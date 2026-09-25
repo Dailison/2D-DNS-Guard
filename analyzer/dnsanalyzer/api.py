@@ -66,7 +66,8 @@ def health():
         out["db_error"] = str(e)[:200]
     ok, msg = OllamaClient().available()
     out["llm"] = {"ok": ok, "detail": msg, "model": settings().ollama_model, "enabled": settings().llm_enabled}
-    out["webhook"] = {"enabled": bool(settings().webhook_urls), "kinds": settings().webhook_kinds}
+    out["webhook"] = {"enabled": bool(settings().webhook_urls), "kinds": settings().webhook_kinds,
+                      "push": bool(settings().push_api_url and settings().push_api_token)}
     return out
 
 

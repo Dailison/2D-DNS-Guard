@@ -69,6 +69,9 @@ class Settings:
 
     webhook_urls: list[str]
     webhook_kinds: list[str]
+    push_api_url: str
+    push_api_token: str
+    push_app_name: str
     portal_url: str
 
     web_intel_enabled: bool
@@ -126,6 +129,9 @@ def load_settings() -> Settings:
         rdap_skip_top_rank=_int("RDAP_SKIP_TOP_RANK", 100000),
         webhook_urls=_list("WEBHOOK_URLS"),
         webhook_kinds=_list("WEBHOOK_KINDS", "malicious_access,suspicious_access,dga_burst"),
+        push_api_url=os.environ.get("PUSH_API_URL", ""),
+        push_api_token=os.environ.get("PUSH_API_TOKEN", ""),
+        push_app_name=os.environ.get("PUSH_APP_NAME", "2D-Monitoramento"),
         portal_url=os.environ.get("PORTAL_URL", "https://dns-guard.2dtecnologia.com"),
         web_intel_enabled=_bool(os.environ.get("WEB_INTEL_ENABLED"), True),
         web_fetch_site=_bool(os.environ.get("WEB_FETCH_SITE"), True),

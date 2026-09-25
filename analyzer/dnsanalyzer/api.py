@@ -789,6 +789,8 @@ def operator_update(oid: int, body: OperatorIn):
 
 class LiberadoMetaIn(BaseModel):
     ip: str
+    tenant_id: Optional[int] = None
+    filial: Optional[str] = None
     empresa: Optional[str] = None
     departamento: Optional[str] = None
     usuario: Optional[str] = None
@@ -799,8 +801,9 @@ class LiberadoMetaIn(BaseModel):
 @app.get("/console/liberados-meta", dependencies=[Depends(auth)])
 def liberados_meta_list():
     with db.conn() as c:
-        return c.execute("SELECT ip, empresa, departamento, usuario, tipo, created_at, created_by "
-                         "FROM liberado_meta ORDER BY ip").fetchall()
+        return c.execute("SELECT m.ip, m.tenant_id, t.name AS tenant_name, m.filial, m.empresa, m.departamento, "
+                         "m.usuario, m.tipo, m.created_at, m.created_by "
+                         "FROM liberado_meta m LEFT JOIN tenants t ON t.id=m.tenant_id ORDER BY m.ip").fetchall()
 
 
 @app.put("/console/liberados-meta", dependencies=[Depends(auth)])
@@ -808,12 +811,17 @@ def liberados_meta_upsert(body: LiberadoMetaIn):
     def s(v, n):
         return ((v or "").strip()[:n]) or None
     with db.conn() as c:
+        if body.tenant_id is not None:
+            _tenant(c, body.tenant_id)
+        # empresa escolhida no cadastro -> o texto livre (legado) deixa de valer
         c.execute(
-            "INSERT INTO liberado_meta (ip, empresa, departamento, usuario, tipo, created_by) "
-            "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (ip) DO UPDATE SET empresa=EXCLUDED.empresa, "
-            "departamento=EXCLUDED.departamento, usuario=EXCLUDED.usuario, tipo=EXCLUDED.tipo",
-            (body.ip, s(body.empresa, 150), s(body.departamento, 255), s(body.usuario, 255), s(body.tipo, 20),
-             body.by or None))
+            "INSERT INTO liberado_meta (ip, tenant_id, filial, empresa, departamento, usuario, tipo, created_by) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (ip) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, "
+            "filial=EXCLUDED.filial, empresa=EXCLUDED.empresa, departamento=EXCLUDED.departamento, "
+            "usuario=EXCLUDED.usuario, tipo=EXCLUDED.tipo",
+            (body.ip, body.tenant_id, s(body.filial, 150) if body.tenant_id else None,
+             None if body.tenant_id else s(body.empresa, 150), s(body.departamento, 255), s(body.usuario, 255),
+             s(body.tipo, 20), body.by or None))
         return {"ok": True, "ip": body.ip}
 
 

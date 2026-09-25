@@ -23,11 +23,6 @@
         <option value="">— Todas —</option>
         {% for r in respostas %}<option value="{{ r }}" {{ 'selected' if resposta==r }}>{{ r }}</option>{% endfor %}
       </select></div>
-    <div><label>Código (rcode)</label>
-      <select name="rcode">
-        <option value="">— Todos —</option>
-        {% for r in rcodes %}<option value="{{ r }}" {{ 'selected' if rcode==r }}>{{ r }}</option>{% endfor %}
-      </select></div>
     <div><label>Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
     <div><label>Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
     <div><label>Vista</label>

@@ -4,46 +4,71 @@
 <h1>Liberados (DNS) <span class="mut" style="font-size:.8rem">· isenção de filtro no Technitium</span></h1>
 <p class="mut" style="margin:-.6rem 0 1rem">IPs aqui são <b>isentos do filtro DNS</b> (grupo <code>{{ grupo }}</code> — não bloqueia nada). Revogar faz o IP voltar a filtrar pela rede dele.</p>
 
+{% macro sel_empresa(form_id, atual) -%}
+<select {% if form_id %}form="{{ form_id }}"{% endif %} name="tenant_id" class="lb-emp" data-filial="{{ form_id or 'novo' }}">
+  <option value="">—</option>
+  {% for e in empresas %}<option value="{{ e.id }}" {{ 'selected' if atual == e.id }}>{{ e.name }}</option>{% endfor %}
+</select>
+{%- endmacro %}
+{% macro sel_filial(form_id, emp_id, atual) -%}
+{% set fs = (empresas|selectattr('id', 'equalto', emp_id)|first or {}).get('filiais', []) %}
+<select {% if form_id %}form="{{ form_id }}"{% endif %} name="filial" id="fil_{{ form_id or 'novo' }}" {{ 'disabled' if not fs }}>
+  <option value="">—</option>
+  {% for f in fs %}<option {{ 'selected' if atual == f }}>{{ f }}</option>{% endfor %}
+  {% if atual and atual not in fs %}<option selected>{{ atual }}</option>{% endif %}
+</select>
+{%- endmacro %}
+{% macro sel_tipo(form_id, atual) -%}
+<select {% if form_id %}form="{{ form_id }}"{% endif %} name="tipo" {% if not form_id %}id="tipo_novo"{% endif %}>
+  <option value="">—</option>
+  {% for t in tipos %}<option {{ 'selected' if atual == t }}>{{ t }}</option>{% endfor %}
+  {% if atual and atual not in tipos %}<option selected>{{ atual }}</option>{% endif %}
+</select>
+{%- endmacro %}
+
 <div class="card">
   <h2>Liberar IP</h2>
   <form method="post" action="{{ url_for('admin.liberados_liberar') }}" class="row">
-    <div><label>IP ou faixa (CIDR)</label><input type="text" name="ip" placeholder="10.100.10.20 ou 10.100.10.0/24" required></div>
-    <div><label>Empresa</label><input type="text" name="empresa" placeholder="Nome da empresa"></div>
+    <div><label>IP ou faixa (CIDR)</label><input type="text" name="ip" id="ip_novo" placeholder="10.100.10.20 ou 10.100.10.0/24" required autocomplete="off"></div>
+    <div><label>Empresa</label>{{ sel_empresa(None, None) }}</div>
+    <div><label>Filial</label>{{ sel_filial(None, None, None) }}</div>
     <div><label>Departamento</label><input type="text" name="departamento" placeholder="Ex.: Recepção"></div>
     <div><label>Usuário</label><input type="text" name="usuario" placeholder="Ex.: João"></div>
-    <div><label>Tipo</label>
-      <select name="tipo">
-        <option value="">—</option>
-        <option value="Computador">Computador</option>
-        <option value="Celular">Celular</option>
-      </select></div>
+    <div><label>Tipo</label>{{ sel_tipo(None, None) }}</div>
     <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Liberar</button></div>
   </form>
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">IP único vira <code>/32</code> automaticamente. Empresa/departamento/usuário são só organização (ficam no portal; o Technitium guarda só o IP).</p>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">IP único vira <code>/32</code> automaticamente. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro de
+    <a href="{{ url_for('analise.empresas') }}">Empresas</a>. A descrição fica no DNS Guard; o Technitium guarda só o IP.</p>
 </div>
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem">
     <h2 style="margin:0">{{ rows|length }} IP(s) liberado(s)</h2>
-    <form method="get"><input type="text" name="q" value="{{ q }}" placeholder="buscar IP, empresa, departamento, usuário"></form>
+    <form method="get" style="display:flex;gap:.4rem;flex-wrap:wrap">
+      <select name="empresa" onchange="this.form.submit()" style="width:auto">
+        <option value="">Todas as empresas</option>
+        {% for e in empresas %}<option value="{{ e.id }}" {{ 'selected' if f_emp == e.id }}>{{ e.name }}</option>{% endfor %}
+      </select>
+      <input type="text" name="q" value="{{ q }}" placeholder="buscar IP, empresa, filial, departamento, usuário">
+    </form>
   </div>
-  <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Edite empresa/departamento/usuário na linha e clique <b>Salvar</b>.</p>
+  <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Edite na linha e clique <b>Salvar</b>.</p>
   <table>
-    <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th></th></tr></thead>
+    <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Filial</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}
+      {% set fid = 'e_' ~ loop.index %}
       <tr>
         <td><code>{{ r.ip }}</code></td>
-        <td><input form="e_{{ loop.index }}" name="empresa" value="{{ r.empresa }}" placeholder="—"></td>
-        <td><input form="e_{{ loop.index }}" name="departamento" value="{{ r.departamento }}" placeholder="—"></td>
-        <td><input form="e_{{ loop.index }}" name="usuario" value="{{ r.usuario }}" placeholder="—"></td>
-        <td><select form="e_{{ loop.index }}" name="tipo">
-          <option value="" {{ 'selected' if not r.tipo }}>—</option>
-          <option value="Computador" {{ 'selected' if r.tipo=='Computador' }}>Computador</option>
-          <option value="Celular" {{ 'selected' if r.tipo=='Celular' }}>Celular</option>
-        </select></td>
+        <td>{{ sel_empresa(fid, r.tenant_id) }}
+          {% if not r.tenant_id and r.empresa %}<div class="mut" style="font-size:.75rem">antes: {{ r.empresa }}</div>
+          <input type="hidden" form="{{ fid }}" name="empresa" value="{{ r.empresa }}">{% endif %}</td>
+        <td>{{ sel_filial(fid, r.tenant_id, r.filial) }}</td>
+        <td><input form="{{ fid }}" name="departamento" value="{{ r.departamento }}" placeholder="—"></td>
+        <td><input form="{{ fid }}" name="usuario" value="{{ r.usuario }}" placeholder="—"></td>
+        <td>{{ sel_tipo(fid, r.tipo) }}</td>
         <td style="white-space:nowrap">
-          <form id="e_{{ loop.index }}" method="post" action="{{ url_for('admin.liberados_editar') }}" style="display:inline">
+          <form id="{{ fid }}" method="post" action="{{ url_for('admin.liberados_editar') }}" style="display:inline">
             <input type="hidden" name="ip" value="{{ r.ip }}">
             <button class="primary" style="padding:.35rem .6rem;font-size:.85rem">Salvar</button>
           </form>
@@ -54,9 +79,59 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="mut">Nenhum IP liberado.</td></tr>
+      <tr><td colspan="7" class="mut">Nenhum IP liberado.</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+
+<script>
+(function () {
+  var EMP = {{ empresas|tojson }};
+  var porId = {};
+  EMP.forEach(function (e) { porId[e.id] = e; });
+
+  function preencherFiliais(sel, filialAtual) {
+    var e = porId[sel.value], fil = document.getElementById('fil_' + sel.dataset.filial);
+    if (!fil) return;
+    fil.innerHTML = '<option value="">—</option>';
+    (e ? e.filiais : []).forEach(function (f) {
+      var o = document.createElement('option'); o.textContent = f; o.selected = f === filialAtual; fil.appendChild(o);
+    });
+    fil.disabled = !(e && e.filiais.length);
+  }
+  document.querySelectorAll('select.lb-emp').forEach(function (s) {
+    s.addEventListener('change', function () { preencherFiliais(s, null); });
+  });
+
+  // IP digitado -> empresa/filial pela rede mais específica do cadastro; faixa -> tipo "Faixa de IP"
+  function ipNum(ip) {
+    var p = ip.split('.'); if (p.length !== 4) return null;
+    var n = 0;
+    for (var i = 0; i < 4; i++) { var v = +p[i]; if (!(v >= 0 && v <= 255) || p[i] === '') return null; n = n * 256 + v; }
+    return n;
+  }
+  function contem(cidr, n, prefIp) {
+    var a = cidr.split('/'), base = ipNum(a[0]), len = +(a[1] || 32);
+    if (base === null || len > prefIp) return false;
+    var tam = Math.pow(2, 32 - len);
+    return Math.floor(n / tam) === Math.floor(base / tam);
+  }
+  var ipIn = document.getElementById('ip_novo'), empSel = document.querySelector('select.lb-emp[data-filial="novo"]'),
+      tipoSel = document.getElementById('tipo_novo');
+  ipIn.addEventListener('input', function () {
+    var v = ipIn.value.trim().split('/'), n = ipNum(v[0]), pref = +(v[1] || 32);
+    if (n === null || !(pref >= 0 && pref <= 32)) return;
+    var melhor = null;
+    EMP.forEach(function (e) {
+      e.redes.forEach(function (r) {
+        var len = +(r.cidr.split('/')[1] || 32);
+        if (contem(r.cidr, n, pref) && (!melhor || len > melhor.len)) melhor = {e: e, unit: r.unit, len: len};
+      });
+    });
+    if (melhor) { empSel.value = melhor.e.id; preencherFiliais(empSel, melhor.unit); }
+    if (pref < 32 && !tipoSel.value) tipoSel.value = 'Faixa de IP';
+  });
+})();
+</script>
 {% endblock %}

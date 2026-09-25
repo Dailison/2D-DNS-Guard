@@ -79,6 +79,7 @@ class Settings:
     web_cache_days: int
     web_search_url: str
     web_search_results: int
+    web_search_min_interval: int
 
     reanalyze_days: int
     retention_days: int
@@ -140,6 +141,8 @@ def load_settings() -> Settings:
         web_cache_days=_int("WEB_CACHE_DAYS", 30),
         web_search_url=os.environ.get("WEB_SEARCH_URL", ""),   # SearXNG local (etapa 2); vazio = desligada
         web_search_results=_int("WEB_SEARCH_RESULTS", 6),
+        # buscadores gratuitos bloqueiam rajadas (~10-15 buscas seguidas): intervalo mínimo (s)
+        web_search_min_interval=_int("WEB_SEARCH_MIN_INTERVAL", 20),
         reanalyze_days=_int("REANALYZE_DAYS", 30),
         retention_days=_int("RETENTION_DAYS", 180),
         classify_batch=_int("CLASSIFY_BATCH", 10),

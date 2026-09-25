@@ -21,7 +21,7 @@
 {%- endmacro %}
 
 {% macro origem(by, pending) -%}
-  {%- set lbl = {'llm': 'IA', 'rules': 'regras', 'catalog': 'catálogo', 'internal': 'interno', 'manual': 'manual'} -%}
+  {%- set lbl = {'llm': 'IA', 'web': 'busca na web', 'rules': 'regras', 'catalog': 'catálogo', 'internal': 'interno', 'manual': 'manual'} -%}
   <span class="tag">{{ lbl.get(by, by or '—') }}{{ ' · na fila da IA' if pending }}</span>
 {%- endmacro %}
 

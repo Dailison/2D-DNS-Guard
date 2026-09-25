@@ -135,6 +135,14 @@ def _homepage_host(domain: str) -> dict | None:
             "site_name": _clean(meta("og:site_name", "application-name"), 60)}
 
 
+class BuscaIndisponivel(Exception):
+    """Buscadores bloquearam/suspenderam (captcha, excesso de pedidos): tentar depois.
+    NÃO é "sem resultado" — senão o domínio ficaria marcado como sem presença na web."""
+
+
+_ultima_busca = 0.0
+
+
 def search(c, domain: str, fetch: bool) -> list[dict] | None:
     """Etapa 2: resultados de busca na web (SearXNG local) sobre o domínio. Texto de
     TERCEIROS (pista, não prova). Cache permanente em lookup_cache kind='search'."""
@@ -142,11 +150,18 @@ def search(c, domain: str, fetch: bool) -> list[dict] | None:
     row = c.execute("SELECT value FROM lookup_cache WHERE kind='search' AND key=%s", (domain,)).fetchone()
     if row or not (fetch and cfg.web_search_url):
         return row["value"].get("results") if row else None
+    import time
+    global _ultima_busca
+    espera = cfg.web_search_min_interval - (time.monotonic() - _ultima_busca)
+    if espera > 0:
+        time.sleep(espera)
+    _ultima_busca = time.monotonic()
     r = httpx.get(cfg.web_search_url.rstrip("/") + "/search", timeout=40,
                   params={"q": f'"{domain}"', "format": "json", "language": "pt-BR", "safesearch": 0})
     r.raise_for_status()
+    j = r.json()
     out, hosts = [], set()
-    for x in r.json().get("results", []):
+    for x in j.get("results", []):
         url = x.get("url") or ""
         host = (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
         title, snippet = _clean(x.get("title"), 120), _clean(x.get("content"), 220)
@@ -156,6 +171,9 @@ def search(c, domain: str, fetch: bool) -> list[dict] | None:
         hosts.add(host)
         if len(out) >= cfg.web_search_results:
             break
+    fora = [e[0] for e in j.get("unresponsive_engines") or []]
+    if not out and fora:
+        raise BuscaIndisponivel("buscadores sem resposta: " + ", ".join(fora))
     c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('search', %s, true, %s) "
               "ON CONFLICT (kind, key) DO UPDATE SET value=EXCLUDED.value, ok=true, fetched_at=now()",
               (domain, Jsonb({"results": out, "fetched": datetime.now(timezone.utc).isoformat()})))

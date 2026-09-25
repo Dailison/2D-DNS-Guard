@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, db, enrich, ti
+from . import catalog, db, enrich, ti, webintel
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -228,7 +228,7 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     with db.conn() as c:
         try:
             dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=etapa2)
-        except httpx.HTTPError as e:     # SearXNG fora/limitado: tenta de novo mais tarde
+        except (httpx.HTTPError, webintel.BuscaIndisponivel) as e:   # SearXNG fora/bloqueado: depois
             c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
             event("search_error", name, did, detail=f"busca indisponível: {e.__class__.__name__}")
             return "unavailable"
@@ -238,6 +238,26 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
                 c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
                 event("search_done", name, did, drow["classification"], detail="etapa 2: nenhum resultado na web")
                 return "done"
+        elif _buscar_antes(dossier):
+            # fora do top 1M e sem Wikidata/certificado: a IA sozinha "não reconhece" em ~98%
+            # dos casos. Busca ANTES e chama a IA uma vez só (ou nenhuma, se não há nada na web).
+            try:
+                dossier["search"] = webintel.search(c, name, fetch=True)
+                c.execute("UPDATE domains SET web_search_at=now() WHERE id=%s", (did,))
+            except (httpx.HTTPError, webintel.BuscaIndisponivel) as e:
+                log.info("busca antes da IA indisponível p/ %s: %s", name, e)   # segue só com a IA
+            else:
+                if not dossier["search"]:
+                    rule0 = evaluate(dossier)
+                    if rule0.classification == "DESCONHECIDO":
+                        fin = rules_only(rule0, False)
+                        fin.classified_by = "web"
+                        fin.notes.append("nenhum resultado na busca na web e fora do top 1M: serviço não "
+                                         "identificado; IA dispensada")
+                        save(c, drow, dossier, rule0, fin, False, None)
+                        event("rules_final", name, did, fin.classification, fin.risk, fin.work,
+                              detail="sem resultado na busca na web — IA dispensada (economia de ~40 s)")
+                        return "done"
         rule = evaluate(dossier)
     if rule.final:  # (ex.: RDAP/TI mudou o quadro) regras bastam
         with db.conn() as c:
@@ -273,8 +293,21 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     scat = next((s["label"] for s in scats if s["code"] == fin.category), fin.category or "")
     event("search_done" if etapa2 else "llm_done", name, did, fin.classification, fin.risk, fin.work,
           meta.get("seconds"),
-          detail=" · ".join(x for x in (("etapa 2 (busca na web)" if etapa2 else ""), svc, scat, extra) if x))
+          detail=" · ".join(x for x in (("etapa 2 (busca na web)" if etapa2 else
+                                         f"com busca na web ({len(dossier['search'])} resultados)"
+                                         if dossier.get("search") else ""), svc, scat, extra) if x))
     return "done"
+
+
+def _buscar_antes(d: dict) -> bool:
+    """Etapa 1: buscar na web antes da IA? Só p/ o que a IA não teria como reconhecer."""
+    if not settings().web_search_url or d.get("kind") != "public" or d.get("popularity_rank"):
+        return False
+    web = d.get("web") or {}
+    cert = web.get("cert") or {}
+    ident = bool((web.get("wikidata") or {}).get("label")) or bool(
+        cert.get("verified") and (cert.get("org") or cert.get("san_domains")))
+    return not ident and not d.get("catalog") and not d.get("private_suffix")
 
 
 ETAPA1_PENDENTE = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "

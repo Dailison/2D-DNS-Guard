@@ -483,7 +483,7 @@ def review_queue(tid: int, days: int = 30, limit: int = Query(200, le=1000)):
             f"WHERE {_tf('v')} AND v.last_seen >= %(s)s AND v.review_status IS NULL AND v.kind='public' "
             " AND NOT dominio_decidido(v.domain_id) "   # decidido uma vez (global ou outra empresa) não volta
             " AND (v.classification IN ('NAO_TRABALHO','SUSPEITO','MALICIOSO') OR (v.classification='DESCONHECIDO' "
-            "      AND v.classified_by='llm' AND NOT v.llm_pending)) "
+            "      AND v.classified_by IN ('llm','web') AND NOT v.llm_pending)) "
             "ORDER BY (v.classification='MALICIOSO') DESC, (v.classification='SUSPEITO') DESC, "
             " COALESCE(v.corp_action='BLOQUEAR', false) DESC, COALESCE(v.corp_action='REVISAR', false) DESC, "
             " v.total_queries DESC LIMIT %(lim)s", {"t": tid, "s": _since(days), "lim": limit}).fetchall()

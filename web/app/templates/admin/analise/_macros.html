@@ -49,7 +49,7 @@
     {%- if st[n] and todos -%}
       <a class="mini ok" href="{{ url_for('analise.dominio', nome=n, t=tid) }}#bloqueio" title="escolha onde desbloquear">Desbloquear…</a>
     {%- elif st[n] -%}
-      <form method="post" action="{{ url_for('analise.dominio_liberar', nome=n) }}" style="display:inline"
+      <form method="post" action="{{ url_for('analise.dominio_liberar', nome=n) }}" style="display:inline" data-ajax
             onsubmit="return confirm('Desbloquear {{ n }} para {{ tenant.name }}?')">
         <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ n }}">
         <input type="hidden" name="escopo" value="empresa">

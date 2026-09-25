@@ -1,6 +1,6 @@
 {# Diálogo "Bloquear em quais listas?" — usado pelos botões Bloquear… (um ou vários domínios) #}
 <dialog id="dlgBlq" class="dlg">
-  <form method="post" action="{{ url_for('analise.decisoes_lote') }}" onsubmit="return dlgValida(this)">
+  <form method="post" action="{{ url_for('analise.decisoes_lote') }}" onsubmit="return dlgValida(this)" data-ajax>
     <input type="hidden" name="acao" value="bloquear">
     <input type="hidden" name="voltar" value="{{ request.full_path }}">
     {% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
@@ -29,6 +29,7 @@
   // itens: ["tid|dominio", ...] (vindo de data-itens de um botão, ou lista pronta)
   window.abrirBloqueio = function (src) {
     const itens = Array.isArray(src) ? src : JSON.parse(src.dataset.itens || "[]");
+    window._blqSrc = Array.isArray(src) ? null : src;   // linha a atualizar depois (null = selecionados)
     if (!itens.length) return;
     const box = document.getElementById("dlgItens");
     box.innerHTML = "";
@@ -49,11 +50,12 @@
   window.dlgTodas = function (f) {
     const cs = f.querySelectorAll('input[name="grupos"]');
     cs.forEach(function (c) { c.checked = true; });
-    if (confirm("Bloquear em TODAS as " + cs.length + " listas?")) f.submit();
+    if (confirm("Bloquear em TODAS as " + cs.length + " listas?")) { f.dataset.confirmado = "1"; f.requestSubmit(); }
   };
   window.dlgValida = function (f) {
     const g = Array.from(f.querySelectorAll('input[name="grupos"]:checked')).map(function (c) { return c.value; });
     if (!g.length) { alert("Escolha pelo menos uma lista."); return false; }
+    if (f.dataset.confirmado) { delete f.dataset.confirmado; return true; }
     return confirm("Bloquear em: " + g.join(", ") + "?");
   };
 })();

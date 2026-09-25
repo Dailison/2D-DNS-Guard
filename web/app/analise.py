@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
+from flask import (Blueprint, current_app, flash, get_flashed_messages, jsonify, redirect, render_template,
+                   request, session, url_for)
 
 from app import analyzer_client as api
 from app import technitium as dnslib
@@ -289,7 +290,7 @@ def decisoes_lote():
             itens.append((int(t) if t.isdigit() else 0, n.strip()))
     if not itens:
         flash("Nenhum domínio selecionado.", "erro")
-        return redirect(voltar)
+        return _fim(voltar)
     todos = request.form.get("visao") == "todos"   # decidido na visão "Todos os clientes"
     try:
         if acao == "bloquear":
@@ -297,7 +298,7 @@ def decisoes_lote():
             grupos = [g for g in request.form.getlist("grupos") if g in ativos]
             if not grupos:
                 flash("Escolha pelo menos uma lista de bloqueio.", "erro")
-                return redirect(voltar)
+                return _fim(voltar)
             res = dnslib.bloquear_varios_em(grupos, [n for _, n in itens])
             for t, n in itens:
                 _registrar_decisao(t, n, "blocked")
@@ -319,7 +320,7 @@ def decisoes_lote():
                   + (", vale também para empresas que acessarem depois" if todos else "") + ").", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha: {e}", "erro")
-    return redirect(voltar)
+    return _fim(voltar)
 
 
 @analise_bp.post("/decisoes/<int:tid>/<path:nome>")
@@ -335,7 +336,7 @@ def decisao(tid, nome):
             if not grupos:
                 flash(f"{nome}: a empresa não tem grupo de bloqueio no Technitium — bloqueie pela página do domínio.",
                       "erro")
-                return redirect(voltar)
+                return _fim(voltar)
             dnslib.bloquear_em(grupos, nome)
             api.post(f"/tenants/{tid}/review/{quote(nome, safe='')}", {"status": "blocked", "by": _quem()})
             current_app.logger.info("DNS: %s BLOQUEOU %s em %s (decisão)", _quem(), nome, grupos)
@@ -351,7 +352,7 @@ def decisao(tid, nome):
             flash(f"{nome} voltou para a fila de decisão.", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha: {e}", "erro")
-    return redirect(voltar if next_local(voltar) else url_for("analise.decisoes", t=tid))
+    return _fim(voltar if next_local(voltar) else url_for("analise.decisoes", t=tid))
 
 
 # ------------------------------------------------------------------ domínios
@@ -447,7 +448,16 @@ def _escopo_grupos(escopo: str, tid: int, dominio: str, acao: str) -> list[str]:
 
 def _voltar(nome: str, tid):
     v = request.form.get("voltar") or ""
-    return redirect(v if v.startswith("/admin/") else url_for("analise.dominio", nome=nome, t=tid))
+    return _fim(v if next_local(v) else url_for("analise.dominio", nome=nome, t=tid))
+
+
+def _fim(destino: str):
+    """Fim das ações de bloquear/liberar/decidir: JSON quando vem do fetch da tela (sem
+    recarregar a página — as mensagens vão no corpo), senão o redirect de sempre."""
+    if request.headers.get("X-Requested-With") == "fetch":
+        msgs = get_flashed_messages(with_categories=True)
+        return jsonify(ok=not any(c == "erro" for c, _ in msgs), msgs=msgs)
+    return redirect(destino)
 
 
 def _registrar_global(dominio: str, status: str | None) -> None:

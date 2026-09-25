@@ -79,4 +79,69 @@
 </nav>
 {% block an %}{% endblock %}
 {% if grp is defined and grp %}{% include "admin/analise/_dlg_bloqueio.html" %}{% endif %}
+<div id="anToasts" style="position:fixed;right:16px;bottom:16px;z-index:200;display:flex;flex-direction:column;gap:.4rem;max-width:min(420px,calc(100vw - 32px))"></div>
+<script>
+/* Ações de bloquear/liberar/decidir sem recarregar a página (forms com data-ajax).
+   Sem JSON na resposta (ex.: sessão expirou) cai no envio normal. */
+(function () {
+  function toast(msgs) {
+    var box = document.getElementById("anToasts");
+    (msgs || []).forEach(function (m) {
+      var d = document.createElement("div");
+      d.className = "flash " + m[0]; d.textContent = m[1];
+      d.style.boxShadow = "0 6px 20px rgba(0,0,0,.18)"; d.style.margin = "0";
+      box.appendChild(d);
+      setTimeout(function () { d.style.transition = "opacity .4s"; d.style.opacity = "0"; }, m[0] === "erro" ? 9000 : 5000);
+      setTimeout(function () { d.remove(); }, m[0] === "erro" ? 9500 : 5500);
+    });
+  }
+  function sumir(tr) {
+    tr.style.transition = "opacity .3s"; tr.style.opacity = "0";
+    setTimeout(function () { tr.remove(); if (window.filaConta) filaConta(); }, 300);
+  }
+  function atualizar(tr, bloqueado, gatilho) {
+    if (tr.querySelector(".selFila")) { sumir(tr); return; }          // linha da fila: decidida, sai
+    var stt = tr.querySelector(".stt");
+    if (stt) {
+      stt.className = "stt " + (bloqueado ? "blk" : "ok");
+      stt.textContent = bloqueado ? "🔒 Bloqueado" : "🔓 Liberado";
+    }
+    var alvo = gatilho && (gatilho.closest("form") || gatilho);
+    if (alvo && tr.contains(alvo)) {
+      var s = document.createElement("span"); s.className = "mut"; s.style.fontSize = ".75rem";
+      s.textContent = bloqueado ? "✓ bloqueado" : "✓ desbloqueado"; alvo.replaceWith(s);
+    }
+  }
+  document.addEventListener("submit", function (e) {
+    var f = e.target;
+    if (!f.matches("form[data-ajax]") || e.defaultPrevented) return;
+    e.preventDefault();
+    var bloquear = (new FormData(f).get("acao") === "bloquear") || /\/bloquear$/.test(f.action);
+    var dlg = f.closest("dialog");
+    var linhas = [], gatilho = null;
+    if (dlg) {
+      gatilho = window._blqSrc;
+      linhas = gatilho ? [gatilho.closest("tr")] : Array.from(document.querySelectorAll(".selFila:checked")).map(function (c) { return c.closest("tr"); });
+    } else if (f.id === "filaLote") {
+      linhas = Array.from(document.querySelectorAll(".selFila:checked")).map(function (c) { return c.closest("tr"); });
+    } else {
+      gatilho = f; linhas = [f.closest("tr")];
+    }
+    var botoes = f.querySelectorAll("button"); botoes.forEach(function (b) { b.disabled = true; });
+    fetch(f.action, { method: "POST", body: new FormData(f), credentials: "same-origin",
+                      headers: { "X-Requested-With": "fetch", "Accept": "application/json" } })
+      .then(function (r) {
+        if (!r.ok || (r.headers.get("content-type") || "").indexOf("json") < 0) throw new Error("sem json");
+        return r.json();
+      })
+      .then(function (d) {
+        toast(d.msgs);
+        if (dlg) dlg.close();
+        if (d.ok) linhas.filter(Boolean).forEach(function (tr) { atualizar(tr, bloquear, gatilho); });
+      })
+      .catch(function () { f.submit(); })
+      .finally(function () { botoes.forEach(function (b) { b.disabled = false; }); });
+  });
+})();
+</script>
 {% endblock %}

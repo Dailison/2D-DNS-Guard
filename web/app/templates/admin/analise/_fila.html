@@ -1,5 +1,5 @@
 {# fila "Aguardando decisão" (só o que está LIBERADO), uma linha por site — painel e aba Decisões #}
-<form method="post" action="{{ url_for('analise.decisoes_lote') }}" id="filaLote" class="lote">
+<form method="post" action="{{ url_for('analise.decisoes_lote') }}" id="filaLote" class="lote" data-ajax>
   <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">{% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
   <span class="mut" style="font-size:.85rem"><b id="filaN">0</b> selecionado(s)</span>
   <button type="button" class="mini blk" onclick="filaAcao('bloquear')">Bloquear selecionados…</button>
@@ -23,7 +23,7 @@
       <td class="mut" style="white-space:nowrap">{{ d.first_seen|dt_sp }}</td>
       <td style="white-space:nowrap">
         <button type="button" class="mini blk" data-itens='{{ itens|tojson }}' onclick="abrirBloqueio(this)">Bloquear…</button>
-        <form method="post" action="{{ url_for('analise.decisoes_lote') }}" style="display:inline">
+        <form method="post" action="{{ url_for('analise.decisoes_lote') }}" style="display:inline" data-ajax>
           <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">{% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
           {% for it in itens %}<input type="hidden" name="itens" value="{{ it }}">{% endfor %}
           <button class="mini ok" title="some da fila; o site continua liberado">Manter liberado</button></form>
@@ -46,6 +46,6 @@ function filaAcao(acao) {
   const f = document.getElementById("filaLote");
   f.querySelectorAll('input[name="itens"]').forEach(function (i) { i.remove(); });
   itens.forEach(function (it) { const i = document.createElement("input"); i.type = "hidden"; i.name = "itens"; i.value = it; f.appendChild(i); });
-  f.submit();
+  f.requestSubmit();
 }
 </script>

@@ -43,7 +43,8 @@
   {%- else -%}<span class="stt ok" title="{{ 'não está em nenhuma lista de bloqueio' }}">🔓 Liberado</span>{%- endif -%}
 {%- endmacro %}
 
-{# botão rápido bloquear/desbloquear; volta para a página atual #}
+{# botão rápido bloquear/desbloquear; volta para a página atual.
+   Já bloqueado: mantém "Bloquear…" para adicionar em outras listas ('stg' = grupos onde já está, em todas as listas) #}
 {% macro acao(n) -%}
   {%- if st is defined and n in st -%}
     {%- if st[n] and todos -%}
@@ -55,10 +56,14 @@
         <input type="hidden" name="escopo" value="empresa">
         <input type="hidden" name="voltar" value="{{ request.full_path }}">
         <button class="mini ok">Desbloquear</button></form>
-    {%- elif grp is defined and grp -%}
-      <button type="button" class="mini blk" data-itens='{{ [(tid ~ "|" ~ n)]|tojson }}' onclick="abrirBloqueio(this)">Bloquear…</button>
+    {%- endif -%}
+    {%- if st[n] %} {% endif -%}
+    {%- if grp is defined and grp -%}
+      <button type="button" class="mini blk" data-itens='{{ [(tid ~ "|" ~ n)]|tojson }}'
+        {%- if st[n] %} data-ja='{{ (stg[n] if stg is defined and n in stg else st[n])|tojson }}' title="adicionar em outras listas"{% endif %}
+        onclick="abrirBloqueio(this)">Bloquear…</button>
     {%- else -%}
-      <a class="mini blk" href="{{ url_for('analise.dominio', nome=n, t=tid) }}#bloqueio">Bloquear…</a>
+      <a class="mini blk" href="{{ url_for('analise.dominio', nome=n, t=tid) }}#bloqueio"{% if st[n] %} title="adicionar em outras listas"{% endif %}>Bloquear…</a>
     {%- endif -%}
   {%- endif -%}
 {%- endmacro %}

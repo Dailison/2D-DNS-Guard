@@ -110,6 +110,8 @@
       stt.className = "stt " + (bloqueado ? "blk" : "ok");
       stt.textContent = bloqueado ? "🔒 Bloqueado" : "🔓 Liberado";
     }
+    // desbloqueou: o "Bloquear…" da linha não pode mais travar as listas antigas
+    if (!bloqueado) tr.querySelectorAll("[data-ja]").forEach(function (b) { delete b.dataset.ja; });
     var alvo = gatilho && (gatilho.closest("form") || gatilho);
     if (alvo && tr.contains(alvo)) {
       var s = document.createElement("span"); s.className = "mut"; s.style.fontSize = ".75rem";

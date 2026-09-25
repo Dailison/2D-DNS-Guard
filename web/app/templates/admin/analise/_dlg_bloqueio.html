@@ -15,7 +15,7 @@
     <div style="max-height:45vh;overflow:auto;border-top:1px solid var(--bd)">
       {% for g in grp.grupos %}
       <label class="dlg-grp"><input type="checkbox" name="grupos" value="{{ g.nome }}" {{ 'data-especifico' if g.especifico }}>
-        <span><b>{{ g.nome }}</b>{% if g.especifico %} <span class="tag" style="font-size:.7rem" title="fica de fora do Bloquear em todas">específico</span>{% endif %} <span class="tag dlg-acessou" style="font-size:.7rem" title="usada por empresa que acessou o domínio" hidden>acessou</span><br><span class="mut" style="font-size:.78rem">{{ g.empresas|join(', ') if g.empresas else ('demais redes (padrão)' if g.nome == 'default' else 'nenhuma empresa cadastrada') }}</span></span></label>
+        <span><b>{{ g.nome }}</b>{% if g.especifico %} <span class="tag" style="font-size:.7rem" title="fica de fora do Bloquear em todas">específico</span>{% endif %} <span class="tag dlg-acessou" style="font-size:.7rem" title="usada por empresa que acessou o domínio" hidden>acessou</span> <span class="tag dlg-ja" style="font-size:.7rem;background:#fee2e2;color:#7f1d1d" hidden>🔒 já bloqueado</span><br><span class="mut" style="font-size:.78rem">{{ g.empresas|join(', ') if g.empresas else ('demais redes (padrão)' if g.nome == 'default' else 'nenhuma empresa cadastrada') }}</span></span></label>
       {% endfor %}
     </div>
     <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
@@ -38,6 +38,8 @@
     const box = document.getElementById("dlgItens");
     box.innerHTML = "";
     const pre = new Set(), nomes = new Set();
+    // listas em que o domínio já está bloqueado (botão de linha já bloqueada): vêm marcadas e travadas
+    const ja = new Set(Array.isArray(src) ? [] : JSON.parse(src.dataset.ja || "[]"));
     itens.forEach(function (it) {
       const inp = document.createElement("input");
       inp.type = "hidden"; inp.name = "itens"; inp.value = it; box.appendChild(inp);
@@ -50,8 +52,9 @@
       lista.length + " domínio(s): " + lista.slice(0, 12).join(", ") + (lista.length > 12 ? " …" : "");
     // sempre abre com tudo desmarcado; as listas das empresas que acessaram só ficam em destaque
     dlg.querySelectorAll('input[name="grupos"]').forEach(function (c) {
-      c.checked = false;
+      c.checked = c.disabled = ja.has(c.value);
       c.closest("label").querySelector(".dlg-acessou").hidden = !pre.has(c.value);
+      c.closest("label").querySelector(".dlg-ja").hidden = !ja.has(c.value);
     });
     dlg.showModal();
   };
@@ -70,26 +73,29 @@
       const inp = document.createElement("input");
       inp.type = "hidden"; inp.name = "itens"; inp.value = it; box.appendChild(inp);
     });
-    f.querySelectorAll('input[name="grupos"]').forEach(function (c) { c.checked = !c.hasAttribute("data-especifico"); });
+    f.querySelectorAll('input[name="grupos"]').forEach(function (c) {
+      c.disabled = false; c.checked = !c.hasAttribute("data-especifico");
+      c.closest("label").querySelector(".dlg-ja").hidden = true;
+    });
     f.dataset.confirmado = "1"; f.requestSubmit();
   };
   window.dlgTodas = function (f) {
     // "todas" = todas menos os grupos específicos (ex.: Anúncios)
-    const cs = f.querySelectorAll('input[name="grupos"]');
+    const cs = f.querySelectorAll('input[name="grupos"]:not(:disabled)');   // fora as que já bloqueiam
     let n = 0;
     cs.forEach(function (c) { c.checked = !c.hasAttribute("data-especifico"); if (c.checked) n++; });
-    const esp = cs.length - n;
-    if (confirm("Bloquear em TODAS as " + n + " listas" + (esp ? " (exceto " + esp + " grupo(s) específico(s))" : "") + "?")) {
+    const esp = cs.length - n, ja = f.querySelectorAll('input[name="grupos"]:disabled').length;
+    if (confirm("Bloquear em TODAS as " + n + " listas" + (ja ? " restantes" : "") + (esp ? " (exceto " + esp + " grupo(s) específico(s))" : "") + "?")) {
       f.dataset.confirmado = "1"; f.requestSubmit();
     }
   };
   // "Marcar todas" aqui marca de fato todas (inclusive grupos específicos, ex.: Anúncios)
   window.dlgMarcar = function (f, marcar) {
-    f.querySelectorAll('input[name="grupos"]').forEach(function (c) { c.checked = marcar; });
+    f.querySelectorAll('input[name="grupos"]:not(:disabled)').forEach(function (c) { c.checked = marcar; });
   };
   window.dlgValida = function (f) {
-    const g = Array.from(f.querySelectorAll('input[name="grupos"]:checked')).map(function (c) { return c.value; });
-    if (!g.length) { alert("Escolha pelo menos uma lista."); return false; }
+    const g = Array.from(f.querySelectorAll('input[name="grupos"]:checked:not(:disabled)')).map(function (c) { return c.value; });
+    if (!g.length) { alert("Escolha pelo menos uma lista (fora as que já bloqueiam)."); return false; }
     if (f.dataset.confirmado) { delete f.dataset.confirmado; return true; }
     return confirm("Bloquear em: " + g.join(", ") + "?");
   };

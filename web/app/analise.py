@@ -129,6 +129,15 @@ def _status(nomes, tenant: dict | None) -> dict[str, list[str]]:
     return {n: dnslib.bloqueado_em(idx, n, grupos) for n in dict.fromkeys(nomes) if n}
 
 
+def _status_global(st: dict[str, list[str]]) -> dict[str, list[str]]:
+    """{domínio bloqueado: [grupos onde está bloqueado]} em TODAS as listas (não só as da empresa) —
+    marca no diálogo Bloquear… as listas em que já está."""
+    idx, _ = _indice_status(None)
+    if idx is None:
+        return {}
+    return {n: dnslib.bloqueado_em(idx, n) for n, g in st.items() if g}
+
+
 def _fila_pendente(fila: list[dict], tenants: list[dict]) -> tuple[list[dict], int]:
     """Tira da fila o que já está bloqueado para a empresa da linha (não há o que decidir).
     Retorna (fila, quantos ocultos)."""
@@ -371,7 +380,8 @@ def dominios():
         except AnalyzerError as e:
             flash(f"Falha ao listar domínios: {e}", "erro")
         st = _status([d["name"] for d in res["items"]], ctx["tenant"])
-    return render_template("admin/analise/dominios.html", res=res, f=f, st=st, scats=_site_cats(),
+    return render_template("admin/analise/dominios.html", res=res, f=f, st=st, stg=_status_global(st),
+                           scats=_site_cats(),
                            grp=_grp_ctx(ctx["tenants"]), aba="dominios", voltar=request.full_path, **ctx)
 
 

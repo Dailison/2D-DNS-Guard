@@ -138,14 +138,10 @@
   })();
   </script>
   {% endif %}
-  {% if redes %}
-  <table style="margin-top:.6rem">
-    <thead><tr><th>Rede / IP atribuído</th><th>Empresa · unidade</th><th></th></tr></thead>
-    <tbody>
-    {% for r in redes %}
+  {% macro linha_rede(r, rotulo) %}
       <tr>
         <td><code>{{ r }}</code></td>
-        <td>{% if redes_emp.get(r) %}{{ redes_emp[r] }}{% else %}<span class="mut">sem cadastro — <a href="{{ url_for('analise.empresas') }}">cadastrar</a></span>{% endif %}</td>
+        <td>{{ rotulo }}</td>
         <td style="text-align:right">
           <form method="post" action="{{ url_for('admin.bloqueios_rede_rem') }}" style="display:inline" onsubmit="return confirm('Remover {{ r }} de {{ grupo }}? Volta a filtrar pela rede pai.')">
             <input type="hidden" name="grupo" value="{{ grupo }}"><input type="hidden" name="rede" value="{{ r }}">
@@ -153,11 +149,26 @@
           </form>
         </td>
       </tr>
-    {% endfor %}
-    </tbody>
+  {% endmacro %}
+  {% set sem_cad %}<span class="mut">sem cadastro — <a href="{{ url_for('analise.empresas') }}">cadastrar</a></span>{% endset %}
+  {% if faixas %}
+  <table style="margin-top:.6rem">
+    <thead><tr><th>Faixa (CIDR)</th><th>Empresa · unidade</th><th></th></tr></thead>
+    <tbody>{% for r in faixas %}{{ linha_rede(r, redes_emp.get(r) or sem_cad) }}{% endfor %}</tbody>
   </table>
-  {% else %}
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Nenhuma rede atribuída — este grupo não filtra ninguém ainda. Atribua o CIDR do cliente (ex.: <code>10.23.0.0/16</code>).</p>
+  {% elif not ips %}
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Nenhuma rede atribuída — este grupo não filtra ninguém ainda. Atribua o CIDR do cliente (ex.: <code>10.23.0.0/16</code>) ou a empresa.</p>
+  {% endif %}
+  {% if ips %}
+  {% set eh_lib = grupo == config.TECHNITIUM_LIBERADOS_GROUP %}
+  <details style="margin-top:.8rem" {{ 'open' if not faixas and not eh_lib }}>
+    <summary style="cursor:pointer;font-weight:600">{{ ips|length }} IP(s) individual(is)
+      {% if eh_lib %}<span class="mut" style="font-weight:400;font-size:.85rem">· gerenciados na tela <a href="{{ url_for('admin.liberados') }}">Liberados</a></span>{% endif %}</summary>
+    <table style="margin-top:.4rem">
+      <thead><tr><th>IP</th><th>Descrição</th><th></th></tr></thead>
+      <tbody>{% for r in ips %}{{ linha_rede(r, desc_ip.get(r) or redes_emp.get(r) or '—') }}{% endfor %}</tbody>
+    </table>
+  </details>
   {% endif %}
 </div>
 

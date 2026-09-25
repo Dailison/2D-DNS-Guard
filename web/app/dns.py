@@ -148,6 +148,17 @@ def grupos():
                "empresas": sorted({rotulos[r].split(" · ")[0] for r in redes_por.get(g.get("name"), []) if r in rotulos})}
               for g in sorted(cfg.get("groups", []), key=lambda g: (g.get("name") or "").lower())]
     redes = sorted(redes_por.get(grupo, []), key=dnslib._sort_key)
+    # IPs individuais (/32, /128) à parte: no grupo Liberados são os da tela Liberados
+    ips = [r for r in redes if r.endswith(("/32", "/128"))]
+    faixas = [r for r in redes if r not in ips]
+    desc_ip = {}
+    if ips:
+        try:
+            desc_ip = {m["ip"]: " · ".join(x for x in (m.get("tenant_name") or m.get("empresa"), m.get("filial"),
+                                                       m.get("departamento"), m.get("usuario"), m.get("tipo")) if x)
+                       for m in api.get("/console/liberados-meta")}
+        except AnalyzerError:
+            pass
     redes_emp = {r: rotulos[r] for r in redes if r in rotulos}
     empresas_grupo = sorted({v.split(" · ")[0] for v in redes_emp.values()})
     cadastro = sorted(({"id": e["id"], "name": e["name"],
@@ -155,6 +166,7 @@ def grupos():
                        for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
     return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes,
                            redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro,
+                           faixas=faixas, ips=ips, desc_ip=desc_ip,
                            sem_grupo=_sem_grupo(emp.lista(), ngm))
 
 

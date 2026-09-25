@@ -124,6 +124,40 @@
     <div><label>Rede (CIDR) ou IP</label><input type="text" name="rede" placeholder="10.23.0.0/16 ou 10.23.5.10" required></div>
     <div style="flex:0"><button class="primary">Atribuir</button></div>
   </form>
+  {% if cadastro %}
+  <form method="post" action="{{ url_for('admin.bloqueios_empresa_add') }}" class="row" style="align-items:flex-end;margin-top:.5rem">
+    <input type="hidden" name="grupo" value="{{ grupo }}">
+    <div><label>ou pela empresa (cadastro de <a href="{{ url_for('analise.empresas') }}">Empresas</a>)</label>
+      <select name="empresa" id="bqEmp" required>
+        <option value="">— escolha a empresa —</option>
+        {% for e in cadastro %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+      </select></div>
+    <div><label>Filial</label><select name="filial" id="bqFil" disabled><option value="">Todas as redes</option></select></div>
+    <div style="flex:0"><button class="primary">Atribuir empresa</button></div>
+  </form>
+  <p class="mut" id="bqRedes" style="font-size:.8rem;margin:.3rem 0 0"></p>
+  <script>
+  (function () {
+    var EMP = {{ cadastro|tojson }}, emp = document.getElementById('bqEmp'), fil = document.getElementById('bqFil'),
+        info = document.getElementById('bqRedes');
+    function redes() {
+      var e = EMP.find(function (x) { return String(x.id) === emp.value; });
+      if (!e) { info.textContent = ''; return; }
+      var rs = e.redes.filter(function (r) { return !fil.value || r.unit === fil.value; });
+      info.textContent = 'Vai atribuir a {{ grupo }}: ' + rs.map(function (r) { return r.cidr + (r.unit ? ' (' + r.unit + ')' : ''); }).join(', ');
+    }
+    emp.addEventListener('change', function () {
+      var e = EMP.find(function (x) { return String(x.id) === emp.value; }), us = [];
+      (e ? e.redes : []).forEach(function (r) { if (r.unit && us.indexOf(r.unit) < 0) us.push(r.unit); });
+      fil.innerHTML = '<option value="">Todas as redes</option>' + us.map(function (u) {
+        return '<option>' + u.replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }) + '</option>';
+      }).join('');
+      fil.disabled = us.length === 0; redes();
+    });
+    fil.addEventListener('change', redes);
+  })();
+  </script>
+  {% endif %}
   {% if redes %}
   <table style="margin-top:.6rem">
     <thead><tr><th>Rede / IP atribuído</th><th>Empresa · unidade</th><th></th></tr></thead>

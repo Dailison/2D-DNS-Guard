@@ -148,10 +148,13 @@ def bloqueios():
     from app import empresas as emp
     redes_emp = emp.rotulos_de_redes(redes) if redes else {}
     empresas_grupo = sorted({v.split(" · ")[0] for v in redes_emp.values()})
+    cadastro = sorted(({"id": e["id"], "name": e["name"],
+                        "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
+                       for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
     return render_template("admin/bloqueios.html", grupos=grupos, grupo=grupo, q=q,
                            doms=doms, redes=redes, total=total, limite=limite, qg=qg,
                            globais=globais, globais_total=globais_total, globais_cap=globais_cap,
-                           redes_emp=redes_emp, empresas_grupo=empresas_grupo)
+                           redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro)
 
 
 @admin_bp.post("/bloqueios/add")
@@ -260,6 +263,36 @@ def bloqueios_rede_add():
             flash(ant, "erro")   # ant carrega a mensagem de erro quando cidr é None
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao atribuir rede: {e}", "erro")
+    return redirect(url_for("admin.bloqueios", grupo=grupo))
+
+
+@admin_bp.post("/bloqueios/empresa")
+@login_required
+def bloqueios_empresa_add():
+    """Atribui ao grupo todas as redes (CIDR) de uma empresa do cadastro (ou só de uma filial)."""
+    from app import empresas as emp
+    grupo = (request.form.get("grupo") or "").strip()
+    tid = request.form.get("empresa", type=int)
+    filial = (request.form.get("filial") or "").strip()
+    e = next((x for x in emp.lista() if x["id"] == tid), None)
+    redes = [n["cidr"] for n in (e or {}).get("networks", []) if not filial or (n.get("unit") or "") == filial]
+    if not e:
+        flash("Escolha uma empresa do cadastro.", "erro")
+    elif not redes:
+        flash(f"{e['name']} não tem rede (CIDR) cadastrada"
+              + (f" na filial {filial}" if filial else "") + " — cadastre em Empresas.", "erro")
+    else:
+        try:
+            feitos, invalidos = dnslib.atribuir_redes(redes, grupo)
+            antes = [f"{c} (antes: {a})" for c, a in feitos if a]
+            nome = e["name"] + (f" · {filial}" if filial else "")
+            flash(f"{nome}: {len(feitos)} rede(s) atribuída(s) a {grupo}: {', '.join(c for c, _ in feitos)}."
+                  + (f" Mudaram de grupo: {'; '.join(antes)}." if antes else ""), "ok")
+            if invalidos:
+                flash(f"Redes inválidas no cadastro, ignoradas: {', '.join(invalidos)}", "erro")
+            current_app.logger.info("DNS: %s atribuiu %s (%s) a %s", admin_atual().email, nome, redes, grupo)
+        except Exception as ex:  # noqa: BLE001
+            flash(f"Falha ao atribuir: {ex}", "erro")
     return redirect(url_for("admin.bloqueios", grupo=grupo))
 
 

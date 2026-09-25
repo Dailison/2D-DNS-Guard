@@ -489,6 +489,32 @@ def atribuir_rede(ip_raw, grupo):
     return ipn, anterior
 
 
+def atribuir_redes(ips, grupo):
+    """Várias redes de uma vez (1 leitura/gravação do config). Retorna
+    ([(cidr, anterior_ou_None)], [inválidos]) ou levanta ValueError se o grupo não existe."""
+    cfg = _get_config()
+    if _grupo_obj(cfg, grupo) is None:
+        raise ValueError(f"Grupo '{grupo}' não existe.")
+    ngmap = cfg.setdefault("networkGroupMap", {})
+    feitos, invalidos = [], []
+    for ip_raw in ips:
+        ipn = norm_ip(ip_raw)
+        if not ipn:
+            invalidos.append(ip_raw)
+            continue
+        anterior = None
+        for k in list(ngmap):
+            if norm_ip(k) == ipn:
+                if ngmap[k] != grupo:
+                    anterior = ngmap[k]
+                del ngmap[k]
+        ngmap[ipn] = grupo
+        feitos.append((ipn, anterior))
+    if feitos:
+        _set_config(cfg)
+    return feitos, invalidos
+
+
 def remover_rede(ip_raw, grupo):
     """Remove a atribuição de uma rede/IP de um grupo (só se estiver nesse grupo)."""
     ipn = norm_ip(ip_raw)

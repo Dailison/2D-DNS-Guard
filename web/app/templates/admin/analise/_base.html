@@ -52,6 +52,9 @@
   @media (max-width:640px){ .two{grid-template-columns:1fr} .an-top form{margin-left:0} }
 </style>
 
+{% if aba == 'empresas' %}
+<h1>Empresas <span class="mut" style="font-size:.8rem;font-weight:400">· cadastro empresa ↔ redes (CIDR), usado em todo o DNS Guard</span></h1>
+{% else %}
 <div class="an-top">
   <h1>Análise DNS <span class="mut" style="font-size:.8rem;font-weight:400">· IA local (Qwen3) + Threat Intelligence</span></h1>
   <form method="get">
@@ -75,9 +78,9 @@
   <a href="{{ url_for('analise.computadores', t=tid) }}" class="{{ 'on' if aba=='computadores' }}">Computadores</a>
   <a href="{{ url_for('analise.alertas', t=tid) }}" class="{{ 'on' if aba=='alertas' }}">Alertas</a>
   <a href="{{ url_for('analise.ia_ao_vivo', t=tid) }}" class="{{ 'on' if aba=='ia' }}">IA ao vivo</a>
-  <a href="{{ url_for('analise.empresas', t=tid) }}" class="{{ 'on' if aba=='empresas' }}">Empresas</a>
   <a href="{{ url_for('analise.fontes', t=tid) }}" class="{{ 'on' if aba=='fontes' }}">Fontes e IA</a>
 </nav>
+{% endif %}
 {% block an %}{% endblock %}
 {% if grp is defined and grp %}{% include "admin/analise/_dlg_bloqueio.html" %}{% endif %}
 <div id="anToasts" style="position:fixed;right:16px;bottom:16px;z-index:200;display:flex;flex-direction:column;gap:.4rem;max-width:min(420px,calc(100vw - 32px))"></div>

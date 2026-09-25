@@ -472,18 +472,30 @@ def site_categories_list():
 @app.get("/tenants/{tid}/review", dependencies=[Depends(auth)])
 def review_queue(tid: int, days: int = 30, limit: int = Query(200, le=1000)):
     """Fila "Aguardando decisão": não trabalho, risco e não reconhecidos pela IA, ainda não decididos
-    (por empresa). DESCONHECIDO só entra depois que a IA analisou — antes disso é só "na fila da IA"."""
+    (por empresa). DESCONHECIDO só entra depois que a IA analisou — antes disso é só "na fila da IA".
+    Já bloqueado para a empresa (todas as consultas da última hora em que apareceu foram bloqueadas)
+    também sai: vale qualquer forma de bloqueio no Technitium (entrada, lista por URL, regex, pai)."""
     with db.conn() as c:
         _scope(c, tid)
         return c.execute(
+            "WITH cand AS ("
+            " SELECT v.* FROM v_tenant_domains v "
+            f" WHERE {_tf('v')} AND v.last_seen >= %(s)s AND v.review_status IS NULL AND v.kind='public' "
+            "  AND NOT dominio_decidido(v.domain_id) "   # decidido uma vez (global ou outra empresa) não volta
+            "  AND (v.classification IN ('NAO_TRABALHO','SUSPEITO','MALICIOSO') OR (v.classification='DESCONHECIDO' "
+            "       AND v.classified_by IN ('llm','web') AND NOT v.llm_pending))), "
+            "ult AS ("   # última hora (bucket) em que a empresa consultou o site
+            " SELECT DISTINCT ON (q.tenant_id, q.domain_id) q.tenant_id, q.domain_id, "
+            "  sum(q.queries) AS queries, sum(q.blocked) AS blocked "
+            " FROM query_agg q JOIN cand USING (tenant_id, domain_id) "
+            " WHERE q.bucket >= %(s)s - interval '1 hour' "
+            " GROUP BY q.tenant_id, q.domain_id, q.bucket ORDER BY q.tenant_id, q.domain_id, q.bucket DESC) "
             "SELECT v.tenant_id, t.name AS tenant_name, v.name, v.classification, v.category, v.topic, v.risk_score, "
             " v.corp_action, v.corp_reason, v.corp_by, "
             " v.work_score, v.total_queries, v.clients_count, v.first_seen, v.last_seen "
-            "FROM v_tenant_domains v JOIN tenants t ON t.id=v.tenant_id "
-            f"WHERE {_tf('v')} AND v.last_seen >= %(s)s AND v.review_status IS NULL AND v.kind='public' "
-            " AND NOT dominio_decidido(v.domain_id) "   # decidido uma vez (global ou outra empresa) não volta
-            " AND (v.classification IN ('NAO_TRABALHO','SUSPEITO','MALICIOSO') OR (v.classification='DESCONHECIDO' "
-            "      AND v.classified_by IN ('llm','web') AND NOT v.llm_pending)) "
+            "FROM cand v JOIN tenants t ON t.id=v.tenant_id "
+            "LEFT JOIN ult u ON u.tenant_id=v.tenant_id AND u.domain_id=v.domain_id "
+            "WHERE u.blocked IS NULL OR u.blocked < u.queries "
             "ORDER BY (v.classification='MALICIOSO') DESC, (v.classification='SUSPEITO') DESC, "
             " COALESCE(v.corp_action='BLOQUEAR', false) DESC, COALESCE(v.corp_action='REVISAR', false) DESC, "
             " v.total_queries DESC LIMIT %(lim)s", {"t": tid, "s": _since(days), "lim": limit}).fetchall()

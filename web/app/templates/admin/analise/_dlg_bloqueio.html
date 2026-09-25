@@ -7,11 +7,15 @@
     <div id="dlgItens"></div>
     <h2 style="margin:0 0 .3rem">Bloquear em quais listas?</h2>
     <p class="mut" id="dlgNomes" style="margin:0 0 .6rem;font-size:.85rem;word-break:break-all"></p>
-    <p class="hint" style="margin:0 0 .4rem">Já vêm marcadas as listas das empresas que acessaram. O domínio é bloqueado com todos os subdomínios.</p>
+    <p class="hint" style="margin:0 0 .4rem">Nenhuma lista vem marcada; <span class="tag" style="font-size:.7rem">acessou</span> = lista de empresa que acessou. O domínio é bloqueado com todos os subdomínios.</p>
+    <div style="display:flex;gap:.4rem;margin:0 0 .4rem">
+      <button type="button" class="mini" onclick="dlgMarcar(this.form, true)">Marcar todas</button>
+      <button type="button" class="mini" onclick="dlgMarcar(this.form, false)">Desmarcar todas</button>
+    </div>
     <div style="max-height:45vh;overflow:auto;border-top:1px solid var(--bd)">
       {% for g in grp.grupos %}
       <label class="dlg-grp"><input type="checkbox" name="grupos" value="{{ g.nome }}" {{ 'data-especifico' if g.especifico }}>
-        <span><b>{{ g.nome }}</b>{% if g.especifico %} <span class="tag" style="font-size:.7rem" title="fica de fora do Bloquear em todas">específico</span>{% endif %}<br><span class="mut" style="font-size:.78rem">{{ g.empresas|join(', ') if g.empresas else ('demais redes (padrão)' if g.nome == 'default' else 'nenhuma empresa cadastrada') }}</span></span></label>
+        <span><b>{{ g.nome }}</b>{% if g.especifico %} <span class="tag" style="font-size:.7rem" title="fica de fora do Bloquear em todas">específico</span>{% endif %} <span class="tag dlg-acessou" style="font-size:.7rem" title="usada por empresa que acessou o domínio" hidden>acessou</span><br><span class="mut" style="font-size:.78rem">{{ g.empresas|join(', ') if g.empresas else ('demais redes (padrão)' if g.nome == 'default' else 'nenhuma empresa cadastrada') }}</span></span></label>
       {% endfor %}
     </div>
     <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
@@ -44,7 +48,11 @@
     const lista = Array.from(nomes);
     document.getElementById("dlgNomes").textContent =
       lista.length + " domínio(s): " + lista.slice(0, 12).join(", ") + (lista.length > 12 ? " …" : "");
-    dlg.querySelectorAll('input[name="grupos"]').forEach(function (c) { c.checked = pre.has(c.value); });
+    // sempre abre com tudo desmarcado; as listas das empresas que acessaram só ficam em destaque
+    dlg.querySelectorAll('input[name="grupos"]').forEach(function (c) {
+      c.checked = false;
+      c.closest("label").querySelector(".dlg-acessou").hidden = !pre.has(c.value);
+    });
     dlg.showModal();
   };
   // Bloquear direto em TODAS as listas, sem abrir o diálogo (confirma antes)
@@ -74,6 +82,10 @@
     if (confirm("Bloquear em TODAS as " + n + " listas" + (esp ? " (exceto " + esp + " grupo(s) específico(s))" : "") + "?")) {
       f.dataset.confirmado = "1"; f.requestSubmit();
     }
+  };
+  // "Marcar todas" aqui marca de fato todas (inclusive grupos específicos, ex.: Anúncios)
+  window.dlgMarcar = function (f, marcar) {
+    f.querySelectorAll('input[name="grupos"]').forEach(function (c) { c.checked = marcar; });
   };
   window.dlgValida = function (f) {
     const g = Array.from(f.querySelectorAll('input[name="grupos"]:checked')).map(function (c) { return c.value; });

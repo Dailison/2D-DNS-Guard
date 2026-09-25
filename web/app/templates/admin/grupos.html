@@ -31,6 +31,33 @@
   </table>
   <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Rede sem grupo usa o <code>default</code>. Quando uma faixa está em mais de um grupo, vale a mais específica (ex.: <code>/32</code> vence <code>/16</code>).</p>
 </div>
+{% if sem_grupo %}
+<div class="card" style="border-left:4px solid #d97706">
+  <h2>Sem grupo <span class="mut" style="font-size:.8rem">· {{ sem_grupo|length }} rede(s) do cadastro/logs que nenhum grupo cobre — filtram pelo <code>default</code></span></h2>
+  <table>
+    <thead><tr><th>Empresa · unidade</th><th>Rede</th><th class="num" title="computadores vistos nos logs, somando todas as redes da empresa">PCs (empresa)</th><th>Visto por último</th><th>Situação</th><th>Atribuir a</th></tr></thead>
+    <tbody>
+    {% for r in sem_grupo %}
+      <tr>
+        <td>{{ r.empresa }}{% if r.unidade %} · {{ r.unidade }}{% endif %}
+          {% if r.auto %}<br><span class="tag" style="font-size:.72rem;color:#b45309" title="criada sozinha a partir de IPs vistos nos logs">detectada nos logs — <a href="{{ url_for('analise.empresas') }}">cadastrar</a></span>{% endif %}</td>
+        <td><code>{{ r.cidr }}</code></td>
+        <td class="num">{{ r.pcs if r.pcs is not none else '—' }}</td>
+        <td class="mut" style="white-space:nowrap">{{ r.visto|dt_sp if r.visto else '—' }}</td>
+        <td style="font-size:.82rem">{% if r.parciais %}parcial: {% for c, g in r.parciais %}<code>{{ c }}</code> em <a href="{{ url_for('admin.grupos', grupo=g) }}">{{ g }}</a>{{ ', ' if not loop.last }}{% endfor %}; o resto usa o default
+          {% else %}<span class="mut">toda a rede usa o default</span>{% endif %}</td>
+        <td style="white-space:nowrap">
+          <form method="post" action="{{ url_for('admin.bloqueios_rede_add') }}" style="display:inline-flex;gap:.3rem" onsubmit="return confirm('Atribuir {{ r.cidr }} ({{ r.empresa }}) a ' + this.grupo.value + '?')">
+            <input type="hidden" name="rede" value="{{ r.cidr }}">
+            <select name="grupo" style="width:auto">{% for g in grupos %}<option {{ 'selected' if g == grupo }}>{{ g }}</option>{% endfor %}</select>
+            <button class="primary" style="padding:.35rem .6rem;font-size:.85rem">Atribuir</button>
+          </form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 <div class="card">
   <h2>Criar grupo</h2>
   <form method="post" action="{{ url_for('admin.bloqueios_grupo') }}" class="row" style="align-items:flex-end">

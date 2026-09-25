@@ -154,7 +154,37 @@ def grupos():
                         "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
                        for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
     return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes,
-                           redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro)
+                           redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro,
+                           sem_grupo=_sem_grupo(emp.lista(), ngm))
+
+
+def _sem_grupo(empresas: list[dict], ngm: dict) -> list[dict]:
+    """Redes do cadastro de Empresas (inclui as criadas sozinhas a partir dos logs) que
+    nenhum grupo cobre: caem no `default`. `parciais` = pedaços dela que já têm grupo."""
+    import ipaddress
+    mapa = []
+    for k, g in ngm.items():
+        try:
+            n = ipaddress.ip_network(k, strict=False)
+        except ValueError:
+            continue
+        if n.prefixlen:                      # 0.0.0.0/0 e ::/0 = o próprio default
+            mapa.append((n, g))
+    out = []
+    for e in empresas:
+        for r in e.get("networks", []):
+            try:
+                net = ipaddress.ip_network(r["cidr"], strict=False)
+            except ValueError:
+                continue
+            if any(net.version == n.version and net.subnet_of(n) for n, _ in mapa):
+                continue
+            parciais = sorted(((str(n), g) for n, g in mapa if n.version == net.version and n.subnet_of(net)),
+                              key=lambda x: dnslib._sort_key(x[0]))
+            out.append({"empresa": e["name"], "unidade": r.get("unit") or "", "cidr": str(net),
+                        "auto": e.get("auto_created"), "pcs": e.get("clients"), "visto": e.get("last_seen"),
+                        "parciais": parciais})
+    return sorted(out, key=lambda x: (not x["auto"], x["empresa"].lower(), dnslib._sort_key(x["cidr"])))
 
 
 @admin_bp.get("/dominios")

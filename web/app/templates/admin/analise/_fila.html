@@ -5,7 +5,7 @@
   <button type="button" class="mini blk" onclick="filaAcao('bloquear')">Bloquear selecionados…</button>
   <button type="button" class="mini ok" onclick="filaAcao('liberar')">Manter liberados</button>
 </form>
-<table>
+<div class="tbl"><table>
   <thead><tr><th style="width:1.5rem"><input type="checkbox" title="selecionar todos" onclick="filaTodos(this)" style="width:auto"></th>
     <th>Domínio</th>{% if todos %}<th>Empresa</th>{% endif %}<th>Categoria</th><th>Classe</th><th>Recomendação p/ empresa</th><th>Risco</th><th class="num">Consultas</th><th class="num">PCs</th><th>1º acesso</th><th>Decisão</th></tr></thead>
   <tbody>
@@ -33,7 +33,7 @@
     <tr><td colspan="11" class="mut">Nada aguardando decisão. 👍</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 <script>
 function filaSel() { return Array.from(document.querySelectorAll(".selFila:checked")); }
 function filaConta() { document.getElementById("filaN").textContent = filaSel().length; }

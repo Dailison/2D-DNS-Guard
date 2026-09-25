@@ -486,12 +486,14 @@ def logs_dns():
         # milhões de linhas). Sem filtro feito aqui = 1 chamada; com filtro de domínio/
         # empresa/faixa (a API não faz) varre até 5000 p/ achar os 1000 resultados.
         filtro_local = bool(dominio or redes is not None or ip_like)
+        # 1 chamada só: o custo de cada página é o COUNT do Technitium (~15-30 s), não o
+        # tamanho — com filtro local pede 5000 de uma vez em vez de 5 páginas de 1000.
         lim, smax = LOGS_LIMITE, (LOGS_LIMITE * 5 if filtro_local else LOGS_LIMITE)
         linhas, scanned, cap = dnslib.consultar_logs(
             mapa, redes=redes, ip_like=ip_like,
             inicio=dnslib.local_para_utc_iso(inicio), fim=dnslib.local_para_utc_iso(fim),
             dominio=dominio or None, ip_exato=ip or None,
-            resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=LOGS_LIMITE)
+            resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=smax)
         # empresa/unidade pelo cadastro (o "empresa" do Technitium é o grupo de bloqueio)
         info = emp.resolver(l.get("ip") for l in linhas)
         for l in linhas:

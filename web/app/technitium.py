@@ -769,7 +769,7 @@ def empresa_redes(empresa, mapa):
 
 def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
                    ip_exato=None, ip_like=None, resposta=None, rcode=None,
-                   limite=300, scan_max=6000, por_pagina=500):
+                   limite=300, scan_max=6000, por_pagina=500, orcamento_s=25):
     """Consulta os query logs do Technitium (período/IP/tipo-de-resposta/rcode
     empurrados para a API); resolve a empresa e filtra por `redes` (CIDR),
     `dominio` (substring, %dominio%) e `ip_like` (parte do IP, ex.: '10.100') no
@@ -789,10 +789,14 @@ def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
         base["rcode"] = rcode.strip()
     dom_like = (dominio or "").strip().lower()
     ip_sub = (ip_like or "").strip()
+    import time
+    t0 = time.monotonic()
     linhas, scanned, page = [], 0, 1
     while len(linhas) < limite and scanned < scan_max:
+        if page > 1 and time.monotonic() - t0 > orcamento_s:
+            break                      # cada página custa segundos no Technitium: não estoura o timeout
         r = _api_get("logs/query?" + urllib.parse.urlencode(
-            {**base, "pageNumber": page, "entriesPerPage": por_pagina}), timeout=30)
+            {**base, "pageNumber": page, "entriesPerPage": por_pagina}), timeout=60)
         ents = r.get("entries", [])
         if not ents:
             break

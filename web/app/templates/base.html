@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="pt-br">
 <head>
+  {% if portal_kit_url %}<script src="{{ portal_kit_url|replace('launcher.js', 'theme.js') }}"></script>{% endif %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Admin{% endblock %} · 2D DNS Guard</title>
@@ -70,6 +71,7 @@
     .dd .ddmenu a{display:block;color:var(--navy);padding:.5rem .95rem;white-space:nowrap;text-decoration:none}
     .dd .ddmenu a:hover{background:#eef1f6}
   </style>
+  {% include '_tema_escuro.html' %}
 </head>
 <body>
     <header>

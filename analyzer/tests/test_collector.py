@@ -45,3 +45,9 @@ def test_excluded_clients():
 def test_normalizes_qname():
     ag = aggregate([e("2026-09-24T10:05:00Z", q="WWW.Facebook.COM.")], S, E)
     assert list(ag)[0][1] == "www.facebook.com"
+
+
+def test_control_chars_in_qname_are_escaped():
+    # NUL no nome travava a coleta (PostgreSQL recusa 0x00 em texto)
+    ag = aggregate([e("2026-09-24T10:05:00Z", q="bad\x00name.com")], S, E)
+    assert list(ag)[0][1] == "bad\\x00name.com"

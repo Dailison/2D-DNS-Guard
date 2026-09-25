@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -45,6 +46,15 @@ def hour_bucket(ts: datetime) -> datetime:
     return ts.replace(minute=0, second=0, microsecond=0)
 
 
+_CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sem_controle(v: str) -> str:
+    """Caracteres de controle viram escape visível (ex.: \\x00). O PostgreSQL recusa NUL em
+    texto e um único nome assim travava a coleta inteira (2026-09-24)."""
+    return _CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}", v)
+
+
 def aggregate(entries, start: datetime, end: datetime, excluded=()) -> dict[tuple, Agg]:
     """Agrega entradas cruas por (ip, fqdn, hora), só com start <= ts < end.
 
@@ -55,7 +65,7 @@ def aggregate(entries, start: datetime, end: datetime, excluded=()) -> dict[tupl
         if ts is None or ts < start or ts >= end:
             continue
         ip = (e.get("clientIpAddress") or "").strip()
-        qname = (e.get("qname") or "").strip().rstrip(".").lower()
+        qname = _sem_controle((e.get("qname") or "").strip().rstrip(".").lower())
         if not ip or not qname:
             continue
         if excluded:

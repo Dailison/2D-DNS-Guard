@@ -441,6 +441,42 @@ def bloqueios_rem_varios():
 LOGS_LIMITE = 1000
 
 
+def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, resposta, redes, ip_like,
+                               mapa, grupos, lista_empresas):
+    def utc(v):
+        iso = dnslib.local_para_utc_iso(v)
+        return iso + "+00:00" if iso and len(iso) == 19 else iso
+    agrupado, cap, coletado, total = [], False, None, 0
+    try:
+        hoje = dnslib.agora_local().date()
+        d = api.get("/logs/grouped", start=utc(inicio or f"{hoje}T00:00"), end=utc(fim or f"{hoje}T23:59"),
+                    tid=int(empresa) if empresa else 0, ip=ip or None, ip_like=ip_like,
+                    cidr=[str(n) for n in redes] if (redes is not None and not empresa) else None,
+                    dominio=dominio or None, blocked="true" if resposta == "Blocked" else None,
+                    limit=LOGS_LIMITE)
+        cap, coletado = d.get("cap"), d.get("coletado_ate")
+        union = None
+        if any(r["bloqueadas"] for r in d["rows"]):
+            union, _ = dnslib.blocked_index()
+        for r in d["rows"]:
+            total += r["n"]
+            a = {"dominio": r["dominio"], "n": r["n"], "nclientes": r["nclientes"],
+                 "ultima": dnslib.utc_para_local(r["ultima"]), "empresas": r["empresas"],
+                 "blocked": r["bloqueadas"] > 0, "bloqueadas": r["bloqueadas"], "tipo": "Resolvido", "answer": None}
+            if a["blocked"] and union is not None:
+                a["culpados"] = dnslib.culpados(a["dominio"], None, union)
+            agrupado.append(a)
+    except Exception as e:  # noqa: BLE001
+        flash(f"Não foi possível consultar os logs no analisador: {e}", "erro")
+    return render_template(
+        "admin/logs_dns.html", linhas=[], agrupado=agrupado, agrupar=True, vista="agrupado",
+        grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
+        cidr=cidr, ip=ip, dominio=dominio, resposta=resposta, respostas=dnslib.RESPONSE_TYPES,
+        inicio=inicio, fim=fim, scanned=None, cap=cap, voltar=request.full_path,
+        fonte_analisador=True, total_acessos=total,
+        coletado_ate=dnslib.utc_para_local(coletado) if coletado else None)
+
+
 @admin_bp.get("/logs-dns")
 @login_required
 def logs_dns():
@@ -482,6 +518,13 @@ def logs_dns():
                 redes = [ipaddress.ip_network(cidr, strict=False)]
             except ValueError:
                 ip_like = cidr  # não é CIDR válido: trata como parte do IP (ex.: '10.100')
+        if agrupar and resposta in ("", "Blocked") and current_app.config.get("ANALYZER_ENABLED"):
+            # Vista agrupada pelo analisador (PostgreSQL, agregado por hora): < 2 s para
+            # qualquer período/empresa. O Technitium leva 15-30 s por página e não filtra
+            # por empresa/faixa. Atraso = o da coleta (~5-7 min).
+            return _logs_agrupados_analisador(
+                inicio, fim, empresa, grupo, cidr, ip, dominio, resposta, redes, ip_like, mapa, grupos,
+                lista_empresas)
         # Máx. 1000 logs por busca: cada página do Technitium custa segundos (SQLite com
         # milhões de linhas). Sem filtro feito aqui = 1 chamada; com filtro de domínio/
         # empresa/faixa (a API não faz) varre até 5000 p/ achar os 1000 resultados.

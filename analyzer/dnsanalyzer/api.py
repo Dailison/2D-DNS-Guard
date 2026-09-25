@@ -853,3 +853,41 @@ def liberados_meta_delete(ip: str):
     with db.conn() as c:
         n = c.execute("DELETE FROM liberado_meta WHERE ip=%s", (ip,)).rowcount
         return {"ok": True, "removed": n}
+
+
+# ------------------------------------------------------------------ logs agrupados (console)
+@app.get("/logs/grouped", dependencies=[Depends(auth)])
+def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str] = None,
+                 cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
+                 dominio: Optional[str] = None, blocked: bool = False, limit: int = Query(1000, le=5000)):
+    """Logs DNS agrupados por nome consultado (a partir de query_agg, por hora), com os
+    mesmos filtros da tela Logs DNS. Atraso = o da coleta (~5-7 min)."""
+    where = ["q.bucket >= date_trunc('hour', %(s)s::timestamptz)", "q.bucket < %(e)s",
+             "q.last_seen >= %(s)s", "q.first_seen <= %(e)s"]
+    p: dict = {"s": start, "e": end, "lim": limit + 1}
+    if tid:
+        where.append("q.tenant_id = %(t)s"); p["t"] = tid
+    if ip:
+        where.append("cl.ip = %(ip)s::inet"); p["ip"] = ip.strip()
+    if cidr:
+        try:
+            p["cidrs"] = [str(ipaddress.ip_network(c, strict=False)) for c in cidr]
+        except ValueError:
+            raise HTTPException(400, "CIDR inválido")
+        where.append("cl.ip <<= ANY(%(cidrs)s::cidr[])")
+    if ip_like:
+        where.append("host(cl.ip) LIKE %(ipl)s"); p["ipl"] = f"%{ip_like.strip()}%"
+    if dominio:
+        where.append("f.name LIKE %(dom)s"); p["dom"] = f"%{dominio.strip().lower()}%"
+    if blocked:
+        where.append("q.blocked > 0")
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT f.name AS dominio, sum(q.queries) AS n, sum(q.blocked) AS bloqueadas, "
+            " count(DISTINCT q.client_id) AS nclientes, max(q.last_seen) AS ultima, "
+            " array_agg(DISTINCT t.name ORDER BY t.name) AS empresas "
+            "FROM query_agg q JOIN fqdns f ON f.id=q.fqdn_id JOIN clients cl ON cl.id=q.client_id "
+            "JOIN tenants t ON t.id=q.tenant_id "
+            f"WHERE {' AND '.join(where)} GROUP BY f.name ORDER BY max(q.last_seen) DESC LIMIT %(lim)s", p).fetchall()
+        cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
+    return {"rows": rows[:limit], "cap": len(rows) > limit, "coletado_ate": cursor}

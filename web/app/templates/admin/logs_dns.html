@@ -39,11 +39,12 @@
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem">
     <h2 style="margin:0">
-      {% if agrupar %}{{ agrupado|length }} domínio(s) <span class="mut" style="font-size:.8rem">· {{ linhas|length }} acessos</span>
+      {% if agrupar %}{{ agrupado|length }} domínio(s) <span class="mut" style="font-size:.8rem">· {{ total_acessos if total_acessos is defined else linhas|length }} acessos</span>
       {% else %}{{ linhas|length }} registro(s){% endif %}
     </h2>
     <span class="mut" style="font-size:.8rem">
-      {{ scanned }} varridos{% if cap %} · <b>limite de 1000 por busca</b> — refine o período ou o filtro para ver mais antigos{% endif %}
+      {% if fonte_analisador is defined %}fonte: analisador (agregado por hora, coletado até {{ (coletado_ate or '—')[11:16] }} — ~5-7 min de atraso; tempo real: vista <b>Detalhado</b>){% if cap %} · <b>limite de 1000 domínios</b> — refine o filtro{% endif %}
+      {% else %}{{ scanned }} varridos{% if cap %} · <b>limite de 1000 por busca</b> — refine o período ou o filtro para ver mais antigos{% endif %}{% endif %}
     </span>
   </div>
   {% macro desbloquear(row) %}
@@ -72,7 +73,7 @@
         <td><b>{{ a.n }}</b></td>
         <td class="mut">{{ a.nclientes }}</td>
         <td class="mut" style="font-size:.85rem">{% if a.empresas %}{{ a.empresas[:3]|join(', ') }}{% if a.empresas|length > 3 %} <span title="{{ a.empresas|join(', ') }}">+{{ a.empresas|length - 3 }}</span>{% endif %}{% else %}—{% endif %}</td>
-        <td class="mut">{% if a.blocked %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% else %}{{ a.tipo }}{% endif %}</td>
+        <td class="mut">{% if a.blocked %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% if a.bloqueadas is defined and a.bloqueadas < a.n %} <span style="font-size:.75rem">{{ a.bloqueadas }}/{{ a.n }}</span>{% endif %}{% else %}{{ a.tipo }}{% endif %}</td>
         <td style="white-space:nowrap">{{ desbloquear(a) }}</td>
       </tr>
     {% else %}

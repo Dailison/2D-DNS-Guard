@@ -19,6 +19,7 @@
 <div class="ia-top">
   <div class="metric"><div class="n" id="st-ia" style="font-size:1rem;padding-top:.4rem">…</div><div class="l" id="st-model">IA</div></div>
   <div class="metric"><div class="n" id="st-fila">–</div><div class="l">Na fila da IA</div></div>
+  <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web quando a fila da IA esvaziar">Etapa 2 · busca na web</div></div>
   <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
   <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div></div>
   <div class="metric"><div class="n" id="st-eta" style="font-size:1.1rem;padding-top:.3rem">–</div><div class="l">Previsão p/ zerar a fila</div></div>
@@ -58,15 +59,21 @@
     if (k === 'llm_start') {
       ic.textContent = '⏳'; body.appendChild(document.createTextNode('Analisando '));
       body.appendChild(link(ev.name)); if (ev.detail) body.appendChild(el('span', 'd', ' — ' + ev.detail));
-    } else if (k === 'llm_done' || k === 'rules_final' || k === 'rules_alert') {
-      ic.textContent = k === 'rules_alert' ? '⚠️' : '✅';
+    } else if (k === 'search_start') {
+      ic.textContent = '🔎'; body.appendChild(document.createTextNode('Buscando na web '));
+      body.appendChild(link(ev.name)); if (ev.detail) body.appendChild(el('span', 'd', ' — ' + ev.detail));
+    } else if (k === 'search_error') {
+      ic.textContent = '⏸️'; body.appendChild(document.createTextNode('Busca na web indisponível ('));
+      body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ') — ' + (ev.detail || '') + '; tenta de novo depois'));
+    } else if (k === 'llm_done' || k === 'rules_final' || k === 'rules_alert' || k === 'search_done') {
+      ic.textContent = k === 'rules_alert' ? '⚠️' : (k === 'search_done' ? '🔎' : '✅');
       body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' → '));
       body.appendChild(badge(ev.classification));
       var nums = [];
       if (ev.risk != null) nums.push('risco ' + ev.risk);
       if (ev.work != null) nums.push('trabalho ' + ev.work);
       if (ev.seconds != null) nums.push(Math.round(ev.seconds) + 's');
-      if (k !== 'llm_done') nums.push('pelas regras');
+      if (k !== 'llm_done' && k !== 'search_done') nums.push('pelas regras');
       body.appendChild(el('span', 'd', ' ' + nums.join(' · ')));
       if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail)); }
     } else if (k === 'rules_batch') {
@@ -85,6 +92,7 @@
     ia.textContent = d.llm && d.llm.ok ? '● no ar' : '● fora'; ia.style.color = d.llm && d.llm.ok ? '#16a34a' : '#b91c1c';
     document.getElementById('st-model').textContent = 'IA (' + ((d.llm && d.llm.model) || '?') + ')';
     document.getElementById('st-fila').textContent = d.queue ? d.queue.ia : '–';
+    document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca + (d.queue.ia ? ' (aguarda)' : '') : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';
     document.getElementById('st-media').textContent = d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–';
     document.getElementById('st-eta').textContent = d.eta_seconds ? '~' + (d.eta_seconds > 5400 ? Math.round(d.eta_seconds/3600) + ' h' : Math.round(d.eta_seconds/60) + ' min') : (d.queue && d.queue.ia === 0 ? 'fila vazia' : '–');

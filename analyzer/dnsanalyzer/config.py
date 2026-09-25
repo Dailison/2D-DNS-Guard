@@ -77,6 +77,8 @@ class Settings:
     web_intel_enabled: bool
     web_fetch_site: bool
     web_cache_days: int
+    web_search_url: str
+    web_search_results: int
 
     reanalyze_days: int
     retention_days: int
@@ -136,6 +138,8 @@ def load_settings() -> Settings:
         web_intel_enabled=_bool(os.environ.get("WEB_INTEL_ENABLED"), True),
         web_fetch_site=_bool(os.environ.get("WEB_FETCH_SITE"), True),
         web_cache_days=_int("WEB_CACHE_DAYS", 30),
+        web_search_url=os.environ.get("WEB_SEARCH_URL", ""),   # SearXNG local (etapa 2); vazio = desligada
+        web_search_results=_int("WEB_SEARCH_RESULTS", 6),
         reanalyze_days=_int("REANALYZE_DAYS", 30),
         retention_days=_int("RETENTION_DAYS", 180),
         classify_batch=_int("CLASSIFY_BATCH", 10),

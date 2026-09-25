@@ -105,3 +105,25 @@ def test_schema_and_prompt():
     msgs = build_messages("x.com", [{"id": "E0", "text": "nome do domínio: x.com"}], CATS)
     assert "E0: nome do domínio: x.com" in msgs[1]["content"]
     assert "NUNCA invente" in msgs[0]["content"]
+
+
+def _busca(*hosts):
+    return [{"title": f"sobre em {h}", "snippet": "Dell SupportAssist", "host": h, "url": f"https://{h}/x"}
+            for h in hosts]
+
+
+def test_web_search_two_sites_allow_recognition():
+    # etapa 2: fora do top 1M, 2 resultados de sites diferentes citados valem como identificação
+    r = base("platinumai.net", search=_busca("dell.com", "reddit.com"))
+    ids = [e.id for e in r.evidence if e.kind == "websearch"]
+    f = combine(r, llm("TRABALHO", work=80, recognized=True,
+                       reasons=[{"evidence_id": i, "text": "Dell SupportAssist"} for i in ids]), ev(r))
+    assert f.classification == "TRABALHO"
+
+
+def test_web_search_single_site_is_not_enough():
+    r = base("platinumai.net", search=_busca("dell.com", "dell.com"))
+    ids = [e.id for e in r.evidence if e.kind == "websearch"]
+    f = combine(r, llm("TRABALHO", work=80, recognized=True,
+                       reasons=[{"evidence_id": i, "text": "Dell"} for i in ids]), ev(r))
+    assert f.classification == "DESCONHECIDO"

@@ -708,7 +708,10 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "FROM domains WHERE claimed_at IS NOT NULL AND claimed_at > now() - interval '30 minutes' "
             "ORDER BY claimed_at DESC LIMIT 1").fetchone()
         queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS ia, "
-                          "count(*) FILTER (WHERE needs_analysis) AS regras FROM domains").fetchone()
+                          "count(*) FILTER (WHERE needs_analysis) AS regras, "
+                          "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by='llm' "
+                          " AND web_search_at IS NULL AND NOT llm_pending AND kind='public' "
+                          " AND NOT dominio_decidido(id)) AS busca FROM domains").fetchone()
         hour = c.execute("SELECT count(*) AS done, round(avg(seconds)::numeric, 1) AS avg_seconds FROM ai_events "
                          "WHERE kind='llm_done' AND created_at > now() - interval '1 hour'").fetchone()
     ok, msg = OllamaClient().available()

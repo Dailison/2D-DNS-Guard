@@ -135,6 +135,33 @@ def _homepage_host(domain: str) -> dict | None:
             "site_name": _clean(meta("og:site_name", "application-name"), 60)}
 
 
+def search(c, domain: str, fetch: bool) -> list[dict] | None:
+    """Etapa 2: resultados de busca na web (SearXNG local) sobre o domínio. Texto de
+    TERCEIROS (pista, não prova). Cache permanente em lookup_cache kind='search'."""
+    cfg = settings()
+    row = c.execute("SELECT value FROM lookup_cache WHERE kind='search' AND key=%s", (domain,)).fetchone()
+    if row or not (fetch and cfg.web_search_url):
+        return row["value"].get("results") if row else None
+    r = httpx.get(cfg.web_search_url.rstrip("/") + "/search", timeout=40,
+                  params={"q": f'"{domain}"', "format": "json", "language": "pt-BR", "safesearch": 0})
+    r.raise_for_status()
+    out, hosts = [], set()
+    for x in r.json().get("results", []):
+        url = x.get("url") or ""
+        host = (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
+        title, snippet = _clean(x.get("title"), 120), _clean(x.get("content"), 220)
+        if not host or not (title or snippet):
+            continue
+        out.append({"title": title, "snippet": snippet, "host": host, "url": url[:300]})
+        hosts.add(host)
+        if len(out) >= cfg.web_search_results:
+            break
+    c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('search', %s, true, %s) "
+              "ON CONFLICT (kind, key) DO UPDATE SET value=EXCLUDED.value, ok=true, fetched_at=now()",
+              (domain, Jsonb({"results": out, "fetched": datetime.now(timezone.utc).isoformat()})))
+    return out
+
+
 def lookup(c, domain: str, fetch: bool, allow_site: bool) -> dict | None:
     """Dados de identificação do domínio (cache; busca na rede só se fetch=True)."""
     cfg = settings()

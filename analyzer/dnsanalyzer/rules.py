@@ -106,6 +106,10 @@ def build_evidence(d: dict) -> list[Evidence]:
         add("site", "página inicial (texto DECLARADO pelo próprio site, não verificado): "
                     + "; ".join(b for b in bits if b) + extra, False)
 
+    for r in (d.get("search") or []):
+        add("websearch", f"resultado de busca na web (texto de TERCEIROS, não verificado) em {r['host']}: "
+                         f"'{r.get('title') or ''}' — {r.get('snippet') or ''}", False, host=r["host"])
+
     hits = d.get("ti_hits") or []
     for h in hits:
         where = "o próprio domínio" if h["matched"] == name else f"o host {h['matched']}"

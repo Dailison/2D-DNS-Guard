@@ -61,7 +61,7 @@ def health():
                                     .fetchone() or {}).get("value")
             out["queue"] = dict(c.execute(
                 "SELECT count(*) FILTER (WHERE needs_analysis) AS regras, "
-                "count(*) FILTER (WHERE llm_pending) AS ia, count(*) AS dominios FROM domains").fetchone())
+                "count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS ia, count(*) AS dominios FROM domains").fetchone())
     except Exception as e:  # noqa: BLE001
         out["db_error"] = str(e)[:200]
     ok, msg = OllamaClient().available()
@@ -75,7 +75,7 @@ def health():
 def stats():
     with db.conn() as c:
         q = dict(c.execute(
-            "SELECT count(*) FILTER (WHERE needs_analysis) AS fila_regras, count(*) FILTER (WHERE llm_pending) AS fila_ia, "
+            "SELECT count(*) FILTER (WHERE needs_analysis) AS fila_regras, count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS fila_ia, "
             "count(*) FILTER (WHERE classified_by='llm') AS classificados_ia, count(*) AS dominios FROM domains").fetchone())
         q["ia_24h"] = c.execute("SELECT count(*) AS n FROM classification_history WHERE source='llm' "
                                 "AND created_at >= now() - interval '24 hours'").fetchone()["n"]
@@ -480,9 +480,8 @@ def review_queue(tid: int, days: int = 30, limit: int = Query(200, le=1000)):
             " v.corp_action, v.corp_reason, v.corp_by, "
             " v.work_score, v.total_queries, v.clients_count, v.first_seen, v.last_seen "
             "FROM v_tenant_domains v JOIN tenants t ON t.id=v.tenant_id "
-            "LEFT JOIN global_reviews g ON g.domain_id=v.domain_id "
             f"WHERE {_tf('v')} AND v.last_seen >= %(s)s AND v.review_status IS NULL AND v.kind='public' "
-            " AND g.status IS DISTINCT FROM 'allowed' "
+            " AND NOT dominio_decidido(v.domain_id) "   # decidido uma vez (global ou outra empresa) não volta
             " AND (v.classification IN ('NAO_TRABALHO','SUSPEITO','MALICIOSO') OR (v.classification='DESCONHECIDO' "
             "      AND v.classified_by='llm' AND NOT v.llm_pending)) "
             "ORDER BY (v.classification='MALICIOSO') DESC, (v.classification='SUSPEITO') DESC, "
@@ -708,7 +707,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "SELECT name, claimed_at, total_queries, extract(epoch from now() - claimed_at)::int AS elapsed "
             "FROM domains WHERE claimed_at IS NOT NULL AND claimed_at > now() - interval '30 minutes' "
             "ORDER BY claimed_at DESC LIMIT 1").fetchone()
-        queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending) AS ia, "
+        queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS ia, "
                           "count(*) FILTER (WHERE needs_analysis) AS regras FROM domains").fetchone()
         hour = c.execute("SELECT count(*) AS done, round(avg(seconds)::numeric, 1) AS avg_seconds FROM ai_events "
                          "WHERE kind='llm_done' AND created_at > now() - interval '1 hour'").fetchone()

@@ -195,6 +195,7 @@ def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE llm_pending AND NOT locked
+               AND (classification = 'SUSPEITO' OR NOT dominio_decidido(id))   -- decidido: IA não reavalia
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY (classification = 'SUSPEITO') DESC, total_queries DESC
              LIMIT 1 FOR UPDATE SKIP LOCKED)
@@ -341,6 +342,6 @@ def run_forever(stop=lambda: False) -> None:
 def status() -> dict:
     with db.conn() as c:
         r = c.execute(
-            "SELECT count(*) FILTER (WHERE needs_analysis) AS fase_a, count(*) FILTER (WHERE llm_pending) AS fila_ia, "
+            "SELECT count(*) FILTER (WHERE needs_analysis) AS fase_a, count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS fila_ia, "
             "count(*) FILTER (WHERE classified_by='llm') AS por_ia, count(*) AS total FROM domains").fetchone()
     return dict(r) | {"at": datetime.now(timezone.utc).isoformat()}

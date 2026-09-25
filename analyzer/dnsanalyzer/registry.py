@@ -32,6 +32,16 @@ def normalize_cidr(s: str) -> str:
     return str(ipaddress.ip_network(s.strip(), strict=False))
 
 
+def _salvar_decisoes(c, where: str, params: tuple) -> None:
+    """Antes de apagar linhas empresa×domínio (CIDR mudou, mescla), a decisão vira decisão
+    do site — senão o site voltava para a fila na empresa nova."""
+    c.execute(
+        "INSERT INTO global_reviews (domain_id, status, reviewed_by, reviewed_at) "
+        "SELECT DISTINCT ON (td.domain_id) td.domain_id, td.review_status, td.reviewed_by, td.reviewed_at "
+        f"FROM tenant_domains td WHERE td.review_status IS NOT NULL AND {where} "
+        "ORDER BY td.domain_id, td.reviewed_at DESC ON CONFLICT (domain_id) DO NOTHING", params)
+
+
 def recompute_tenant_domains(c, tenant_ids: set[int]) -> None:
     """Recalcula tenant_domains a partir de client_domains (preserva overrides)."""
     if not tenant_ids:
@@ -44,6 +54,8 @@ def recompute_tenant_domains(c, tenant_ids: set[int]) -> None:
         "ON CONFLICT (tenant_id, domain_id) DO UPDATE SET first_seen=EXCLUDED.first_seen, "
         "last_seen=EXCLUDED.last_seen, total_queries=EXCLUDED.total_queries, clients_count=EXCLUDED.clients_count",
         (ids,))
+    _salvar_decisoes(c, "td.tenant_id = ANY(%s) AND td.override_classification IS NULL AND NOT EXISTS "
+                     "(SELECT 1 FROM client_domains cd WHERE cd.tenant_id=td.tenant_id AND cd.domain_id=td.domain_id)", (ids,))
     c.execute(
         "DELETE FROM tenant_domains td WHERE td.tenant_id = ANY(%s) AND td.override_classification IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM client_domains cd WHERE cd.tenant_id=td.tenant_id AND cd.domain_id=td.domain_id)",
@@ -172,6 +184,7 @@ def merge_tenant(c, source: int, into: int) -> dict:
     c.execute("UPDATE tenants SET auto_created=true WHERE id=%s", (source,))   # vira descartável
     moved = reassign_clients(c)
     # sobras sem rede (ex.: overrides) saem junto com a empresa de origem
+    _salvar_decisoes(c, "td.tenant_id = %s", (source,))
     c.execute("DELETE FROM tenant_domains WHERE tenant_id=%s", (source,))
     c.execute("UPDATE alerts SET tenant_id=%s WHERE tenant_id=%s AND client_id IS NULL "
               "AND NOT EXISTS (SELECT 1 FROM alerts a2 WHERE a2.tenant_id=%s AND a2.dedup_key=alerts.dedup_key)",

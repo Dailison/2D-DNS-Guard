@@ -166,7 +166,7 @@ def grupos():
                        for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
     return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes,
                            redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro,
-                           faixas=faixas, ips=ips, desc_ip=desc_ip,
+                           faixas=faixas, ips=ips, desc_ip=desc_ip, especificos=emp.grupos_especificos(),
                            sem_grupo=_sem_grupo(emp.lista(), ngm))
 
 
@@ -286,6 +286,10 @@ def bloqueios_renomear():
         n, msg = dnslib.renomear_grupo(velho, novo)
         if n:
             flash(f"Grupo '{velho}' {msg} para '{n}'.", "ok")
+            try:   # a config do grupo (ex.: específico) acompanha o nome
+                api.put("/console/group-settings", {"name": velho, "rename_to": n, "by": admin_atual().email})
+            except AnalyzerError:
+                pass
             return redirect(url_for("admin.grupos", grupo=n))
         flash(msg, "erro")
     except Exception as e:  # noqa: BLE001
@@ -300,6 +304,10 @@ def bloqueios_deletar():
     try:
         n, info = dnslib.deletar_grupo(grupo)
         if n:
+            try:
+                api.delete(f"/console/group-settings?name={quote(n, safe='')}")
+            except AnalyzerError:
+                pass
             extra = f" ({info} rede(s) desatribuída(s))" if info else ""
             flash(f"Grupo '{n}' removido{extra}.", "ok")
             return redirect(url_for("admin.grupos"))
@@ -368,6 +376,21 @@ def bloqueios_empresa_add():
             current_app.logger.info("DNS: %s atribuiu %s (%s) a %s", admin_atual().email, nome, redes, grupo)
         except Exception as ex:  # noqa: BLE001
             flash(f"Falha ao atribuir: {ex}", "erro")
+    return redirect(url_for("admin.grupos", grupo=grupo))
+
+
+@admin_bp.post("/grupos/config")
+@login_required
+def grupo_config():
+    """Grupo específico (ex.: Anúncios): fica de fora do "Bloquear em todas"."""
+    grupo = (request.form.get("grupo") or "").strip()
+    esp = bool(request.form.get("especifico"))
+    try:
+        api.put("/console/group-settings", {"name": grupo, "especifico": esp, "by": admin_atual().email})
+        flash(f"{grupo}: " + ("grupo específico — não entra mais no \"Bloquear em todas\"." if esp
+                              else "volta a entrar no \"Bloquear em todas\"."), "ok")
+    except AnalyzerError as e:
+        flash(f"Falha ao salvar: {e}", "erro")
     return redirect(url_for("admin.grupos", grupo=grupo))
 
 

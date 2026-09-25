@@ -31,6 +31,19 @@ def lista() -> list[dict]:
     return g._empresas
 
 
+def grupos_especificos() -> set[str]:
+    """Grupos marcados como específicos (ex.: Anúncios): ficam de fora do "Bloquear em
+    todas". Config guardada no analisador (cache por requisição; falha = nenhum)."""
+    if not habilitado():
+        return set()
+    if "_esp" not in g:
+        try:
+            g._esp = {x["name"] for x in api.get("/console/group-settings") if x["especifico"]}
+        except AnalyzerError:
+            g._esp = set()
+    return g._esp
+
+
 def rotulo(info: dict | None) -> str:
     if not info:
         return ""

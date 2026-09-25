@@ -19,7 +19,7 @@
     <tbody>
     {% for r in resumo %}
       <tr {% if r.nome == grupo %}style="background:#eef4fb"{% endif %}>
-        <td><a href="{{ url_for('admin.grupos', grupo=r.nome) }}"><b>{{ r.nome }}</b></a></td>
+        <td><a href="{{ url_for('admin.grupos', grupo=r.nome) }}"><b>{{ r.nome }}</b></a>{% if r.nome in especificos %} <span class="tag" style="font-size:.7rem;border:1px solid var(--bd);border-radius:6px;padding:0 .3rem" title="fica de fora do Bloquear em todas">específico</span>{% endif %}</td>
         <td>{{ 'sim' if r.bloqueia else 'não (liberado)' }}</td>
         <td class="num"><a href="{{ url_for('admin.dominios', grupo=r.nome) }}">{{ r.dominios }}</a></td>
         <td class="num">{{ r.redes }}</td>
@@ -74,6 +74,18 @@
 
 {% if grupo %}
 {% set protegido = grupo in ['default', config.TECHNITIUM_LIBERADOS_GROUP] %}
+{% if grupo != config.TECHNITIUM_LIBERADOS_GROUP %}
+<div class="card">
+  <h2>Uso do grupo <b>{{ grupo }}</b></h2>
+  <form method="post" action="{{ url_for('admin.grupo_config') }}" class="row" style="align-items:center">
+    <input type="hidden" name="grupo" value="{{ grupo }}">
+    <label class="chk" style="margin:0;flex:1"><input type="checkbox" name="especifico" {{ 'checked' if grupo in especificos }}>
+      <span><b>Grupo específico</b> — não entra no <b>“Bloquear em todas”</b> (Decisões, página do domínio). Use para listas temáticas, ex.: <i>Anúncios</i>.
+      Ainda dá para bloquear nele escolhendo a lista manualmente.</span></label>
+    <div style="flex:0"><button class="primary">Salvar</button></div>
+  </form>
+</div>
+{% endif %}
 {% if not protegido %}
 <div class="card">
   <h2>Gerenciar grupo <b>{{ grupo }}</b></h2>

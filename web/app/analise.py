@@ -16,6 +16,7 @@ from flask import (Blueprint, current_app, flash, get_flashed_messages, jsonify,
 from app import analyzer_client as api
 from app import technitium as dnslib
 from app.analyzer_client import AnalyzerError
+from app.empresas import grupos_especificos
 from app.auth import admin_atual, login_required, next_local
 
 analise_bp = Blueprint("analise", __name__, url_prefix="/analise")
@@ -173,7 +174,8 @@ def _grp_ctx(tenants: list[dict]) -> dict | None:
         return None
     ngm = idx["ngm"]
     comp = _compartilham(idx["ativos"], ngm, None)
-    return {"grupos": [{"nome": g, "empresas": comp.get(g, [])} for g in idx["ativos"]],
+    esp = grupos_especificos()
+    return {"grupos": [{"nome": g, "empresas": comp.get(g, []), "especifico": g in esp} for g in idx["ativos"]],
             "por_tenant": {t["id"]: sorted(_grupos_empresa(t, ngm)) for t in tenants}}
 
 
@@ -406,6 +408,7 @@ def _bloqueio_ctx(nome_reg: str, tenant: dict | None, evidencias: list) -> dict 
             "nome": nome_reg, "estado": estado, "grupos_empresa": g_emp,
             "compartilham": _compartilham(g_emp.keys(), ngm, (tenant or {}).get("name")),
             "todos": dnslib.grupos_ativos(cfg),
+            "especificos": sorted(grupos_especificos()),
             "bloqueado_empresa": sorted(set(estado) & set(g_emp)),
             "protegido": any(e.get("kind") == "catalog" and (e.get("data") or {}).get("protected")
                              for e in evidencias or []),
@@ -442,7 +445,9 @@ def _escopo_grupos(escopo: str, tid: int, dominio: str, acao: str) -> list[str]:
     if escopo == "empresa":
         return sorted(set(_grupos_empresa(tenant, ngm)) & ativos)
     if escopo == "todos":
-        return sorted(ativos) if acao == "bloquear" else sorted(dnslib.estado_bloqueio(dominio, cfg))
+        if acao == "bloquear":   # grupos específicos (ex.: Anúncios) não entram em "todos"
+            return sorted(ativos - grupos_especificos())
+        return sorted(dnslib.estado_bloqueio(dominio, cfg))
     return []
 
 

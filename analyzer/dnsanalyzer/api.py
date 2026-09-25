@@ -891,3 +891,38 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
             f"WHERE {' AND '.join(where)} GROUP BY f.name ORDER BY max(q.last_seen) DESC LIMIT %(lim)s", p).fetchall()
         cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
     return {"rows": rows[:limit], "cap": len(rows) > limit, "coletado_ate": cursor}
+
+
+# ------------------------------------------------------------------ configuração dos grupos (console)
+class GroupSettingIn(BaseModel):
+    name: str
+    especifico: bool = False
+    rename_to: Optional[str] = None
+    by: str = ""
+
+
+@app.get("/console/group-settings", dependencies=[Depends(auth)])
+def group_settings_list():
+    with db.conn() as c:
+        return c.execute("SELECT name, especifico, updated_by, updated_at FROM group_settings ORDER BY name").fetchall()
+
+
+@app.put("/console/group-settings", dependencies=[Depends(auth)])
+def group_settings_set(body: GroupSettingIn):
+    """Grava a config do grupo; com rename_to só renomeia (grupo renomeado no Technitium)."""
+    with db.conn() as c:
+        if body.rename_to:
+            c.execute("UPDATE group_settings SET name=%s, updated_by=%s, updated_at=now() WHERE name=%s",
+                      (body.rename_to, body.by or None, body.name))
+        else:
+            c.execute("INSERT INTO group_settings (name, especifico, updated_by) VALUES (%s,%s,%s) "
+                      "ON CONFLICT (name) DO UPDATE SET especifico=EXCLUDED.especifico, "
+                      "updated_by=EXCLUDED.updated_by, updated_at=now()", (body.name, body.especifico, body.by or None))
+        return {"ok": True}
+
+
+@app.delete("/console/group-settings", dependencies=[Depends(auth)])
+def group_settings_delete(name: str):
+    with db.conn() as c:
+        c.execute("DELETE FROM group_settings WHERE name=%s", (name,))
+        return {"ok": True}

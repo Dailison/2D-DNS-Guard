@@ -204,7 +204,8 @@
           <div style="display:flex;gap:.3rem">
             <select name="escopo">
               {% if ge %}<option value="empresa">grupos desta empresa ({{ ge.keys()|join(', ') }})</option>{% endif %}
-              <option value="todos">todos os grupos de bloqueio ({{ blq.todos|length }})</option>
+              {% set esp = blq.especificos or [] %}
+              <option value="todos">todos os grupos de bloqueio ({{ blq.todos|reject('in', esp)|list|length }}){% if esp %} — exceto específicos: {{ esp|join(', ') }}{% endif %}</option>
               {% for g in blq.todos if g not in blq.estado %}<option value="g:{{ g }}">só no grupo {{ g }}</option>{% endfor %}
             </select>
             <button class="danger" style="white-space:nowrap">🔒 Bloquear</button>

@@ -330,6 +330,9 @@ def bloqueios_rem_varios():
     return redirect(url_for("admin.bloqueios", grupo=grupo, q=(request.form.get("q") or "")))
 
 
+LOGS_LIMITE = 1000
+
+
 @admin_bp.get("/logs-dns")
 @login_required
 def logs_dns():
@@ -371,13 +374,16 @@ def logs_dns():
                 redes = [ipaddress.ip_network(cidr, strict=False)]
             except ValueError:
                 ip_like = cidr  # não é CIDR válido: trata como parte do IP (ex.: '10.100')
-        # agrupado varre mais entradas p/ a contagem fazer sentido
-        lim, smax = (4000, 20000) if agrupar else (300, 6000)
+        # Máx. 1000 logs por busca: cada página do Technitium custa segundos (SQLite com
+        # milhões de linhas). Sem filtro feito aqui = 1 chamada; com filtro de domínio/
+        # empresa/faixa (a API não faz) varre até 5000 p/ achar os 1000 resultados.
+        filtro_local = bool(dominio or redes is not None or ip_like)
+        lim, smax = LOGS_LIMITE, (LOGS_LIMITE * 5 if filtro_local else LOGS_LIMITE)
         linhas, scanned, cap = dnslib.consultar_logs(
             mapa, redes=redes, ip_like=ip_like,
             inicio=dnslib.local_para_utc_iso(inicio), fim=dnslib.local_para_utc_iso(fim),
             dominio=dominio or None, ip_exato=ip or None,
-            resposta=resposta or None, limite=lim, scan_max=smax)
+            resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=LOGS_LIMITE)
         # empresa/unidade pelo cadastro (o "empresa" do Technitium é o grupo de bloqueio)
         info = emp.resolver(l.get("ip") for l in linhas)
         for l in linhas:

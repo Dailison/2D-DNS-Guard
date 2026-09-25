@@ -43,7 +43,7 @@
       {% else %}{{ linhas|length }} registro(s){% endif %}
     </h2>
     <span class="mut" style="font-size:.8rem">
-      {{ scanned }} varridos{% if cap %} · <b>limite atingido</b> — refine o período/filtro para ver mais antigos{% endif %}
+      {{ scanned }} varridos{% if cap %} · <b>limite de 1000 por busca</b> — refine o período ou o filtro para ver mais antigos{% endif %}
     </span>
   </div>
   {% macro desbloquear(row) %}

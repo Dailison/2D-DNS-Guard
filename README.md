@@ -9,7 +9,7 @@ automaticamente:** a IA sugere e uma pessoa decide na fila *Decisões*.
 
 | Parte | Onde roda | Pasta |
 |---|---|---|
-| **Console web**: Análise, Decisões, Bloqueios, Liberados, Logs DNS, Empresas, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
+| **Console web**: Análise, Decisões, Grupos, Domínios, Liberados, Logs DNS, Empresas, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
 | **Analisador**: coleta dos logs, regras, Threat Intel, IA (Ollama/Qwen3), alertas, API | VM `10.100.10.4` (systemd + PostgreSQL) | [`analyzer/`](analyzer/) |
 | **Resolvedor/filtro**: Technitium + app Advanced Blocking | VM `10.100.10.15` | (fora do repo) |
 
@@ -20,7 +20,7 @@ clientes ──DNS──► Technitium (10.100.10.15) ──logs──► analis
 ```
 
 O console não tem banco próprio. Análise, empresas (CIDR), **operadores** e as descrições
-dos **liberados** ficam no PostgreSQL do analisador (via API). Bloqueios, liberados e logs
+dos **liberados** ficam no PostgreSQL do analisador (via API). Grupos, domínios bloqueados, liberados e logs
 são lidos e gravados direto no Technitium.
 
 ## Acesso

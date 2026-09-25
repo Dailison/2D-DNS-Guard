@@ -507,7 +507,7 @@ def dominio_liberar(nome):
         if restam:
             flash("Atenção: continua bloqueado por domínio PAI em "
                   + "; ".join(f"{g} ({', '.join(v)})" for g, v in restam.items())
-                  + ". Remover o pai liberaria tudo abaixo dele — faça isso em DNS → Bloqueios se for o caso.", "erro")
+                  + ". Remover o pai liberaria tudo abaixo dele — faça isso em Domínios se for o caso.", "erro")
         _registrar_decisao(tid, dominio_reg, "allowed")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao liberar: {e}", "erro")

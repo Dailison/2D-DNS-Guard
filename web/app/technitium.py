@@ -195,7 +195,7 @@ def _grupo_obj(cfg, nome):
 
 
 def grupos_bloqueio():
-    """Nomes dos grupos (para o seletor da tela de Bloqueios)."""
+    """Nomes dos grupos (seletor das telas Grupos e Domínios)."""
     cfg = _get_config()
     return sorted(g.get("name") for g in cfg.get("groups", []) if g.get("name"))
 
@@ -338,7 +338,7 @@ def bloquear_varios_em(grupos, dominios):
 def liberar_em(grupos, dominio):
     """Remove do `blocked` dos grupos as entradas EXATAS e de SUBDOMÍNIOS do domínio
     (numa única gravação). Entradas de domínio PAI não são removidas (liberariam
-    tudo abaixo delas): voltam em `restam` para o operador decidir em Bloqueios."""
+    tudo abaixo delas): voltam em `restam` para o operador decidir em Domínios."""
     d = _norm_nome(dominio)
     cfg = _get_config()
     removidas, restam, mudou = {}, {}, False

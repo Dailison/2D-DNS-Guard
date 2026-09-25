@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Grupos{% endblock %}
+{% block content %}
+<h1>Grupos <span class="mut" style="font-size:.8rem">· quais empresas e redes usam cada política de bloqueio (Technitium)</span></h1>
+<div class="card">
+  <form method="get" class="row" style="align-items:flex-end">
+    <div><label>Grupo</label>
+      <select name="grupo" onchange="this.form.submit()">
+        {% for g in grupos %}<option value="{{ g }}" {{ 'selected' if grupo==g }}>{{ g }}</option>{% endfor %}
+      </select></div>
+    <div class="mut" style="font-size:.85rem">Selecione o grupo para gerenciar as redes e empresas que usam ele. Os domínios bloqueados ficam em <a href="{{ url_for('admin.dominios', grupo=grupo) }}">Domínios</a>.</div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Grupos <span class="mut" style="font-size:.8rem">· cada rede/empresa usa um grupo; o grupo define o que é bloqueado</span></h2>
+  <table>
+    <thead><tr><th>Grupo</th><th>Filtra?</th><th class="num">Domínios</th><th class="num">Redes</th><th>Empresas</th><th></th></tr></thead>
+    <tbody>
+    {% for r in resumo %}
+      <tr {% if r.nome == grupo %}style="background:#eef4fb"{% endif %}>
+        <td><a href="{{ url_for('admin.grupos', grupo=r.nome) }}"><b>{{ r.nome }}</b></a></td>
+        <td>{{ 'sim' if r.bloqueia else 'não (liberado)' }}</td>
+        <td class="num"><a href="{{ url_for('admin.dominios', grupo=r.nome) }}">{{ r.dominios }}</a></td>
+        <td class="num">{{ r.redes }}</td>
+        <td style="font-size:.85rem">{{ r.empresas|join(', ') or '—' }}</td>
+        <td style="text-align:right;white-space:nowrap"><a href="{{ url_for('admin.dominios', grupo=r.nome) }}">domínios →</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Rede sem grupo usa o <code>default</code>. Quando uma faixa está em mais de um grupo, vale a mais específica (ex.: <code>/32</code> vence <code>/16</code>).</p>
+</div>
+<div class="card">
+  <h2>Criar grupo</h2>
+  <form method="post" action="{{ url_for('admin.bloqueios_grupo') }}" class="row" style="align-items:flex-end">
+    <div><label>Nome do novo grupo</label><input type="text" name="nome" placeholder="Ex.: Empresa X" required></div>
+    <div><label>Clonar bloqueios de (opcional)</label>
+      <select name="clonar_de">
+        <option value="">— vazio (sem bloqueios) —</option>
+        {% for g in grupos %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+      </select></div>
+    <div style="flex:0"><button class="primary">Criar</button></div>
+  </form>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Clonar copia todos os domínios bloqueados do grupo de origem para o novo. Depois, atribua as redes ou empresas ao grupo em <b>Redes</b>, abaixo.</p>
+</div>
+
+{% if grupo %}
+{% set protegido = grupo in ['default', config.TECHNITIUM_LIBERADOS_GROUP] %}
+{% if not protegido %}
+<div class="card">
+  <h2>Gerenciar grupo <b>{{ grupo }}</b></h2>
+  <div class="row" style="align-items:flex-end">
+    <form method="post" action="{{ url_for('admin.bloqueios_renomear') }}" class="row" style="align-items:flex-end;flex:1;margin:0">
+      <input type="hidden" name="grupo" value="{{ grupo }}">
+      <div style="flex:1"><label>Renomear para</label><input type="text" name="novo_nome" value="{{ grupo }}" required></div>
+      <div style="flex:0"><button class="primary">Renomear</button></div>
+    </form>
+    <form method="post" action="{{ url_for('admin.bloqueios_deletar') }}" style="flex:0" onsubmit="return confirm('Deletar o grupo {{ grupo }}? Os domínios bloqueados dele serão perdidos e as redes atribuídas voltam ao filtro padrão.')">
+      <input type="hidden" name="grupo" value="{{ grupo }}">
+      <button class="danger">Deletar grupo</button>
+    </form>
+  </div>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Renomear mantém os bloqueios e reatribui as redes ao novo nome. Deletar remove o grupo e desatribui suas redes (elas voltam a filtrar pelo grupo pai/<code>default</code>).</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Redes de <b>{{ grupo }}</b> <span class="mut" style="font-size:.8rem">· quais IPs/faixas usam este grupo</span></h2>
+  {% if empresas_grupo %}
+  <p style="margin:-.3rem 0 .6rem;font-size:.9rem">Empresas neste grupo ({{ empresas_grupo|length }}):
+    {% for e in empresas_grupo %}<span class="tag" style="font-size:.8rem;border:1px solid var(--bd);border-radius:6px;padding:.05rem .4rem;margin:0 .2rem .2rem 0;display:inline-block">{{ e }}</span>{% endfor %}
+  </p>
+  {% endif %}
+  <form method="post" action="{{ url_for('admin.bloqueios_rede_add') }}" class="row" style="align-items:flex-end">
+    <input type="hidden" name="grupo" value="{{ grupo }}">
+    <div><label>Rede (CIDR) ou IP</label><input type="text" name="rede" placeholder="10.23.0.0/16 ou 10.23.5.10" required></div>
+    <div style="flex:0"><button class="primary">Atribuir</button></div>
+  </form>
+  {% if cadastro %}
+  <form method="post" action="{{ url_for('admin.bloqueios_empresa_add') }}" class="row" style="align-items:flex-end;margin-top:.5rem">
+    <input type="hidden" name="grupo" value="{{ grupo }}">
+    <div><label>ou pela empresa (cadastro de <a href="{{ url_for('analise.empresas') }}">Empresas</a>)</label>
+      <select name="empresa" id="bqEmp" required>
+        <option value="">— escolha a empresa —</option>
+        {% for e in cadastro %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+      </select></div>
+    <div><label>Filial</label><select name="filial" id="bqFil" disabled><option value="">Todas as redes</option></select></div>
+    <div style="flex:0"><button class="primary">Atribuir empresa</button></div>
+  </form>
+  <p class="mut" id="bqRedes" style="font-size:.8rem;margin:.3rem 0 0"></p>
+  <script>
+  (function () {
+    var EMP = {{ cadastro|tojson }}, emp = document.getElementById('bqEmp'), fil = document.getElementById('bqFil'),
+        info = document.getElementById('bqRedes');
+    function redes() {
+      var e = EMP.find(function (x) { return String(x.id) === emp.value; });
+      if (!e) { info.textContent = ''; return; }
+      var rs = e.redes.filter(function (r) { return !fil.value || r.unit === fil.value; });
+      info.textContent = 'Vai atribuir a {{ grupo }}: ' + rs.map(function (r) { return r.cidr + (r.unit ? ' (' + r.unit + ')' : ''); }).join(', ');
+    }
+    emp.addEventListener('change', function () {
+      var e = EMP.find(function (x) { return String(x.id) === emp.value; }), us = [];
+      (e ? e.redes : []).forEach(function (r) { if (r.unit && us.indexOf(r.unit) < 0) us.push(r.unit); });
+      fil.innerHTML = '<option value="">Todas as redes</option>' + us.map(function (u) {
+        return '<option>' + u.replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }) + '</option>';
+      }).join('');
+      fil.disabled = us.length === 0; redes();
+    });
+    fil.addEventListener('change', redes);
+  })();
+  </script>
+  {% endif %}
+  {% if redes %}
+  <table style="margin-top:.6rem">
+    <thead><tr><th>Rede / IP atribuído</th><th>Empresa · unidade</th><th></th></tr></thead>
+    <tbody>
+    {% for r in redes %}
+      <tr>
+        <td><code>{{ r }}</code></td>
+        <td>{% if redes_emp.get(r) %}{{ redes_emp[r] }}{% else %}<span class="mut">sem cadastro — <a href="{{ url_for('analise.empresas') }}">cadastrar</a></span>{% endif %}</td>
+        <td style="text-align:right">
+          <form method="post" action="{{ url_for('admin.bloqueios_rede_rem') }}" style="display:inline" onsubmit="return confirm('Remover {{ r }} de {{ grupo }}? Volta a filtrar pela rede pai.')">
+            <input type="hidden" name="grupo" value="{{ grupo }}"><input type="hidden" name="rede" value="{{ r }}">
+            <button class="danger">Remover</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Nenhuma rede atribuída — este grupo não filtra ninguém ainda. Atribua o CIDR do cliente (ex.: <code>10.23.0.0/16</code>).</p>
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

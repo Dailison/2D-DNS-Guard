@@ -1,6 +1,6 @@
 """Cadastro de empresas (fonte: analisador de DNS) — resolução IP/CIDR -> "Empresa · Unidade".
 
-Usado por Logs DNS e Bloqueios para identificar a empresa mesmo quando várias
+Usado por Logs DNS e Grupos para identificar a empresa mesmo quando várias
 compartilham o mesmo grupo de bloqueio do Technitium. Se o analisador estiver
 fora do ar, as telas seguem funcionando (só sem os nomes).
 """

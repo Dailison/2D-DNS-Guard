@@ -87,7 +87,8 @@
       <a href="{{ url_for('analise.painel') }}" class="{{ 'on' if request.blueprint == 'analise' and request.endpoint not in ('analise.empresas', 'analise.decisoes') }}">Análise (IA)</a>
       <a href="{{ url_for('analise.decisoes') }}" class="{{ 'on' if request.endpoint == 'analise.decisoes' }}">Decisões</a>{% endif %}
       {% if config.TECHNITIUM_ENABLED %}
-      <a href="{{ url_for('admin.bloqueios') }}" class="{{ 'on' if request.endpoint == 'admin.bloqueios' }}">Bloqueios</a>
+      <a href="{{ url_for('admin.grupos') }}" class="{{ 'on' if request.endpoint == 'admin.grupos' }}">Grupos</a>
+      <a href="{{ url_for('admin.dominios') }}" class="{{ 'on' if request.endpoint == 'admin.dominios' }}">Domínios</a>
       <a href="{{ url_for('admin.liberados') }}" class="{{ 'on' if request.endpoint == 'admin.liberados' }}">Liberados</a>
       <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs DNS</a>{% endif %}
       {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">Empresas</a>{% endif %}

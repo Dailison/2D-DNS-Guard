@@ -1,4 +1,4 @@
-"""Telas de DNS do console: Bloqueios (listas por grupo), Liberados (IPs isentos do
+"""Telas de DNS do console: Grupos (quem usa cada política), Domínios (o que cada grupo bloqueia), Liberados (IPs isentos do
 filtro) e Logs DNS — tudo direto no Technitium (app Advanced Blocking)."""
 
 from urllib.parse import quote
@@ -18,7 +18,7 @@ admin_bp = Blueprint("admin", __name__)
 def dashboard():
     if current_app.config.get("ANALYZER_ENABLED"):
         return redirect(url_for("analise.painel"))
-    return redirect(url_for("admin.bloqueios"))
+    return redirect(url_for("admin.grupos"))
 
 
 
@@ -111,50 +111,83 @@ def liberados_revogar():
     return redirect(url_for("admin.liberados"))
 
 
+def _sem_technitium():
+    return render_template("admin/nao_configurado.html", oque="Technitium (TECHNITIUM_URL/TECHNITIUM_TOKEN)")
+
+
 @admin_bp.get("/bloqueios")
 @login_required
 def bloqueios():
+    """Tela antiga (dividida em Grupos e Domínios): links antigos seguem funcionando."""
+    args = request.args.to_dict()
+    destino = "admin.dominios" if (args.get("q") or args.get("qg")) else "admin.grupos"
+    return redirect(url_for(destino, **args))
+
+
+@admin_bp.get("/grupos")
+@login_required
+def grupos():
+    """Grupos de bloqueio: quais redes/empresas usam cada grupo (networkGroupMap)."""
     if not current_app.config.get("TECHNITIUM_ENABLED"):
-        flash("Technitium não configurado (defina TECHNITIUM_URL/TOKEN).", "erro")
-        return render_template("admin/nao_configurado.html", oque="Technitium (TECHNITIUM_URL/TECHNITIUM_TOKEN)")
-    grupos, doms = [], []
+        return _sem_technitium()
+    from app import empresas as emp
+    cfg, nomes = {}, []
     try:
-        grupos = dnslib.grupos_bloqueio()
+        cfg = dnslib._get_config()
+        nomes = sorted(g.get("name") for g in cfg.get("groups", []) if g.get("name"))
     except Exception as e:  # noqa: BLE001
         flash(f"Não foi possível consultar o Technitium: {e}", "erro")
-    grupo = (request.args.get("grupo") or (grupos[0] if grupos else "")).strip()
+    grupo = (request.args.get("grupo") or (nomes[0] if nomes else "")).strip()
+    ngm = cfg.get("networkGroupMap", {})
+    redes_por = {}
+    for k, v in ngm.items():
+        redes_por.setdefault(v, []).append(dnslib.norm_ip(k) or k)
+    rotulos = emp.rotulos_de_redes([r for rs in redes_por.values() for r in rs]) if ngm else {}
+    resumo = [{"nome": g.get("name"), "bloqueia": g.get("enableBlocking", True),
+               "dominios": len(g.get("blocked") or []), "redes": len(redes_por.get(g.get("name"), [])),
+               "empresas": sorted({rotulos[r].split(" · ")[0] for r in redes_por.get(g.get("name"), []) if r in rotulos})}
+              for g in sorted(cfg.get("groups", []), key=lambda g: (g.get("name") or "").lower())]
+    redes = sorted(redes_por.get(grupo, []), key=dnslib._sort_key)
+    redes_emp = {r: rotulos[r] for r in redes if r in rotulos}
+    empresas_grupo = sorted({v.split(" · ")[0] for v in redes_emp.values()})
+    cadastro = sorted(({"id": e["id"], "name": e["name"],
+                        "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
+                       for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
+    return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes,
+                           redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro)
+
+
+@admin_bp.get("/dominios")
+@login_required
+def dominios():
+    """Domínios: o que cada grupo bloqueia (listas do Advanced Blocking)."""
+    if not current_app.config.get("TECHNITIUM_ENABLED"):
+        return _sem_technitium()
+    nomes, doms = [], []
+    try:
+        nomes = dnslib.grupos_bloqueio()
+    except Exception as e:  # noqa: BLE001
+        flash(f"Não foi possível consultar o Technitium: {e}", "erro")
+    grupo = (request.args.get("grupo") or (nomes[0] if nomes else "")).strip()
     q = (request.args.get("q") or "").strip()
     qg = (request.args.get("qg") or "").strip()
-    redes = []
-    total = 0
-    limite = 1000
+    total, limite = 0, 1000
     if grupo:
         try:
             doms = dnslib.bloqueados(grupo, q or None) or []
             total = len(doms)
             doms = doms[:limite]  # cap p/ não travar a tela (listas com dezenas de milhares)
-            redes = dnslib.redes_do_grupo(grupo)
         except Exception as e:  # noqa: BLE001
             flash(f"Falha ao listar bloqueios: {e}", "erro")
-    # Busca global (em todas as listas)
     globais, globais_total, globais_cap = [], 0, False
     if qg:
         try:
             globais, globais_total, globais_cap = dnslib.buscar_em_todos(qg)
         except Exception as e:  # noqa: BLE001
             flash(f"Falha na busca global: {e}", "erro")
-    # empresa dona de cada rede do grupo (cadastro de empresas) — vários clientes podem
-    # compartilhar o mesmo grupo de bloqueio
-    from app import empresas as emp
-    redes_emp = emp.rotulos_de_redes(redes) if redes else {}
-    empresas_grupo = sorted({v.split(" · ")[0] for v in redes_emp.values()})
-    cadastro = sorted(({"id": e["id"], "name": e["name"],
-                        "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
-                       for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
-    return render_template("admin/bloqueios.html", grupos=grupos, grupo=grupo, q=q,
-                           doms=doms, redes=redes, total=total, limite=limite, qg=qg,
-                           globais=globais, globais_total=globais_total, globais_cap=globais_cap,
-                           redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro)
+    return render_template("admin/dominios.html", grupos=nomes, grupo=grupo, q=q, doms=doms, total=total,
+                           limite=limite, qg=qg, globais=globais, globais_total=globais_total,
+                           globais_cap=globais_cap)
 
 
 @admin_bp.post("/bloqueios/add")
@@ -184,7 +217,7 @@ def bloqueios_add():
             flash(f"{add} adicionado(s), {ja} já existia(m). Total do grupo: {total}.", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao adicionar: {e}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=grupo))
+    return redirect(url_for("admin.dominios", grupo=grupo))
 
 
 @admin_bp.post("/bloqueios/limpar")
@@ -199,7 +232,7 @@ def bloqueios_limpar():
             flash(f"Lista de {grupo} limpa ({n} domínio(s) removido(s)).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao limpar: {e}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=grupo))
+    return redirect(url_for("admin.dominios", grupo=grupo))
 
 
 @admin_bp.post("/bloqueios/renomear")
@@ -211,11 +244,11 @@ def bloqueios_renomear():
         n, msg = dnslib.renomear_grupo(velho, novo)
         if n:
             flash(f"Grupo '{velho}' {msg} para '{n}'.", "ok")
-            return redirect(url_for("admin.bloqueios", grupo=n))
+            return redirect(url_for("admin.grupos", grupo=n))
         flash(msg, "erro")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao renomear: {e}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=velho))
+    return redirect(url_for("admin.grupos", grupo=velho))
 
 
 @admin_bp.post("/bloqueios/deletar")
@@ -227,11 +260,11 @@ def bloqueios_deletar():
         if n:
             extra = f" ({info} rede(s) desatribuída(s))" if info else ""
             flash(f"Grupo '{n}' removido{extra}.", "ok")
-            return redirect(url_for("admin.bloqueios"))
+            return redirect(url_for("admin.grupos"))
         flash(info, "erro")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao remover grupo: {e}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=grupo))
+    return redirect(url_for("admin.grupos", grupo=grupo))
 
 
 @admin_bp.post("/bloqueios/grupo")
@@ -243,11 +276,11 @@ def bloqueios_grupo():
         n, msg = dnslib.criar_grupo(nome, clonar)
         if n:
             flash(f"Grupo '{n}' {msg}.", "ok")
-            return redirect(url_for("admin.bloqueios", grupo=n))
+            return redirect(url_for("admin.grupos", grupo=n))
         flash(msg, "erro")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao criar grupo: {e}", "erro")
-    return redirect(url_for("admin.bloqueios"))
+    return redirect(url_for("admin.grupos"))
 
 
 @admin_bp.post("/bloqueios/rede")
@@ -263,7 +296,7 @@ def bloqueios_rede_add():
             flash(ant, "erro")   # ant carrega a mensagem de erro quando cidr é None
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao atribuir rede: {e}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=grupo))
+    return redirect(url_for("admin.grupos", grupo=grupo))
 
 
 @admin_bp.post("/bloqueios/empresa")
@@ -293,7 +326,7 @@ def bloqueios_empresa_add():
             current_app.logger.info("DNS: %s atribuiu %s (%s) a %s", admin_atual().email, nome, redes, grupo)
         except Exception as ex:  # noqa: BLE001
             flash(f"Falha ao atribuir: {ex}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=grupo))
+    return redirect(url_for("admin.grupos", grupo=grupo))
 
 
 @admin_bp.post("/bloqueios/rede/rem")
@@ -306,7 +339,7 @@ def bloqueios_rede_rem():
             flash(f"Rede {r} removida de {grupo} (volta a filtrar pela rede pai).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao remover rede: {e}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=grupo))
+    return redirect(url_for("admin.grupos", grupo=grupo))
 
 
 @admin_bp.post("/bloqueios/rem")
@@ -321,8 +354,8 @@ def bloqueios_rem():
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao remover: {e}", "erro")
     if qg:  # veio da busca global: volta pra ela
-        return redirect(url_for("admin.bloqueios", qg=qg))
-    return redirect(url_for("admin.bloqueios", grupo=grupo, q=(request.form.get("q") or "")))
+        return redirect(url_for("admin.dominios", qg=qg))
+    return redirect(url_for("admin.dominios", grupo=grupo, q=(request.form.get("q") or "")))
 
 
 @admin_bp.post("/bloqueios/rem-todos")
@@ -342,7 +375,7 @@ def bloqueios_rem_todos():
         flash(f"Falha ao remover de todas as listas: {e}", "erro")
     if next_local(voltar):  # veio da tela de logs: volta pra ela
         return redirect(voltar)
-    return redirect(url_for("admin.bloqueios", qg=qg))
+    return redirect(url_for("admin.dominios", qg=qg))
 
 
 @admin_bp.post("/bloqueios/rem-varios")
@@ -360,7 +393,7 @@ def bloqueios_rem_varios():
             flash(f"{rem} domínio(s) removido(s) de {grupo}. Total restante: {total}.", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao remover em massa: {e}", "erro")
-    return redirect(url_for("admin.bloqueios", grupo=grupo, q=(request.form.get("q") or "")))
+    return redirect(url_for("admin.dominios", grupo=grupo, q=(request.form.get("q") or "")))
 
 
 LOGS_LIMITE = 1000

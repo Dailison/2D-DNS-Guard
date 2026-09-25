@@ -199,7 +199,7 @@ def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE llm_pending AND NOT locked
-               AND (classification = 'SUSPEITO' OR NOT dominio_decidido(id))   -- decidido: IA não reavalia
+               AND NOT dominio_decidido(id)   -- decidido na tela de Decisões: IA nunca mais reavalia
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY (classification = 'SUSPEITO') DESC, total_queries DESC
              LIMIT 1 FOR UPDATE SKIP LOCKED)
@@ -311,7 +311,7 @@ def _buscar_antes(d: dict) -> bool:
 
 
 ETAPA1_PENDENTE = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "
-                   "AND (classification = 'SUSPEITO' OR NOT dominio_decidido(id))")
+                   "AND NOT dominio_decidido(id)")
 
 
 def _claim_etapa2(c) -> dict | None:

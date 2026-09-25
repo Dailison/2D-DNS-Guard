@@ -3,6 +3,7 @@
   <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">{% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
   <span class="mut" style="font-size:.85rem"><b id="filaN">0</b> selecionado(s)</span>
   <button type="button" class="mini blk" onclick="filaAcao('bloquear')">Bloquear selecionados…</button>
+  <button type="button" class="mini blk" onclick="filaAcao('todas')" title="bloqueia os selecionados em todas as listas, sem perguntar quais">Bloquear selecionados em todas</button>
   <button type="button" class="mini ok" onclick="filaAcao('liberar')">Manter liberados</button>
 </form>
 <div class="tbl"><table>
@@ -23,6 +24,7 @@
       <td class="mut" style="white-space:nowrap">{{ d.first_seen|dt_sp }}</td>
       <td style="white-space:nowrap">
         <button type="button" class="mini blk" data-itens='{{ itens|tojson }}' onclick="abrirBloqueio(this)">Bloquear…</button>
+        <button type="button" class="mini blk" data-itens='{{ itens|tojson }}' onclick="bloquearTodas(this)" title="bloquear em todas as listas">⛔ Todas</button>
         <form method="post" action="{{ url_for('analise.decisoes_lote') }}" style="display:inline" data-ajax>
           <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">{% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
           {% for it in itens %}<input type="hidden" name="itens" value="{{ it }}">{% endfor %}
@@ -42,6 +44,7 @@ function filaAcao(acao) {
   const itens = [].concat.apply([], filaSel().map(function (c) { return JSON.parse(c.dataset.itens); }));
   if (!itens.length) { alert("Selecione pelo menos um domínio."); return; }
   if (acao === "bloquear") { abrirBloqueio(itens); return; }
+  if (acao === "todas") { bloquearTodas(itens); return; }
   if (!confirm("Manter liberados " + filaSel().length + " domínio(s)? Eles saem da fila.")) return;
   const f = document.getElementById("filaLote");
   f.querySelectorAll('input[name="itens"]').forEach(function (i) { i.remove(); });

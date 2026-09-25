@@ -47,6 +47,24 @@
     dlg.querySelectorAll('input[name="grupos"]').forEach(function (c) { c.checked = pre.has(c.value); });
     dlg.showModal();
   };
+  // Bloquear direto em TODAS as listas, sem abrir o diálogo (confirma antes)
+  window.bloquearTodas = function (src) {
+    const itens = Array.isArray(src) ? src : JSON.parse(src.dataset.itens || "[]");
+    if (!itens.length) return;
+    const nomes = Array.from(new Set(itens.map(function (it) { return it.slice(it.indexOf("|") + 1); })));
+    const f = dlg.querySelector("form"), cs = f.querySelectorAll('input[name="grupos"]');
+    if (!confirm("Bloquear " + (nomes.length === 1 ? nomes[0] : nomes.length + " domínio(s)") +
+                 " em TODAS as " + cs.length + " listas?")) return;
+    window._blqSrc = Array.isArray(src) ? null : src;
+    const box = document.getElementById("dlgItens");
+    box.innerHTML = "";
+    itens.forEach(function (it) {
+      const inp = document.createElement("input");
+      inp.type = "hidden"; inp.name = "itens"; inp.value = it; box.appendChild(inp);
+    });
+    cs.forEach(function (c) { c.checked = true; });
+    f.dataset.confirmado = "1"; f.requestSubmit();
+  };
   window.dlgTodas = function (f) {
     const cs = f.querySelectorAll('input[name="grupos"]');
     cs.forEach(function (c) { c.checked = true; });

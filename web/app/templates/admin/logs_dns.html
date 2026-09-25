@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Logs DNS{% endblock %}
+{% block content %}
+<h1>Logs DNS <span class="mut" style="font-size:.8rem">· Technitium, com empresa por IP</span></h1>
+
+<div class="card">
+  <form method="get" class="row">
+    <div><label>Empresa</label>
+      <select name="empresa">
+        <option value="">— Todas —</option>
+        {% for e in lista_empresas %}<option value="{{ e.id }}" {{ 'selected' if empresa == e.id|string }}>{{ e.name }}{{ ' (sem cadastro)' if e.auto_created }}</option>{% endfor %}
+      </select></div>
+    <div><label>Grupo de bloqueio</label>
+      <select name="grupo">
+        <option value="">— Todos —</option>
+        {% for g in grupos %}<option value="{{ g }}" {{ 'selected' if grupo == g }}>{{ g }}</option>{% endfor %}
+      </select></div>
+    <div><label>Faixa / parte do IP</label><input type="text" name="cidr" value="{{ cidr }}" placeholder="10.100 ou 10.70.0.0/16"></div>
+    <div><label>IP exato</label><input type="text" name="ip" value="{{ ip }}" placeholder="10.70.20.9"></div>
+    <div><label>Domínio (contém)</label><input type="text" name="dominio" value="{{ dominio }}" placeholder="ex.: jogos"></div>
+    <div><label>Resposta (tipo)</label>
+      <select name="resposta">
+        <option value="">— Todas —</option>
+        {% for r in respostas %}<option value="{{ r }}" {{ 'selected' if resposta==r }}>{{ r }}</option>{% endfor %}
+      </select></div>
+    <div><label>Código (rcode)</label>
+      <select name="rcode">
+        <option value="">— Todos —</option>
+        {% for r in rcodes %}<option value="{{ r }}" {{ 'selected' if rcode==r }}>{{ r }}</option>{% endfor %}
+      </select></div>
+    <div><label>Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
+    <div><label>Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
+    <div><label>Vista</label>
+      <select name="vista" onchange="this.form.submit()">
+        <option value="agrupado" {{ 'selected' if agrupar }}>Agrupado por domínio</option>
+        <option value="detalhado" {{ 'selected' if not agrupar }}>Detalhado (cada acesso)</option>
+      </select></div>
+    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Filtrar</button></div>
+  </form>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0"><b>Empresa</b> vem do <a href="{{ url_for('analise.empresas') }}">cadastro de empresas</a> (todas as unidades/redes dela); <b>Grupo de bloqueio</b> é a política do Technitium (pode reunir várias empresas). <b>Faixa / parte do IP</b> aceita CIDR (<code>10.70.0.0/16</code>) ou um pedaço do IP (<code>10.100</code> traz todos os IPs que contêm isso). <b>Resposta</b> = como o Technitium respondeu (<code>Blocked</code> = bloqueado pelo filtro, <code>Cached</code>, <code>Recursive</code>…). Reduza o período para buscas mais fundas. Horários no fuso de São Paulo (GMT-3).</p>
+  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0">Nas linhas <b style="color:#dc2626">Blocked</b>, a coluna <b>Desbloquear</b> mostra o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME <code>↳</code>). O botão <code>✕</code> remove esse domínio do <code>blocked[]</code> de <b>todos os grupos</b> de uma vez.</p>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem">
+    <h2 style="margin:0">
+      {% if agrupar %}{{ agrupado|length }} domínio(s) <span class="mut" style="font-size:.8rem">· {{ linhas|length }} acessos</span>
+      {% else %}{{ linhas|length }} registro(s){% endif %}
+    </h2>
+    <span class="mut" style="font-size:.8rem">
+      {{ scanned }} varridos{% if cap %} · <b>limite atingido</b> — refine o período/filtro para ver mais antigos{% endif %}
+    </span>
+  </div>
+  {% macro desbloquear(row) %}
+    {% if row.resposta == 'Blocked' or row.blocked %}
+      {% set alvos = row.culpados if row.culpados else [row.dominio] %}
+      {% for c in alvos %}
+        <form method="post" action="{{ url_for('admin.bloqueios_rem_todos') }}" style="display:inline-block;margin:0 .2rem .2rem 0"
+              onsubmit="return confirm('Remover {{ c }} da lista de bloqueio de TODOS os grupos?')">
+          <input type="hidden" name="dominios" value="{{ c }}">
+          <input type="hidden" name="voltar" value="{{ voltar }}">
+          <button class="danger" title="Remove {{ c }} do blocked[] de todos os grupos" style="padding:.15rem .5rem;font-size:.78rem">✕ {{ c }}</button>
+        </form>
+      {% endfor %}
+    {% else %}<span class="mut">—</span>{% endif %}
+  {% endmacro %}
+  {% if agrupar %}
+  <table>
+    <thead><tr><th>Último acesso</th><th>Domínio</th><th>Entradas</th><th>Clientes</th><th>Empresas</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <tbody>
+    {% for a in agrupado %}
+      <tr>
+        <td class="mut" style="white-space:nowrap">{{ (a.ultima or '')[:19]|replace('T',' ') }}</td>
+        <td>{{ a.dominio }}
+          {% if a.blocked and a.answer and 'CNAME' in a.answer %}<br><span class="mut" style="font-size:.75rem">↳ {{ a.answer }}</span>{% endif %}
+        </td>
+        <td><b>{{ a.n }}</b></td>
+        <td class="mut">{{ a.nclientes }}</td>
+        <td class="mut" style="font-size:.85rem">{% if a.empresas %}{{ a.empresas[:3]|join(', ') }}{% if a.empresas|length > 3 %} <span title="{{ a.empresas|join(', ') }}">+{{ a.empresas|length - 3 }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td class="mut">{% if a.blocked %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% else %}{{ a.tipo }}{% endif %}</td>
+        <td style="white-space:nowrap">{{ desbloquear(a) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="mut">Nenhum registro no filtro/período.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <table>
+    <thead><tr><th>Quando (São Paulo)</th><th>Cliente</th><th>Domínio</th><th>Tipo</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <tbody>
+    {% for l in linhas %}
+      <tr>
+        <td class="mut" style="white-space:nowrap">{{ (l.timestamp or '')[:19]|replace('T',' ') }}</td>
+        <td><code>{{ l.ip }}</code>{% if l.empresa and l.empresa != '—' %} <b style="font-size:.85rem">· {{ l.empresa }}</b>{% endif %}
+          {% if l.grupo %}<br><span class="mut" style="font-size:.75rem">grupo: {{ l.grupo }}</span>{% endif %}</td>
+        <td>{{ l.dominio }}
+          {% if l.resposta == 'Blocked' and l.answer and 'CNAME' in l.answer %}
+            <br><span class="mut" style="font-size:.75rem">↳ {{ l.answer }}</span>
+          {% endif %}
+        </td>
+        <td class="mut">{{ l.tipo }}</td>
+        <td class="mut">
+          {% if l.resposta == 'Blocked' %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% else %}{{ l.resposta }}{% endif %}
+          {% if l.rcode and l.rcode != 'NoError' %} · {{ l.rcode }}{% endif %}
+        </td>
+        <td style="white-space:nowrap">{{ desbloquear(l) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="mut">Nenhum registro no filtro/período.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

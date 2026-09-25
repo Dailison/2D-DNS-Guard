@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar · 2D DNS Guard</title>
+  <style>
+    :root{--brand:#0f72bc;--brand-2:#1483d4;--navy:#1b3a6b;--navy-deep:#0e1f42;--ink:#0f1b2e;--mut:#64748b;--bd:#e6e9ef}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,'Segoe UI',Roboto,sans-serif;color:var(--ink);min-height:100vh;
+         display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.2rem;
+         background:radial-gradient(1200px 600px at 50% -10%,#215fa8 0%,transparent 60%),
+                    linear-gradient(160deg,var(--navy) 0%,var(--navy-deep) 70%,#0a1631 100%);}
+    .box{position:relative;background:#fff;padding:1.8rem 1.6rem;border-radius:18px;width:min(92vw,360px);
+         box-shadow:0 20px 60px rgba(6,16,40,.45);overflow:hidden}
+    .box::before{content:"";position:absolute;top:0;left:0;right:0;height:5px;
+         background:linear-gradient(90deg,var(--brand-2),var(--brand),var(--navy))}
+    .logo{width:150px;height:auto;display:block;margin:.2rem auto 1rem}
+    h1{font-size:1.05rem;margin:0 0 1rem;text-align:center;color:var(--navy)}
+    label{display:block;font-size:.82rem;color:#334155;margin:.7rem 0 .2rem;font-weight:600}
+    input{width:100%;padding:.75rem .8rem;border:1.5px solid var(--bd);border-radius:11px;font:inherit;background:#fbfcfe;
+          transition:border-color .15s,box-shadow .15s}
+    input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(15,114,188,.15);background:#fff}
+    button{width:100%;margin-top:1.1rem;padding:.8rem;color:#fff;border:0;border-radius:11px;font:inherit;font-weight:700;
+           cursor:pointer;background:linear-gradient(135deg,var(--brand-2),var(--brand) 55%,var(--navy));
+           box-shadow:0 8px 20px rgba(15,114,188,.35)}
+    button:active{transform:translateY(1px)}
+    .flash{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:.6rem .8rem;border-radius:11px;font-size:.9rem;margin-bottom:.6rem}
+    footer{margin-top:1.1rem;font-size:.8rem;color:#a9b8d4}
+    footer a{color:#dbe6f7;text-decoration:none;font-weight:700}
+  </style>
+</head>
+<body>
+  <form class="box" method="post" action="{{ url_for('auth.login_post', next=request.args.get('next')) }}">
+    {% include "_logo.html" %}
+    <h1>DNS Guard · Protective DNS</h1>
+    {% with msgs = get_flashed_messages() %}{% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}{% endwith %}
+    <label>E-mail</label>
+    <input type="email" name="email" required autofocus>
+    <label>Senha</label>
+    <input type="password" name="senha" required>
+    <button type="submit">Entrar</button>
+    {% if config.SSO_LOGIN_URL and request.args.get('local') %}
+    <p style="margin:.8rem 0 0;font-size:.85rem;text-align:center"><a href="{{ url_for('auth.login') }}" style="color:var(--brand)">Entrar com o login único 2D</a></p>
+    {% endif %}
+  </form>
+  <footer>⚡ powered by <a href="https://www.2dtecnologia.com" target="_blank" rel="noopener">2D Tecnologia</a></footer>
+</body>
+</html>

@@ -1,0 +1,60 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+{% set q = (stats.queue or {}) %}{% set llm = (health.llm or {}) %}
+<div class="m-grid">
+  <div class="metric"><div class="n" style="font-size:1rem;padding-top:.5rem;color:{{ '#16a34a' if llm.ok else '#b91c1c' }}">{{ '● no ar' if llm.ok else '● fora' }}</div><div class="l">IA ({{ llm.model or '?' }})</div></div>
+  <div class="metric"><div class="n">{{ q.dominios or 0 }}</div><div class="l">Domínios conhecidos</div></div>
+  <div class="metric"><div class="n">{{ q.classificados_ia or 0 }}</div><div class="l">Classificados pela IA</div></div>
+  <div class="metric"><div class="n">{{ q.fila_ia or 0 }}</div><div class="l">Na fila da IA</div></div>
+  <div class="metric"><div class="n">{{ q.ia_24h or 0 }}</div><div class="l">Análises da IA (24h)</div></div>
+  {% set wh = (health.webhook or {}) %}
+  <div class="metric" title="{{ ('avisa: ' ~ (wh.kinds|join(', '))) if wh.enabled else 'defina WEBHOOK_URLS em /etc/2d-dnsanalyzer/analyzer.env na VM' }}"><div class="n" style="font-size:1rem;padding-top:.5rem;color:{{ '#16a34a' if wh.enabled else '#94a3b8' }}">{{ '● ligado' if wh.enabled else '○ não configurado' }}</div><div class="l">Webhook da TI</div></div>
+</div>
+{% if not llm.ok and llm.detail %}<div class="flash erro">IA: {{ llm.detail }}</div>{% endif %}
+
+<div class="card">
+  <h2>Fontes de Threat Intelligence <span class="mut" style="font-size:.8rem;font-weight:400">· baixadas e comparadas localmente (nenhum log sai da rede)</span></h2>
+  <table>
+    <thead><tr><th>Fonte</th><th>Tipo</th><th>Confiança</th><th class="num">Peso</th><th class="num">Entradas</th><th>Atualizada</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for s in fontes %}
+      <tr class="{{ 'muted-row' if not s.enabled }}">
+        <td>{{ s.label }}<br><span class="mut" style="font-size:.72rem">{{ s.license_note }}</span></td>
+        <td class="mut">{{ s.threat }}</td><td class="mut">{{ s.confidence }}</td>
+        <td class="num">
+          <form method="post" action="{{ url_for('analise.fonte_editar', sid=s.id) }}" style="display:flex;gap:.2rem;justify-content:flex-end">
+            <input type="number" name="peso" value="{{ s.weight }}" min="0" max="100" style="width:64px;padding:.2rem .3rem">
+            <button class="btn" style="padding:.2rem .4rem;font-size:.75rem">ok</button>
+          </form>
+        </td>
+        <td class="num">{{ '{:,}'.format(s.entries or 0).replace(',', '.') }}</td>
+        <td class="mut" style="white-space:nowrap">{{ s.last_fetch|dt_sp }}</td>
+        <td class="mut" style="font-size:.8rem">{{ s.last_status or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('analise.fonte_editar', sid=s.id) }}">
+            <button class="btn" name="ativo" value="{{ '0' if s.enabled else '1' }}" style="padding:.2rem .5rem;font-size:.8rem">{{ 'Desligar' if s.enabled else 'Ligar' }}</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">Só fontes de confiança <b>alta</b> podem levar um domínio a MALICIOSO. As de confiança média/baixa são sinais: infraestrutura protegida (Microsoft, bancos, gov.br, CDNs…) e domínios populares nunca são condenados só por lista.</p>
+</div>
+
+<div class="card">
+  <h2>Últimas execuções</h2>
+  <table>
+    <thead><tr><th>Etapa</th><th>Início</th><th>OK</th><th>Resultado</th></tr></thead>
+    <tbody>
+    {% for r in stats.last_runs or [] %}
+      <tr><td>{{ r.kind }}</td><td class="mut" style="white-space:nowrap">{{ r.started_at|dt_sp }}</td>
+          <td>{{ '✔' if r.ok else ('✘' if r.ok is sameas false else '…') }}</td>
+          <td class="mut" style="font-size:.78rem">{{ r.error or (r.stats|tojson if r.stats else '') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">Coleta até: {{ stats.cursor.value|dt_sp if stats.cursor else '—' }} (o Technitium grava os logs em lote; a coleta roda com ~2 min de atraso de propósito).</p>
+</div>
+{% endblock %}

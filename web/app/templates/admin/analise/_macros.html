@@ -1,0 +1,82 @@
+{# importar com: {% import "admin/analise/_macros.html" as m with context %} #}
+{% macro badge(c) -%}
+  <span class="cls {{ c or 'PENDENTE' }}">{{ CLASS_LABEL.get(c, c) if c else 'Pendente' }}</span>
+{%- endmacro %}
+
+{% macro riskbar(v) -%}
+  {%- set v = v or 0 -%}
+  <div class="bar" title="risco {{ v }}"><span style="width:{{ v }}%;background:{{ '#b91c1c' if v >= 75 else '#ea580c' if v >= 50 else '#d97706' if v >= 30 else '#16a34a' }}"></span></div>
+{%- endmacro %}
+
+{% macro dom(n) -%}
+  <a href="{{ url_for('analise.dominio', nome=n, t=tid) }}">{{ n }}</a>
+{%- endmacro %}
+
+{% macro pc(ip, t=none) -%}
+  <a href="{{ url_for('analise.computador', ip=ip, t=(t if t is not none else tid)) }}"><code>{{ ip }}</code></a>
+{%- endmacro %}
+
+{% macro emp(nome, t) -%}
+  <a class="mut" style="font-size:.8rem;text-decoration:none" href="{{ url_for('analise.painel', t=t) }}">{{ nome }}</a>
+{%- endmacro %}
+
+{% macro origem(by, pending) -%}
+  {%- set lbl = {'llm': 'IA', 'rules': 'regras', 'catalog': 'catálogo', 'internal': 'interno', 'manual': 'manual'} -%}
+  <span class="tag">{{ lbl.get(by, by or '—') }}{{ ' · na fila da IA' if pending }}</span>
+{%- endmacro %}
+
+{% macro pct(v) -%}{{ ((v or 0) * 100)|round|int }}%{%- endmacro %}
+
+{# categoria do site (vocabulário fixo) — 'scats' vem da rota #}
+{% macro cat(code) -%}
+  {%- if code -%}
+    {%- set c = (scats or {}).get(code, {}) -%}
+    <a class="catg{{ ' nw' if c.nonwork }}" href="{{ url_for('analise.dominios', t=tid, categoria=code) }}"
+       title="ver todos desta categoria">{{ c.label or code }}</a>
+  {%- else -%}<span class="catg pend" title="a IA ainda vai categorizar">aguardando IA</span>{%- endif -%}
+{%- endmacro %}
+
+{# status atual no Technitium, no escopo da empresa ('st' vem da rota: {nome: [grupos]}) #}
+{% macro status(n) -%}
+  {%- if st is not defined or n not in st -%}<span class="mut">—</span>
+  {%- elif st[n] -%}<span class="stt blk" title="bloqueado em: {{ st[n]|join(', ') }}">🔒 Bloqueado{% if todos %} · {{ st[n]|length }} grupo(s){% endif %}</span>
+  {%- else -%}<span class="stt ok" title="{{ 'não está em nenhuma lista de bloqueio' }}">🔓 Liberado</span>{%- endif -%}
+{%- endmacro %}
+
+{# botão rápido bloquear/desbloquear; volta para a página atual #}
+{% macro acao(n) -%}
+  {%- if st is defined and n in st -%}
+    {%- if st[n] and todos -%}
+      <a class="mini ok" href="{{ url_for('analise.dominio', nome=n, t=tid) }}#bloqueio" title="escolha onde desbloquear">Desbloquear…</a>
+    {%- elif st[n] -%}
+      <form method="post" action="{{ url_for('analise.dominio_liberar', nome=n) }}" style="display:inline"
+            onsubmit="return confirm('Desbloquear {{ n }} para {{ tenant.name }}?')">
+        <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ n }}">
+        <input type="hidden" name="escopo" value="empresa">
+        <input type="hidden" name="voltar" value="{{ request.full_path }}">
+        <button class="mini ok">Desbloquear</button></form>
+    {%- elif grp is defined and grp -%}
+      <button type="button" class="mini blk" data-itens='{{ [(tid ~ "|" ~ n)]|tojson }}' onclick="abrirBloqueio(this)">Bloquear…</button>
+    {%- else -%}
+      <a class="mini blk" href="{{ url_for('analise.dominio', nome=n, t=tid) }}#bloqueio">Bloquear…</a>
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{# recomendação para ambiente corporativo (BLOQUEAR / LIBERAR / REVISAR) #}
+{% macro rec(d, full=false) -%}
+  {%- if d.corp_action -%}
+    {%- set lbl = {'BLOQUEAR': 'Bloquear', 'LIBERAR': 'Liberar', 'REVISAR': 'Revisar'} -%}
+    {%- set org = {'ia': 'IA', 'politica': 'política', 'manual': 'manual'} -%}
+    <span class="rec {{ d.corp_action }}" title="{{ d.corp_reason or '' }} ({{ org.get(d.corp_by, d.corp_by) }})">{{ lbl.get(d.corp_action, d.corp_action) }}</span>
+    {%- if full and d.corp_reason %}<br><span class="mut" style="font-size:.76rem">{{ d.corp_reason }} <i>· {{ org.get(d.corp_by, d.corp_by) }}</i></span>{% endif -%}
+  {%- else -%}<span class="mut" style="font-size:.75rem" title="aguardando a IA">—</span>{%- endif -%}
+{%- endmacro %}
+
+{# empresa(s) de uma linha agrupada: 1 = link; várias = "Diversas (N)" com a lista no hover #}
+{% macro empresas(lista) -%}
+  {%- if lista|length == 1 -%}{{ emp(lista[0].name, lista[0].id) }}
+  {%- else -%}<span class="diversas" tabindex="0">Diversas ({{ lista|length }})<span class="dv-pop">
+    {%- for e in lista %}<a href="{{ url_for('analise.painel', t=e.id) }}">{{ e.name }}</a>{% endfor -%}
+  </span></span>{%- endif -%}
+{%- endmacro %}

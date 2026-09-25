@@ -1,0 +1,23 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+<div class="card">
+  <h2>{{ lista|length }} computador(es) <span class="mut" style="font-size:.8rem;font-weight:400">· ordenados por comportamento anormal</span></h2>
+  <table>
+    <thead><tr><th>Computador</th><th>Score</th><th class="num">Consultas</th><th class="num">Domínios</th><th class="num">% não trab.</th><th class="num">Suspeitos</th><th class="num">Maliciosos</th><th class="num">Novos 24h</th><th class="num">Alertas</th><th>Último</th></tr></thead>
+    <tbody>
+    {% for p in lista %}
+      <tr class="{{ 'muted-row' if p.anomaly_score < 20 }}">
+        <td>{{ m.pc(p.ip, p.tenant_id) }}{% if todos %}<br>{{ m.emp(p.tenant_name, p.tenant_id) }}{% endif %}{% if p.label %}<br><span class="mut" style="font-size:.75rem">{{ p.label }}</span>{% endif %}</td>
+        <td>{{ m.riskbar(p.anomaly_score) }}<span class="mut" style="font-size:.75rem">{{ p.anomaly_score }}</span></td>
+        <td class="num">{{ p.queries }}</td><td class="num">{{ p.domains }}</td>
+        <td class="num">{{ m.pct(p.nonwork_share) }}</td><td class="num">{{ p.susp or 0 }}</td><td class="num">{{ p.mal or 0 }}</td>
+        <td class="num">{{ p.new_domains_24h }}</td><td class="num">{{ p.open_alerts }}</td>
+        <td class="mut" style="white-space:nowrap">{{ p.last_seen|dt_sp }}</td>
+      </tr>
+    {% else %}<tr><td colspan="10" class="mut">Nenhum computador com consultas no período.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">Computadores atrás de NAT aparecem como o IP do roteador do site: para ver cada máquina, o DNS precisa chegar ao Technitium sem NAT.</p>
+</div>
+{% endblock %}

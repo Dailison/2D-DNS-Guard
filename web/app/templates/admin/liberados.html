@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Liberados (DNS){% endblock %}
+{% block content %}
+<h1>Liberados (DNS) <span class="mut" style="font-size:.8rem">· isenção de filtro no Technitium</span></h1>
+<p class="mut" style="margin:-.6rem 0 1rem">IPs aqui são <b>isentos do filtro DNS</b> (grupo <code>{{ grupo }}</code> — não bloqueia nada). Revogar faz o IP voltar a filtrar pela rede dele.</p>
+
+<div class="card">
+  <h2>Liberar IP</h2>
+  <form method="post" action="{{ url_for('admin.liberados_liberar') }}" class="row">
+    <div><label>IP ou faixa (CIDR)</label><input type="text" name="ip" placeholder="10.100.10.20 ou 10.100.10.0/24" required></div>
+    <div><label>Empresa</label><input type="text" name="empresa" placeholder="Nome da empresa"></div>
+    <div><label>Departamento</label><input type="text" name="departamento" placeholder="Ex.: Recepção"></div>
+    <div><label>Usuário</label><input type="text" name="usuario" placeholder="Ex.: João"></div>
+    <div><label>Tipo</label>
+      <select name="tipo">
+        <option value="">—</option>
+        <option value="Computador">Computador</option>
+        <option value="Celular">Celular</option>
+      </select></div>
+    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Liberar</button></div>
+  </form>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">IP único vira <code>/32</code> automaticamente. Empresa/departamento/usuário são só organização (ficam no portal; o Technitium guarda só o IP).</p>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem">
+    <h2 style="margin:0">{{ rows|length }} IP(s) liberado(s)</h2>
+    <form method="get"><input type="text" name="q" value="{{ q }}" placeholder="buscar IP, empresa, departamento, usuário"></form>
+  </div>
+  <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Edite empresa/departamento/usuário na linha e clique <b>Salvar</b>.</p>
+  <table>
+    <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><code>{{ r.ip }}</code></td>
+        <td><input form="e_{{ loop.index }}" name="empresa" value="{{ r.empresa }}" placeholder="—"></td>
+        <td><input form="e_{{ loop.index }}" name="departamento" value="{{ r.departamento }}" placeholder="—"></td>
+        <td><input form="e_{{ loop.index }}" name="usuario" value="{{ r.usuario }}" placeholder="—"></td>
+        <td><select form="e_{{ loop.index }}" name="tipo">
+          <option value="" {{ 'selected' if not r.tipo }}>—</option>
+          <option value="Computador" {{ 'selected' if r.tipo=='Computador' }}>Computador</option>
+          <option value="Celular" {{ 'selected' if r.tipo=='Celular' }}>Celular</option>
+        </select></td>
+        <td style="white-space:nowrap">
+          <form id="e_{{ loop.index }}" method="post" action="{{ url_for('admin.liberados_editar') }}" style="display:inline">
+            <input type="hidden" name="ip" value="{{ r.ip }}">
+            <button class="primary" style="padding:.35rem .6rem;font-size:.85rem">Salvar</button>
+          </form>
+          <form method="post" action="{{ url_for('admin.liberados_revogar') }}" style="display:inline" onsubmit="return confirm('Revogar {{ r.ip }}? Volta a filtrar pela rede.')">
+            <input type="hidden" name="ip" value="{{ r.ip }}">
+            <button class="danger">Revogar</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="mut">Nenhum IP liberado.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

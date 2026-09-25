@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Análise DNS{% endblock %}
+{% block content %}
+<style>
+  .an-top{display:flex;flex-wrap:wrap;gap:.6rem 1rem;align-items:center;margin-bottom:.8rem}
+  .an-top h1{margin:0}
+  .an-top form{display:flex;gap:.5rem;align-items:center;margin-left:auto;flex-wrap:wrap}
+  .an-top select{width:auto;min-width:170px}
+  .an-tabs{display:flex;flex-wrap:wrap;gap:.3rem;border-bottom:2px solid var(--bd);margin:0 0 1rem}
+  .an-tabs a{padding:.45rem .8rem;text-decoration:none;color:var(--mut);font-weight:600;font-size:.9rem;
+             border-bottom:2px solid transparent;margin-bottom:-2px}
+  .an-tabs a.on,.an-tabs a:hover{color:var(--navy);border-bottom-color:var(--b)}
+  .cls{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .45rem;border-radius:6px;color:#fff;white-space:nowrap}
+  .cls.TRABALHO{background:#16a34a}.cls.NAO_TRABALHO{background:#d97706}.cls.SUSPEITO{background:#ea580c}
+  .cls.MALICIOSO{background:#b91c1c}.cls.DESCONHECIDO{background:#64748b}.cls.PENDENTE{background:#94a3b8}
+  .sev{font-size:.72rem;font-weight:700;padding:.1rem .4rem;border-radius:6px;color:#fff}
+  .sev.critical{background:#7f1d1d}.sev.high{background:#dc2626}.sev.medium{background:#ea580c}.sev.low{background:#64748b}
+  .bar{height:6px;border-radius:4px;background:#e5e7eb;min-width:60px;overflow:hidden}
+  .bar>span{display:block;height:100%}
+  .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .muted-row td{color:var(--mut)}
+  .m-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:.7rem;margin-bottom:1rem}
+  .m-grid .metric .n{font-size:1.5rem}
+  .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:1rem}
+  .two .card{margin:0}
+  .tag{font-size:.72rem;color:var(--mut);border:1px solid var(--bd);border-radius:6px;padding:0 .35rem;white-space:nowrap}
+  td a{text-decoration:none}
+  .catg{display:inline-block;font-size:.72rem;padding:.08rem .45rem;border-radius:10px;background:#e0e7ff;color:#3730a3;white-space:nowrap}
+  .catg.nw{background:#fef3c7;color:#92400e}.catg.pend{background:#f1f5f9;color:#94a3b8}
+  .stt{font-size:.75rem;font-weight:700;white-space:nowrap}.stt.blk{color:#b91c1c}.stt.ok{color:#15803d}
+  .mini{font-size:.72rem;padding:.15rem .5rem;border-radius:6px;cursor:pointer;border:1px solid;background:#fff;
+        font-weight:600;text-decoration:none;white-space:nowrap;display:inline-block}
+  .mini.blk{color:#b91c1c;border-color:#fca5a5}.mini.blk:hover{background:#fef2f2}
+  .mini.ok{color:#15803d;border-color:#86efac}.mini.ok:hover{background:#f0fdf4}
+  .mini.neu{color:var(--mut);border-color:var(--bd)}
+  .rec{display:inline-block;font-size:.72rem;font-weight:700;padding:.1rem .45rem;border-radius:6px;border:1px solid;white-space:nowrap;cursor:help}
+  .rec.BLOQUEAR{color:#b91c1c;border-color:#fca5a5;background:#fef2f2}
+  .rec.LIBERAR{color:#15803d;border-color:#86efac;background:#f0fdf4}
+  .rec.REVISAR{color:#b45309;border-color:#fcd34d;background:#fffbeb}
+  .diversas{position:relative;cursor:help;border-bottom:1px dotted var(--mut);font-size:.85rem;white-space:nowrap}
+  .diversas .dv-pop{display:none;position:absolute;z-index:20;left:0;top:1.3rem;background:#fff;border:1px solid var(--bd);
+    border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);padding:.4rem .6rem;min-width:190px;max-height:260px;overflow:auto}
+  .diversas:hover .dv-pop,.diversas:focus .dv-pop,.diversas:focus-within .dv-pop{display:block}
+  .dv-pop a{display:block;padding:.12rem 0;font-size:.82rem}
+  .lote{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.2rem 0 .6rem}
+  dialog.dlg{border:0;border-radius:12px;padding:1rem 1.2rem;max-width:560px;width:calc(100% - 32px);box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  dialog.dlg::backdrop{background:rgba(15,23,42,.45)}
+  .dlg-grp{display:flex;gap:.5rem;align-items:flex-start;padding:.35rem .2rem;border-bottom:1px solid var(--bd);margin:0;font-weight:400}
+  .dlg-grp input{width:auto;margin-top:.2rem}
+  @media (max-width:640px){ .two{grid-template-columns:1fr} .an-top form{margin-left:0} }
+</style>
+
+<div class="an-top">
+  <h1>Análise DNS <span class="mut" style="font-size:.8rem;font-weight:400">· IA local (Qwen3) + Threat Intelligence</span></h1>
+  <form method="get">
+    <select name="t" onchange="this.form.submit()" title="Cliente">
+      <option value="0" {{ 'selected' if tid == 0 }}>🌐 Todos os clientes</option>
+      {% for t in tenants %}
+        <option value="{{ t.id }}" {{ 'selected' if t.id == tid }}>{{ t.name }}{{ ' · auto' if t.auto_created }}{{ ' (inativo)' if not t.active }}</option>
+      {% endfor %}
+    </select>
+    <select name="dias" onchange="this.form.submit()" title="Período">
+      {% for d, l in [(1,'Últimas 24h'),(7,'7 dias'),(30,'30 dias'),(90,'90 dias')] %}
+        <option value="{{ d }}" {{ 'selected' if d == dias }}>{{ l }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+<nav class="an-tabs">
+  <a href="{{ url_for('analise.painel', t=tid) }}" class="{{ 'on' if aba=='painel' }}">Painel</a>
+  <a href="{{ url_for('analise.decisoes', t=tid) }}" class="{{ 'on' if aba=='decisoes' }}">Decisões{% if fila_total %} <span class="sev high">{{ fila_total }}</span>{% endif %}</a>
+  <a href="{{ url_for('analise.dominios', t=tid) }}" class="{{ 'on' if aba=='dominios' }}">Domínios</a>
+  <a href="{{ url_for('analise.computadores', t=tid) }}" class="{{ 'on' if aba=='computadores' }}">Computadores</a>
+  <a href="{{ url_for('analise.alertas', t=tid) }}" class="{{ 'on' if aba=='alertas' }}">Alertas</a>
+  <a href="{{ url_for('analise.ia_ao_vivo', t=tid) }}" class="{{ 'on' if aba=='ia' }}">IA ao vivo</a>
+  <a href="{{ url_for('analise.empresas', t=tid) }}" class="{{ 'on' if aba=='empresas' }}">Empresas</a>
+  <a href="{{ url_for('analise.fontes', t=tid) }}" class="{{ 'on' if aba=='fontes' }}">Fontes e IA</a>
+</nav>
+{% block an %}{% endblock %}
+{% if grp is defined and grp %}{% include "admin/analise/_dlg_bloqueio.html" %}{% endif %}
+{% endblock %}

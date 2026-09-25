@@ -1,0 +1,157 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+{% if tid is none %}
+  <div class="card mut">Nenhum cliente cadastrado no analisador ainda. Cadastre em <a href="{{ url_for('analise.empresas') }}">Empresas</a>.</div>
+{% elif s %}
+  {% set c = s.counts %}
+  <div class="m-grid">
+    <div class="metric"><div class="n">{{ s.total_domains }}</div><div class="l">Domínios analisados</div></div>
+    <div class="metric"><div class="n" style="color:#16a34a">{{ c.TRABALHO }}</div><div class="l">Trabalho</div></div>
+    <div class="metric"><div class="n" style="color:#d97706">{{ c.NAO_TRABALHO }}</div><div class="l">Não trabalho</div></div>
+    <div class="metric"><div class="n" style="color:#ea580c">{{ c.SUSPEITO }}</div><div class="l">Suspeitos</div></div>
+    <div class="metric"><div class="n" style="color:#b91c1c">{{ c.MALICIOSO }}</div><div class="l">Maliciosos</div></div>
+    <div class="metric"><div class="n" style="color:#64748b">{{ c.DESCONHECIDO }}</div><div class="l">Desconhecidos</div></div>
+    <div class="metric"><div class="n" style="color:#94a3b8">{{ s.pending_ai }}</div><div class="l">Aguardando IA</div></div>
+  </div>
+
+  {% if todos and s.by_tenant %}
+  <div class="card">
+    <h2>Por empresa <span class="mut" style="font-size:.8rem;font-weight:400">· clique para ver a análise da empresa</span></h2>
+    <table>
+      <thead><tr><th>Empresa</th><th class="num">PCs</th><th class="num">Consultas</th><th class="num">Domínios</th><th class="num">% não trabalho</th><th class="num">Suspeitos/malic.</th><th class="num">Alertas abertos</th></tr></thead>
+      <tbody>
+      {% for e in s.by_tenant %}
+        <tr>
+          <td><a href="{{ url_for('analise.painel', t=e.id) }}"><b>{{ e.name }}</b></a>{% if e.auto_created %} <span class="tag">sem cadastro</span>{% endif %}</td>
+          <td class="num">{{ e.clients }}</td><td class="num">{{ e.queries }}</td><td class="num">{{ e.domains }}</td>
+          <td class="num">{{ ((e.nonwork_q or 0) / (e.queries or 1) * 100)|round|int }}%</td>
+          <td class="num" style="{{ 'color:#b91c1c;font-weight:700' if e.risky }}">{{ e.risky or 0 }}</td>
+          <td class="num" style="{{ 'color:#b91c1c;font-weight:700' if e.open_alerts }}">{{ e.open_alerts }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if fila %}
+  <div class="card" style="border-left:4px solid #ea580c">
+    <h2>Aguardando decisão <span class="mut" style="font-size:.8rem;font-weight:400">· sites de não trabalho/risco ou não reconhecidos pela IA que estão liberados e ninguém decidiu ainda</span>
+      <a class="mut" style="font-size:.8rem;font-weight:400;float:right" href="{{ url_for('analise.decisoes', t=tid) }}">ver fila completa →</a></h2>
+    {% set embed = true %}{% include "admin/analise/_fila.html" %}
+  </div>
+  {% endif %}
+
+  {% if porcat %}
+  <div class="card">
+    <h2>Por categoria <span class="mut" style="font-size:.8rem;font-weight:400">· {{ 'período selecionado, 1000 domínios mais acessados' }}</span></h2>
+    {% set maxq = (porcat|map(attribute='consultas')|max) or 1 %}
+    <table>
+      <thead><tr><th>Categoria</th><th class="num">Domínios</th><th class="num">🔒 Bloqueados</th><th class="num">🔓 Liberados</th><th class="num">Consultas</th><th style="width:30%"></th></tr></thead>
+      <tbody>
+      {% for c in porcat %}
+        <tr>
+          <td>{% if c.code == '_pendente' %}<span class="catg pend">aguardando IA</span>{% else %}{{ m.cat(c.code) }}{% endif %}</td>
+          <td class="num">{% if c.code != '_pendente' %}<a href="{{ url_for('analise.dominios', t=tid, categoria=c.code) }}">{{ c.dominios }}</a>{% else %}{{ c.dominios }}{% endif %}</td>
+          <td class="num" style="color:#b91c1c">{{ c.bloqueados or '' }}</td>
+          <td class="num" style="{{ 'color:#b45309;font-weight:700' if c.nonwork and c.dominios - c.bloqueados }}">{{ c.dominios - c.bloqueados }}</td>
+          <td class="num">{{ c.consultas }}</td>
+          <td><div class="bar"><span style="width:{{ (c.consultas / maxq * 100)|round|int }}%;background:{{ '#d97706' if c.nonwork else '#6366f1' }}"></span></div></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">Em laranja: categorias de não trabalho com sites ainda liberados. Clique no número para ver os domínios e bloquear/desbloquear.</p>
+  </div>
+  {% endif %}
+
+  <div class="two">
+    <div class="card">
+      <h2>Suspeitos e maliciosos</h2>
+      <table>
+        <thead><tr><th>Domínio</th><th>Classe</th><th>Recomend.</th><th>Risco</th><th class="num">Consultas</th><th class="num">PCs</th>{% if todos %}<th class="num">Empresas</th>{% endif %}<th>Status</th></tr></thead>
+        <tbody>
+        {% for d in s.top_risk %}
+          <tr><td>{{ m.dom(d.name) }}{% if d.topic %}<br><span class="mut" style="font-size:.78rem">{{ d.topic }}</span>{% endif %}</td>
+              <td>{{ m.badge(d.classification) }}</td><td>{{ m.rec(d) }}</td><td>{{ m.riskbar(d.risk_score) }}<span class="mut" style="font-size:.75rem">{{ d.risk_score }}</span></td>
+              <td class="num">{{ d.queries }}</td><td class="num">{{ d.clients }}</td>{% if todos %}<td class="num">{{ d.tenants }}</td>{% endif %}
+              <td>{{ m.status(d.name) }}<br>{{ m.acao(d.name) }}</td></tr>
+        {% else %}<tr><td colspan="8" class="mut">Nenhum domínio suspeito ou malicioso no período. 👍</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Principais domínios não relacionados ao trabalho</h2>
+      <table>
+        <thead><tr><th>Domínio</th><th>Categoria</th><th>Recomend.</th><th class="num">Consultas</th><th class="num">PCs</th>{% if todos %}<th class="num">Empresas</th>{% endif %}<th>Status</th></tr></thead>
+        <tbody>
+        {% for d in s.top_nonwork %}
+          <tr><td>{{ m.dom(d.name) }}{% if d.topic %}<br><span class="mut" style="font-size:.78rem">{{ d.topic }}</span>{% endif %}</td><td>{{ m.cat(d.category) }}</td><td>{{ m.rec(d) }}</td>
+              <td class="num">{{ d.queries }}</td><td class="num">{{ d.clients }}</td>{% if todos %}<td class="num">{{ d.tenants }}</td>{% endif %}
+              <td>{{ m.status(d.name) }}<br>{{ m.acao(d.name) }}</td></tr>
+        {% else %}<tr><td colspan="7" class="mut">Nada no período.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Computadores com comportamento anormal</h2>
+      <table>
+        <thead><tr><th>Computador</th><th>Score</th><th class="num">% não trab.</th><th class="num">Susp.</th><th class="num">Novos 24h</th><th class="num">Alertas</th></tr></thead>
+        <tbody>
+        {% for p in s.anomalous_clients %}
+          <tr class="{{ 'muted-row' if p.anomaly_score < 20 }}">
+            <td>{{ m.pc(p.ip, p.tenant_id) }}{% if todos %}<br>{{ m.emp(p.tenant_name, p.tenant_id) }}{% endif %}</td><td>{{ m.riskbar(p.anomaly_score) }}<span class="mut" style="font-size:.75rem">{{ p.anomaly_score }}</span></td>
+            <td class="num">{{ m.pct(p.nonwork_share) }}</td><td class="num">{{ (p.susp or 0) + (p.mal or 0) }}</td>
+            <td class="num">{{ p.new_domains_24h }}</td><td class="num">{{ p.open_alerts }}</td></tr>
+        {% else %}<tr><td colspan="6" class="mut">Sem computadores no período.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <p class="hint">Score 0–100: combina % de consultas não relacionadas ao trabalho, domínios suspeitos/maliciosos, domínios inéditos e alertas abertos.</p>
+    </div>
+
+    <div class="card">
+      <h2>Alertas <a class="mut" style="font-size:.8rem;font-weight:400" href="{{ url_for('analise.alertas', t=tid) }}">ver todos →</a></h2>
+      <table>
+        <thead><tr><th>Quando</th><th>Sev.</th><th>Alerta</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for a in s.alerts %}
+          <tr class="{{ 'muted-row' if a.status != 'open' }}"><td class="mut" style="white-space:nowrap">{{ a.created_at|dt_sp }}</td>
+              <td><span class="sev {{ a.severity }}">{{ a.severity }}</span></td><td>{{ a.title }}{% if todos %}<br>{{ m.emp(a.tenant_name, a.tenant_id) }}{% endif %}</td>
+              <td class="mut">{{ {'open':'aberto','ack':'visto','closed':'fechado'}.get(a.status, a.status) }}</td></tr>
+        {% else %}<tr><td colspan="4" class="mut">Nenhum alerta.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Domínios mais acessados</h2>
+      <table>
+        <thead><tr><th>Domínio</th><th>Categoria</th><th>Classe</th><th class="num">Consultas</th><th class="num">PCs</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for d in s.top_domains %}
+          <tr><td>{{ m.dom(d.name) }}</td><td>{{ m.cat(d.category) }}</td><td>{{ m.badge(d.classification) }}</td>
+              <td class="num">{{ d.queries }}</td><td class="num">{{ d.clients }}</td><td>{{ m.status(d.name) }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Domínios novos (24h)</h2>
+      <table>
+        <thead><tr><th>Domínio</th><th>Classe</th><th>Visto em</th><th class="num">PCs</th></tr></thead>
+        <tbody>
+        {% for d in s.new_domains %}
+          <tr><td>{{ m.dom(d.name) }}</td><td>{{ m.badge(d.classification) }}</td>
+              <td class="mut" style="white-space:nowrap">{{ d.first_seen|dt_sp }}</td><td class="num">{{ d.clients_count }}</td></tr>
+        {% else %}<tr><td colspan="4" class="mut">Nenhum domínio inédito nas últimas 24h.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p class="hint" style="margin-top:1rem">A IA só analisa: nada é bloqueado automaticamente. Os botões Bloquear/Desbloquear alteram o Technitium na hora, nos grupos da empresa, e registram a decisão (em “Todos os clientes” você escolhe os grupos na página do domínio).</p>
+{% endif %}
+{% endblock %}

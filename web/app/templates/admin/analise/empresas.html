@@ -1,0 +1,131 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+{% set cadastradas = tenants|rejectattr('auto_created')|list %}
+{% set sem = tenants|selectattr('auto_created')|list %}
+<style>
+  .emp td{vertical-align:middle}
+  .un{display:inline-flex;align-items:center;gap:.25rem;margin:0 .35rem .35rem 0;border:1px solid var(--bd);border-radius:8px;padding:.15rem .3rem .15rem .45rem;background:#f8fafc}
+  .un code{font-size:.8rem}
+  .un input{width:95px;padding:.15rem .35rem;font-size:.8rem}
+  .un button{padding:.1rem .35rem;font-size:.75rem}
+  .mini{padding:.25rem .5rem;font-size:.8rem}
+</style>
+
+{% if sem %}
+<div class="card" style="border-color:#fdba74">
+  <h2>⚠ Redes com tráfego e sem cadastro ({{ sem|length }})</h2>
+  <p class="mut" style="font-size:.85rem;margin-top:0">O analisador separou estes IPs numa "empresa automática" para não misturá-los com outra empresa. Atribua cada rede à empresa certa (os dados já coletados vão junto).</p>
+  <table class="emp">
+    <thead><tr><th>Rede</th><th class="num">PCs</th><th>Último acesso</th><th>Atribuir a</th></tr></thead>
+    <tbody>
+    {% for t in sem %}{% for n in t.networks %}
+      <tr>
+        <td><code>{{ n.cidr }}</code></td>
+        <td class="num">{{ t.clients }}</td>
+        <td class="mut" style="white-space:nowrap">{{ t.last_seen|dt_sp }}</td>
+        <td>
+          <form method="post" action="{{ url_for('analise.unidade_editar', nid=n.id) }}" style="display:flex;gap:.3rem;flex-wrap:wrap">
+            <select name="mover_para" required class="mini" style="width:auto">
+              <option value="">— empresa —</option>
+              {% for e in cadastradas %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+            </select>
+            <input type="text" name="unidade" placeholder="nome da unidade (opcional)" class="mini" style="width:190px">
+            <button class="btn mini">Atribuir</button>
+          </form>
+          <form method="post" action="{{ url_for('analise.empresa_editar', tid=t.id) }}" style="display:flex;gap:.3rem;margin-top:.3rem">
+            <input type="text" name="nome" placeholder="…ou criar como nova empresa: nome" class="mini" style="width:260px">
+            <button class="btn mini">Criar</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Empresas cadastradas ({{ cadastradas|length }})</h2>
+  <p class="mut" style="font-size:.85rem;margin-top:0">Cada consulta DNS é atribuída pela <b>rede mais específica</b> que contém o IP. O roteador de cada site na malha WireGuard (<code>10.100.100.N</code>) conta como da empresa dona de <code>10.N.0.0/16</code>. Mudar uma rede de empresa realoca o histórico daqueles IPs.</p>
+  <table class="emp">
+    <thead><tr><th style="min-width:210px">Empresa</th><th>Unidades (nome · CIDR)</th><th class="num">PCs</th><th>Último acesso</th><th></th></tr></thead>
+    <tbody>
+    {% for t in cadastradas %}
+      <tr>
+        <td>
+          <form method="post" action="{{ url_for('analise.empresa_editar', tid=t.id) }}" style="display:flex;gap:.3rem">
+            <input type="text" name="nome" value="{{ t.name }}" class="mini">
+            <button class="btn mini">Salvar</button>
+          </form>
+        </td>
+        <td>
+          {% for n in t.networks %}
+            <span class="un">
+              <form method="post" action="{{ url_for('analise.unidade_editar', nid=n.id) }}" style="display:inline-flex;gap:.2rem;align-items:center">
+                <input type="text" name="unidade" value="{{ n.unit }}" placeholder="unidade" title="nome da unidade">
+                <code>{{ n.cidr }}</code>
+                <button class="btn" title="salvar nome da unidade">✓</button>
+              </form>
+              <form method="post" action="{{ url_for('analise.unidade_rem', tid=t.id, nid=n.id) }}" style="display:inline"
+                    onsubmit="return confirm('Remover {{ n.cidr }} de {{ t.name }}? Os IPs dessa rede passam a aparecer como sem cadastro.')">
+                <button class="danger" title="remover rede">✕</button>
+              </form>
+            </span>
+          {% endfor %}
+          <form method="post" action="{{ url_for('analise.unidade_add', tid=t.id) }}" style="display:flex;gap:.3rem;margin-top:.15rem">
+            <input type="text" name="unidade" placeholder="unidade" class="mini" style="width:120px">
+            <input type="text" name="cidr" placeholder="10.23.0.0/16" class="mini" style="width:140px" required>
+            <button class="btn mini">+ unidade</button>
+          </form>
+        </td>
+        <td class="num">{{ t.clients }}</td>
+        <td class="mut" style="white-space:nowrap">{{ t.last_seen|dt_sp }}</td>
+        <td style="white-space:nowrap">
+          <details>
+            <summary class="mut" style="cursor:pointer;font-size:.8rem">mais</summary>
+            <form method="post" action="{{ url_for('analise.empresa_mesclar', tid=t.id) }}" style="display:flex;gap:.3rem;margin-top:.3rem"
+                  onsubmit="return confirm('Mesclar {{ t.name }} em outra empresa? Redes e dados vão para o destino e {{ t.name }} deixa de existir.')">
+              <select name="destino" required class="mini" style="width:auto">
+                <option value="">mesclar em…</option>
+                {% for e in cadastradas if e.id != t.id %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+              </select>
+              <button class="btn mini">Mesclar</button>
+            </form>
+            {% if not t.networks and not t.clients %}
+            <form method="post" action="{{ url_for('analise.empresa_excluir', tid=t.id) }}" style="margin-top:.3rem"
+                  onsubmit="return confirm('Excluir {{ t.name }}?')"><button class="danger mini">Excluir</button></form>
+            {% endif %}
+          </details>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="two">
+  <div class="card">
+    <h2>Importar da planilha</h2>
+    <form method="post" action="{{ url_for('analise.empresas_importar') }}">
+      <label>Cole as linhas (Excel copia com TAB entre as colunas)</label>
+      <textarea name="planilha" rows="9" style="width:100%;font-family:monospace;font-size:.85rem" placeholder="Semetra	10.7.0.0/16
+Moral Auto Peças	PBS	10.57.0.0/16
+Moral Auto Peças	CAN	10.58.0.0/16"></textarea>
+      <label class="chk"><input type="checkbox" name="substituir" value="1"> Substituir o cadastro: remover redes das empresas cadastradas que não estão na lista</label>
+      <button class="primary" style="margin-top:.4rem">Importar</button>
+    </form>
+    <p class="hint">Formatos por linha: <code>Empresa ⇥ CIDR</code> ou <code>Empresa ⇥ Unidade ⇥ CIDR</code> (também aceita <code>;</code> ou <code>|</code>). Empresa com várias unidades = várias linhas com o mesmo nome de empresa. Reimportar é seguro: só cria/atualiza.</p>
+  </div>
+  <div class="card">
+    <h2>Nova empresa</h2>
+    <form method="post" action="{{ url_for('analise.empresa_criar') }}">
+      <label>Nome</label><input type="text" name="nome" required placeholder="Ex.: Norte Sul">
+      <label>Unidades (uma por linha: <code>CIDR</code> ou <code>Unidade CIDR</code>)</label>
+      <textarea name="redes" rows="4" style="width:100%;font-family:monospace;font-size:.85rem" placeholder="I 10.51.0.0/16
+II 10.52.0.0/16"></textarea>
+      <button class="primary" style="margin-top:.4rem">Criar</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

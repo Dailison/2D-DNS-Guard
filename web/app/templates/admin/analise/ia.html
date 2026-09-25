@@ -1,0 +1,131 @@
+{% extends "admin/analise/_base.html" %}
+{% block an %}
+<style>
+  .ia-top{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem;margin-bottom:1rem}
+  .now{display:flex;align-items:center;gap:.8rem;padding:.8rem 1rem;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;margin-bottom:1rem;min-height:3rem}
+  .now .spin{width:14px;height:14px;border:3px solid #93c5fd;border-top-color:var(--b);border-radius:50%;animation:sp 1s linear infinite;flex:0 0 auto}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .now.idle{background:#f8fafc;border-color:var(--bd)} .now.idle .spin{display:none}
+  .feed{list-style:none;margin:0;padding:0}
+  .feed li{display:flex;gap:.6rem;align-items:baseline;padding:.45rem .2rem;border-bottom:1px solid var(--bd);font-size:.9rem}
+  .feed li.novo{animation:fl 2s ease-out}
+  @keyframes fl{from{background:#fef9c3}to{background:transparent}}
+  .feed .h{color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:.8rem}
+  .feed .ic{width:1.2rem;text-align:center;flex:0 0 auto}
+  .feed .d{color:var(--mut);font-size:.82rem}
+  .feed a{font-weight:600;text-decoration:none}
+</style>
+
+<div class="ia-top">
+  <div class="metric"><div class="n" id="st-ia" style="font-size:1rem;padding-top:.4rem">…</div><div class="l" id="st-model">IA</div></div>
+  <div class="metric"><div class="n" id="st-fila">–</div><div class="l">Na fila da IA</div></div>
+  <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
+  <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div></div>
+  <div class="metric"><div class="n" id="st-eta" style="font-size:1.1rem;padding-top:.3rem">–</div><div class="l">Previsão p/ zerar a fila</div></div>
+</div>
+
+<div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div></div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+    <h2 style="margin:0">Atividade em tempo real</h2>
+    <span><span class="mut" id="upd" style="font-size:.8rem"></span>
+      <button class="btn mini" id="pausa" style="padding:.25rem .6rem;font-size:.8rem;margin-left:.5rem">Pausar</button></span>
+  </div>
+  <ul class="feed" id="feed"><li class="mut">Carregando…</li></ul>
+  <p class="hint">Fase A = regras/catálogo/listas (instantâneo). A IA (Qwen3, local) refina um domínio por vez, do mais consultado para o menos.</p>
+</div>
+
+<script>
+(function(){
+  var URL_EV = "{{ url_for('analise.ia_eventos') }}";
+  var URL_DOM = "{{ url_for('analise.dominio', nome='__N__', t=tid) }}";
+  var LBL = {TRABALHO:'Trabalho', NAO_TRABALHO:'Não trabalho', SUSPEITO:'Suspeito', MALICIOSO:'Malicioso', DESCONHECIDO:'Desconhecido'};
+  var lastId = 0, paused = false, cur = null, curBase = 0, first = true;
+  var feed = document.getElementById('feed');
+
+  function el(tag, cls, txt){ var e = document.createElement(tag); if(cls) e.className = cls; if(txt != null) e.textContent = txt; return e; }
+  function hora(iso){ var d = new Date(iso); return d.toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo'}); }
+  function dur(s){ s = Math.max(0, Math.round(s)); var m = Math.floor(s/60); return m ? m + 'min ' + (s%60) + 's' : s + 's'; }
+  function link(name){ var a = el('a', null, name); a.href = URL_DOM.replace('__N__', encodeURIComponent(name)); return a; }
+  function badge(c){ return el('span', 'cls ' + (c || 'PENDENTE'), LBL[c] || c || '—'); }
+
+  function row(ev){
+    var li = el('li'), ic = el('span', 'ic'), body = el('span');
+    li.appendChild(el('span', 'h', hora(ev.created_at)));
+    li.appendChild(ic); li.appendChild(body);
+    var k = ev.kind;
+    if (k === 'llm_start') {
+      ic.textContent = '⏳'; body.appendChild(document.createTextNode('Analisando '));
+      body.appendChild(link(ev.name)); if (ev.detail) body.appendChild(el('span', 'd', ' — ' + ev.detail));
+    } else if (k === 'llm_done' || k === 'rules_final' || k === 'rules_alert') {
+      ic.textContent = k === 'rules_alert' ? '⚠️' : '✅';
+      body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' → '));
+      body.appendChild(badge(ev.classification));
+      var nums = [];
+      if (ev.risk != null) nums.push('risco ' + ev.risk);
+      if (ev.work != null) nums.push('trabalho ' + ev.work);
+      if (ev.seconds != null) nums.push(Math.round(ev.seconds) + 's');
+      if (k !== 'llm_done') nums.push('pelas regras');
+      body.appendChild(el('span', 'd', ' ' + nums.join(' · ')));
+      if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail)); }
+    } else if (k === 'rules_batch') {
+      ic.textContent = '⚙️'; body.appendChild(el('span', 'd', 'Fase A — ' + (ev.detail || '')));
+    } else if (k === 'llm_error') {
+      ic.textContent = '❌'; body.appendChild(document.createTextNode('Falha ao analisar '));
+      body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ' — ' + (ev.detail || '')));
+    } else if (k === 'llm_unavailable') {
+      ic.textContent = '⏸️'; body.appendChild(el('span', 'd', 'IA indisponível: ' + (ev.detail || '')));
+    } else { ic.textContent = '•'; body.appendChild(el('span', 'd', k + ' ' + (ev.name || '') + ' ' + (ev.detail || ''))); }
+    return li;
+  }
+
+  function status(d){
+    var ia = document.getElementById('st-ia');
+    ia.textContent = d.llm && d.llm.ok ? '● no ar' : '● fora'; ia.style.color = d.llm && d.llm.ok ? '#16a34a' : '#b91c1c';
+    document.getElementById('st-model').textContent = 'IA (' + ((d.llm && d.llm.model) || '?') + ')';
+    document.getElementById('st-fila').textContent = d.queue ? d.queue.ia : '–';
+    document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';
+    document.getElementById('st-media').textContent = d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–';
+    document.getElementById('st-eta').textContent = d.eta_seconds ? '~' + (d.eta_seconds > 5400 ? Math.round(d.eta_seconds/3600) + ' h' : Math.round(d.eta_seconds/60) + ' min') : (d.queue && d.queue.ia === 0 ? 'fila vazia' : '–');
+    cur = d.current; curBase = cur ? (cur.elapsed - (Date.now()/1000)) : 0;
+    tick();
+  }
+
+  function tick(){
+    var box = document.getElementById('now'), txt = document.getElementById('now-txt');
+    if (cur) {
+      box.className = 'now'; txt.textContent = '';
+      txt.appendChild(document.createTextNode('Analisando agora: '));
+      txt.appendChild(link(cur.name));
+      txt.appendChild(el('span', 'd', ' · ' + dur(curBase + Date.now()/1000) + ' · ' + cur.total_queries + ' consultas'));
+    } else {
+      box.className = 'now idle';
+      txt.textContent = document.getElementById('st-fila').textContent === '0' ? 'Nada na fila — aguardando domínios novos.' : 'Entre análises…';
+    }
+  }
+
+  function poll(){
+    if (paused) return;
+    fetch(URL_EV + '?after=' + lastId, {credentials:'same-origin'})
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(d){
+        if (d.error) throw new Error(d.error);
+        if (first) { feed.innerHTML = ''; }
+        var evs = (d.events || []).slice().reverse();   // mais antigo primeiro, p/ inserir no topo em ordem
+        evs.forEach(function(ev){ var li = row(ev); if (!first) li.className = 'novo'; feed.insertBefore(li, feed.firstChild); lastId = Math.max(lastId, ev.id); });
+        if (first && !evs.length) feed.appendChild(el('li', 'mut', 'Sem atividade registrada ainda.'));
+        while (feed.children.length > 200) feed.removeChild(feed.lastChild);
+        first = false; status(d);
+        document.getElementById('upd').textContent = 'atualizado ' + new Date().toLocaleTimeString('pt-BR');
+      })
+      .catch(function(e){ document.getElementById('upd').textContent = 'falha ao atualizar (' + e.message + ')'; });
+  }
+
+  document.getElementById('pausa').onclick = function(){
+    paused = !paused; this.textContent = paused ? 'Continuar' : 'Pausar'; if (!paused) poll();
+  };
+  poll(); setInterval(poll, 3000); setInterval(tick, 1000);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+<div class="card">
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem">
+    {% for s, l in [('open','Abertos'),('ack','Vistos'),('closed','Fechados'),('all','Todos')] %}
+      <a class="btn" style="padding:.3rem .7rem;{{ '' if st == s else 'background:#eef1f6;color:var(--navy);box-shadow:none' }}" href="{{ url_for('analise.alertas', t=tid, status=s) }}">{{ l }}</a>
+    {% endfor %}
+    <span class="mut" style="margin-left:auto">{{ lista|length }} alerta(s)</span>
+  </div>
+  <table>
+    <thead><tr><th>Quando</th><th>Sev.</th><th>Tipo</th><th>Alerta</th><th>Computador</th><th>Domínio</th><th></th></tr></thead>
+    <tbody>
+    {% set tipos = {'malicious_access':'Acesso malicioso','suspicious_access':'Acesso suspeito','new_domains_spike':'Muitos domínios novos','volume_spike':'Pico de consultas','dga_burst':'Possível DGA'} %}
+    {% for a in lista %}
+      <tr class="{{ 'muted-row' if a.status != 'open' }}">
+        <td class="mut" style="white-space:nowrap">{{ a.created_at|dt_sp }}{% if a.updated_at != a.created_at %}<br><span style="font-size:.72rem">atualizado {{ a.updated_at|dt_sp('%d/%m %H:%M') }}</span>{% endif %}</td>
+        <td><span class="sev {{ a.severity }}">{{ a.severity }}</span></td>
+        <td class="mut">{{ tipos.get(a.kind, a.kind) }}</td>
+        <td>{{ a.title }}{% if todos %}<br>{{ m.emp(a.tenant_name, a.tenant_id) }}{% endif %}{% if a.details and a.details.ips %}<br><span class="mut" style="font-size:.75rem">{{ a.details.ips[:8]|join(', ') }}{{ '…' if a.details.ips|length > 8 }}</span>{% endif %}</td>
+        <td>{% if a.ip %}{{ m.pc(a.ip, a.tenant_id) }}{% else %}<span class="mut">—</span>{% endif %}</td>
+        <td>{% if a.domain %}{{ m.dom(a.domain) }}{% else %}<span class="mut">—</span>{% endif %}</td>
+        <td style="white-space:nowrap">
+          <form method="post" action="{{ url_for('analise.alerta_status', aid=a.id) }}" style="display:inline">
+            <input type="hidden" name="tid" value="{{ a.tenant_id }}">
+            {% if a.status == 'open' %}
+              <button class="btn" name="status" value="ack" style="padding:.2rem .5rem;font-size:.8rem">Visto</button>
+              <button class="btn" name="status" value="closed" style="padding:.2rem .5rem;font-size:.8rem">Fechar</button>
+            {% else %}
+              <button class="btn" name="status" value="open" style="padding:.2rem .5rem;font-size:.8rem">Reabrir</button>
+            {% endif %}
+          </form>
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="7" class="mut">Nenhum alerta neste filtro.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">Alertas são só informativos — nada é bloqueado automaticamente. Detectores comparativos (domínios novos, pico de consultas) começam após 7 dias de histórico do cliente.</p>
+</div>
+{% endblock %}

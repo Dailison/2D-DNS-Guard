@@ -1,0 +1,89 @@
+# 2D DNS Guard — console web (dns-guard.2dtecnologia.com) no k3s.
+# Aplicado por admin (o SA do CI só faz `set image`). Secret criado fora do git:
+#   kubectl -n dns-guard create secret generic dns-guard-secrets \
+#     --from-literal=SECRET_KEY=... --from-literal=TECHNITIUM_TOKEN=... --from-literal=ANALYZER_TOKEN=...
+# Pull secret `registry-2d`: cópia do ns hotspot.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dns-guard
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dns-guard-config
+  namespace: dns-guard
+data:
+  TECHNITIUM_URL: http://10.100.10.15:5380
+  TECHNITIUM_LIBERADOS_GROUP: Liberados
+  ANALYZER_URL: http://10.100.10.4:8088
+  PORTAL_KIT_URL: https://portal.2dtecnologia.com/kit/launcher.js
+  SSO_LOGIN_URL: https://portal.2dtecnologia.com/2dtecnologia/sso/login
+  SESSION_COOKIE_SECURE: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: dns-guard
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      imagePullSecrets:
+        - name: registry-2d
+      containers:
+        - name: web
+          image: registry.2dtecnologia.com/dailison/2d-dns-guard:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: {name: dns-guard-config}
+            - secretRef: {name: dns-guard-secrets}
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {memory: 384Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: dns-guard
+spec:
+  selector: {app: web}
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  namespace: dns-guard
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: dns-guard.2dtecnologia.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: web, port: {number: 8080}}
+  tls:
+    - hosts: [dns-guard.2dtecnologia.com]
+      secretName: dns-guard-tls

@@ -1,0 +1,236 @@
+# Catálogo de domínios conhecidos (base determinística; a IA não é chamada para eles).
+#
+# Casamento: o domínio registrável é igual ao `suffix` ou termina em ".suffix".
+# Com `exact: true`, só casa se for exatamente igual (use p/ plataformas onde
+# terceiros hospedam conteúdo).
+#
+# protected: true -> infraestrutura crítica de trabalho. Listas de ameaça NÃO
+# conseguem, sozinhas, marcá-lo como SUSPEITO/MALICIOSO (o acerto vira evidência
+# de "provável falso positivo" e ação REVIEW). Lição aprendida: listas agressivas
+# derrubavam Microsoft/CDNs inteiros.
+#
+# work: WORK_SCORE (0-100). Ajuste por tenant é feito no admin (override).
+
+entries:
+  # ---------------- Microsoft / Windows / Microsoft 365
+  - {suffix: microsoft.com,        classification: TRABALHO, topic: "Microsoft", work: 90, protected: true}
+  - {suffix: microsoftonline.com,  classification: TRABALHO, topic: "Microsoft 365 / login", work: 95, protected: true}
+  - {suffix: microsoftonline-p.com, classification: TRABALHO, topic: "Microsoft 365 / login", work: 95, protected: true}
+  - {suffix: office.com,           classification: TRABALHO, topic: "Microsoft 365", work: 95, protected: true}
+  - {suffix: office.net,           classification: TRABALHO, topic: "Microsoft 365", work: 95, protected: true}
+  - {suffix: office365.com,        classification: TRABALHO, topic: "Microsoft 365", work: 95, protected: true}
+  - {suffix: outlook.com,          classification: TRABALHO, topic: "E-mail Microsoft", work: 85, protected: true}
+  - {suffix: onedrive.com,         classification: TRABALHO, topic: "OneDrive", work: 85, protected: true}
+  - {suffix: 1drv.com,             classification: TRABALHO, topic: "OneDrive", work: 85, protected: true}
+  - {suffix: 1drv.ms,              classification: TRABALHO, topic: "OneDrive", work: 85, protected: true}
+  - {suffix: sharepoint.com,       classification: TRABALHO, topic: "SharePoint", work: 95, protected: true}
+  - {suffix: sharepointonline.com, classification: TRABALHO, topic: "SharePoint", work: 95, protected: true}
+  - {suffix: live.com,             classification: TRABALHO, topic: "Conta Microsoft", work: 70, protected: true}
+  - {suffix: windows.com,          classification: TRABALHO, topic: "Windows", work: 85, protected: true}
+  - {suffix: windowsupdate.com,    classification: TRABALHO, topic: "Windows Update", work: 90, protected: true}
+  - {suffix: windows.net,          classification: TRABALHO, topic: "Azure (Microsoft)", work: 75, protected: true, exact: true}
+  - {suffix: microsoft.net,        classification: TRABALHO, topic: "Microsoft", work: 80, protected: true}
+  - {suffix: msftauth.net,         classification: TRABALHO, topic: "Microsoft 365 / login", work: 95, protected: true}
+  - {suffix: msauth.net,           classification: TRABALHO, topic: "Microsoft 365 / login", work: 95, protected: true}
+  - {suffix: msidentity.com,       classification: TRABALHO, topic: "Microsoft 365 / login", work: 95, protected: true}
+  - {suffix: msauthimages.net,     classification: TRABALHO, topic: "Microsoft 365 / login", work: 90, protected: true}
+  - {suffix: msftconnecttest.com,  classification: TRABALHO, topic: "Windows (teste de conectividade)", work: 80, protected: true}
+  - {suffix: msftncsi.com,         classification: TRABALHO, topic: "Windows (teste de conectividade)", work: 80, protected: true}
+  - {suffix: msedge.net,           classification: TRABALHO, topic: "Microsoft CDN", work: 75, protected: true}
+  - {suffix: msecnd.net,           classification: TRABALHO, topic: "Microsoft CDN", work: 75, protected: true}
+  - {suffix: s-microsoft.com,      classification: TRABALHO, topic: "Microsoft", work: 75, protected: true}
+  - {suffix: skype.com,            classification: TRABALHO, topic: "Comunicação", work: 70, protected: true}
+  - {suffix: lync.com,             classification: TRABALHO, topic: "Comunicação", work: 80, protected: true}
+  - {suffix: azure.com,            classification: TRABALHO, topic: "Azure (Microsoft)", work: 75, protected: true, exact: true}
+  - {suffix: trafficmanager.net,   classification: TRABALHO, topic: "Azure (infraestrutura)", work: 70, protected: true, exact: true}
+
+  # ---------------- Google / Apple (base de sistema; serviços pessoais ficam p/ IA)
+  - {suffix: google.com,           classification: TRABALHO, topic: "Google", work: 75, protected: true}
+  - {suffix: google.com.br,        classification: TRABALHO, topic: "Google", work: 75, protected: true}
+  - {suffix: googleapis.com,       classification: TRABALHO, topic: "Google (APIs)", work: 70, protected: true}
+  - {suffix: gstatic.com,          classification: TRABALHO, topic: "Google (conteúdo estático)", work: 70, protected: true}
+  - {suffix: gvt1.com,             classification: TRABALHO, topic: "Google (atualizações)", work: 70, protected: true}
+  - {suffix: gvt2.com,             classification: TRABALHO, topic: "Google (atualizações)", work: 70, protected: true}
+  - {suffix: 1e100.net,            classification: TRABALHO, topic: "Google (infraestrutura)", work: 65, protected: true}
+  - {suffix: gmail.com,            classification: TRABALHO, topic: "E-mail", work: 70, protected: true}
+  - {suffix: apple.com,            classification: TRABALHO, topic: "Apple (sistema/atualizações)", work: 65, protected: true}
+  - {suffix: mzstatic.com,         classification: TRABALHO, topic: "Apple (conteúdo)", work: 55, protected: true}
+
+  # ---------------- CDN / PKI / certificados (bloquear derruba tudo)
+  - {suffix: akamai.net,           classification: TRABALHO, topic: "CDN (infraestrutura compartilhada)", work: 60, protected: true}
+  - {suffix: akamaiedge.net,       classification: TRABALHO, topic: "CDN (infraestrutura compartilhada)", work: 60, protected: true}
+  - {suffix: akamaized.net,        classification: TRABALHO, topic: "CDN (infraestrutura compartilhada)", work: 60, protected: true}
+  - {suffix: akadns.net,           classification: TRABALHO, topic: "CDN (infraestrutura compartilhada)", work: 60, protected: true}
+  - {suffix: edgekey.net,          classification: TRABALHO, topic: "CDN (infraestrutura compartilhada)", work: 60, protected: true}
+  - {suffix: edgesuite.net,        classification: TRABALHO, topic: "CDN (infraestrutura compartilhada)", work: 60, protected: true}
+  - {suffix: fastly.net,           classification: TRABALHO, topic: "CDN (infraestrutura compartilhada)", work: 60, protected: true, exact: true}
+  - {suffix: cloudflare.com,       classification: TRABALHO, topic: "Cloudflare", work: 60, protected: true}
+  - {suffix: jsdelivr.net,         classification: TRABALHO, topic: "CDN (bibliotecas web)", work: 60, protected: true}
+  - {suffix: digicert.com,         classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: verisign.com,         classification: TRABALHO, topic: "Certificados (PKI)", work: 70, protected: true}
+  - {suffix: pki.goog,             classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: letsencrypt.org,      classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: lencr.org,            classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: sectigo.com,          classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: globalsign.com,       classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: entrust.net,          classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: usertrust.com,        classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: amazontrust.com,      classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
+  - {suffix: ntp.org,              classification: TRABALHO, topic: "Hora (NTP)", work: 70, protected: true}
+
+  # ---------------- Governo e bancos (Brasil)
+  - {suffix: gov.br,               classification: TRABALHO, topic: "Governo", work: 90, protected: true}
+  - {suffix: bb.com.br,            classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: itau.com.br,          classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: bradesco.com.br,      classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: santander.com.br,     classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: sicredi.com.br,       classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: sicoob.com.br,        classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: caixa.gov.br,         classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: banrisul.com.br,      classification: TRABALHO, topic: "Banco", work: 85, protected: true}
+  - {suffix: nubank.com.br,        classification: TRABALHO, topic: "Banco", work: 70, protected: true}
+  - {suffix: inter.co,             classification: TRABALHO, topic: "Banco", work: 70, protected: true}
+  - {suffix: registro.br,          classification: TRABALHO, topic: "Registro de domínios", work: 80, protected: true}
+
+  # ---------------- Trabalho (produtividade/comunicação/suporte)
+  - {suffix: 2dtecnologia.com,     classification: TRABALHO, topic: "2D Tecnologia", work: 100, protected: true}
+  - {suffix: zoom.us,              classification: TRABALHO, topic: "Videoconferência", work: 85}
+  - {suffix: webex.com,            classification: TRABALHO, topic: "Videoconferência", work: 85}
+  - {suffix: anydesk.com,          classification: TRABALHO, topic: "Suporte remoto", work: 75}
+  - {suffix: teamviewer.com,       classification: TRABALHO, topic: "Suporte remoto", work: 75}
+  - {suffix: github.com,           classification: TRABALHO, topic: "Desenvolvimento", work: 75}
+  - {suffix: totvs.com.br,         classification: TRABALHO, topic: "ERP", work: 95}
+  - {suffix: senior.com.br,        classification: TRABALHO, topic: "ERP", work: 95}
+
+  # ---------------- Uso misto (work intermediário; ajuste por cliente no admin se preciso)
+  - {suffix: whatsapp.com,         classification: TRABALHO, topic: "Mensageiro (uso misto)", work: 55}
+  - {suffix: whatsapp.net,         classification: TRABALHO, topic: "Mensageiro (uso misto)", work: 55}
+  - {suffix: wa.me,                classification: TRABALHO, topic: "Mensageiro (uso misto)", work: 55}
+  - {suffix: telegram.org,         classification: NAO_TRABALHO, topic: "Mensageiro (uso misto)", work: 40}
+  - {suffix: linkedin.com,         classification: TRABALHO, topic: "Rede profissional", work: 70}
+  - {suffix: licdn.com,            classification: TRABALHO, topic: "Rede profissional", work: 70}
+  - {suffix: canva.com,            classification: TRABALHO, topic: "Design", work: 65}
+  - {suffix: dropbox.com,          classification: TRABALHO, topic: "Armazenamento em nuvem", work: 70}
+  - {suffix: adobe.com,            classification: TRABALHO, topic: "Adobe", work: 75}
+  - {suffix: adobe.io,             classification: TRABALHO, topic: "Adobe", work: 75}
+  - {suffix: mozilla.org,          classification: TRABALHO, topic: "Navegador (Firefox)", work: 60}
+  - {suffix: mozilla.net,          classification: TRABALHO, topic: "Navegador (Firefox)", work: 60}
+  - {suffix: yahoo.com,            classification: NAO_TRABALHO, topic: "Portal/e-mail pessoal", work: 35}
+  - {suffix: icloud.com,           classification: NAO_TRABALHO, topic: "Nuvem pessoal Apple", work: 35}
+  - {suffix: uber.com,             classification: NAO_TRABALHO, topic: "Transporte (uso misto)", work: 40}
+  - {suffix: waze.com,             classification: TRABALHO, topic: "Navegação (uso misto)", work: 50}
+
+  # ---------------- Trabalho — Brasil (governo, judiciário, pagamentos, logística, segurança)
+  - {suffix: jus.br,               classification: TRABALHO, topic: "Judiciário", work: 90, protected: true}
+  - {suffix: correios.com.br,      classification: TRABALHO, topic: "Logística", work: 75}
+  - {suffix: cielo.com.br,         classification: TRABALHO, topic: "Pagamentos", work: 85}
+  - {suffix: stone.com.br,         classification: TRABALHO, topic: "Pagamentos", work: 85}
+  - {suffix: pagseguro.com.br,     classification: TRABALHO, topic: "Pagamentos", work: 80}
+  - {suffix: omie.com.br,          classification: TRABALHO, topic: "ERP", work: 95}
+  - {suffix: contaazul.com,        classification: TRABALHO, topic: "ERP", work: 95}
+  - {suffix: kaspersky.com,        classification: TRABALHO, topic: "Antivírus", work: 80}
+  - {suffix: eset.com,             classification: TRABALHO, topic: "Antivírus", work: 80}
+  - {suffix: bitdefender.com,      classification: TRABALHO, topic: "Antivírus", work: 80}
+  - {suffix: avast.com,            classification: TRABALHO, topic: "Antivírus", work: 70}
+
+  # ---------------- Não trabalho (lazer/pessoal) — NÃO é malicioso
+  - {suffix: kwai.com,             classification: NAO_TRABALHO, topic: "Rede social (vídeos curtos)", work: 3}
+  - {suffix: kwai.net,             classification: NAO_TRABALHO, topic: "Rede social (vídeos curtos)", work: 3}
+  - {suffix: kwai-pro.com,         classification: NAO_TRABALHO, topic: "Rede social (vídeos curtos)", work: 3}
+  - {suffix: kwaipros.com,         classification: NAO_TRABALHO, topic: "Rede social (vídeos curtos)", work: 3}
+  - {suffix: capcut.com,           classification: NAO_TRABALHO, topic: "Edição de vídeo", work: 20}
+  - {suffix: capcutapi.com,        classification: NAO_TRABALHO, topic: "Edição de vídeo", work: 20}
+  - {suffix: threads.net,          classification: NAO_TRABALHO, topic: "Rede social", work: 5}
+  - {suffix: snapchat.com,         classification: NAO_TRABALHO, topic: "Rede social", work: 3}
+  - {suffix: discord.com,          classification: NAO_TRABALHO, topic: "Chat (jogos/comunidades)", work: 15}
+  - {suffix: discordapp.com,       classification: NAO_TRABALHO, topic: "Chat (jogos/comunidades)", work: 15}
+  - {suffix: mercadolivre.com.br,  classification: NAO_TRABALHO, topic: "Compras online", work: 25}
+  - {suffix: mercadolibre.com,     classification: NAO_TRABALHO, topic: "Compras online", work: 25}
+  - {suffix: mlstatic.com,         classification: NAO_TRABALHO, topic: "Compras online", work: 25}
+  - {suffix: shopee.com.br,        classification: NAO_TRABALHO, topic: "Compras online", work: 10}
+  - {suffix: aliexpress.com,       classification: NAO_TRABALHO, topic: "Compras online", work: 10}
+  - {suffix: shein.com,            classification: NAO_TRABALHO, topic: "Compras online", work: 5}
+  - {suffix: ifood.com.br,         classification: NAO_TRABALHO, topic: "Delivery de comida", work: 10}
+  - {suffix: globo.com,            classification: NAO_TRABALHO, topic: "Notícias/entretenimento", work: 30}
+  - {suffix: uol.com.br,           classification: NAO_TRABALHO, topic: "Notícias/entretenimento", work: 30}
+  - {suffix: terra.com.br,         classification: NAO_TRABALHO, topic: "Notícias/entretenimento", work: 30}
+  - {suffix: booking.com,          classification: NAO_TRABALHO, topic: "Viagens", work: 30}
+  - {suffix: max.com,              classification: NAO_TRABALHO, topic: "Streaming", work: 2}
+  - {suffix: globoplay.com,        classification: NAO_TRABALHO, topic: "Streaming", work: 2}
+  - {suffix: blaze.com,            classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: pixbet.com,           classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: sportingbet.com,      classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: estrelabet.com,       classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: facebook.com,         classification: NAO_TRABALHO, topic: "Rede social", work: 5}
+  - {suffix: fbcdn.net,            classification: NAO_TRABALHO, topic: "Rede social", work: 5}
+  - {suffix: instagram.com,        classification: NAO_TRABALHO, topic: "Rede social", work: 5}
+  - {suffix: cdninstagram.com,     classification: NAO_TRABALHO, topic: "Rede social", work: 5}
+  - {suffix: tiktok.com,           classification: NAO_TRABALHO, topic: "Rede social", work: 3}
+  - {suffix: tiktokcdn.com,        classification: NAO_TRABALHO, topic: "Rede social", work: 3}
+  - {suffix: tiktokv.com,          classification: NAO_TRABALHO, topic: "Rede social", work: 3}
+  - {suffix: twitter.com,          classification: NAO_TRABALHO, topic: "Rede social", work: 8}
+  - {suffix: x.com,                classification: NAO_TRABALHO, topic: "Rede social", work: 8}
+  - {suffix: twimg.com,            classification: NAO_TRABALHO, topic: "Rede social", work: 8}
+  - {suffix: kwai.com,             classification: NAO_TRABALHO, topic: "Rede social", work: 3}
+  - {suffix: pinterest.com,        classification: NAO_TRABALHO, topic: "Rede social", work: 5}
+  - {suffix: reddit.com,           classification: NAO_TRABALHO, topic: "Rede social", work: 8}
+  - {suffix: netflix.com,          classification: NAO_TRABALHO, topic: "Streaming", work: 2}
+  - {suffix: nflxvideo.net,        classification: NAO_TRABALHO, topic: "Streaming", work: 2}
+  - {suffix: primevideo.com,       classification: NAO_TRABALHO, topic: "Streaming", work: 2}
+  - {suffix: disneyplus.com,       classification: NAO_TRABALHO, topic: "Streaming", work: 2}
+  - {suffix: spotify.com,          classification: NAO_TRABALHO, topic: "Streaming de música", work: 10}
+  - {suffix: scdn.co,              classification: NAO_TRABALHO, topic: "Streaming de música", work: 10}
+  - {suffix: deezer.com,           classification: NAO_TRABALHO, topic: "Streaming de música", work: 10}
+  - {suffix: youtube.com,          classification: NAO_TRABALHO, topic: "Vídeo", work: 25}
+  - {suffix: googlevideo.com,      classification: NAO_TRABALHO, topic: "Vídeo", work: 25}
+  - {suffix: ytimg.com,            classification: NAO_TRABALHO, topic: "Vídeo", work: 25}
+  - {suffix: twitch.tv,            classification: NAO_TRABALHO, topic: "Streaming/jogos", work: 3}
+  - {suffix: roblox.com,           classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: rbxcdn.com,           classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: steampowered.com,     classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: steamcommunity.com,   classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: epicgames.com,        classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: xbox.com,             classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: xboxlive.com,         classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: playstation.net,      classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: riotgames.com,        classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: leagueoflegends.com,  classification: NAO_TRABALHO, topic: "Jogos", work: 2}
+  - {suffix: bet365.com,           classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: betano.com,           classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+
+  # ---------------- Ecossistema Kwai/Kuaishou e ByteDance/TikTok (infra dos apps)
+  - {suffix: kslawin.com,          classification: NAO_TRABALHO, topic: "Rede social (Kwai)", work: 3}
+  - {suffix: kwaicdn.com,          classification: NAO_TRABALHO, topic: "Rede social (Kwai)", work: 3}
+  - {suffix: yximgs.com,           classification: NAO_TRABALHO, topic: "Rede social (Kwai)", work: 3}
+  - {suffix: kuaishou.com,         classification: NAO_TRABALHO, topic: "Rede social (Kwai)", work: 3}
+  - {suffix: bytedance.com,        classification: NAO_TRABALHO, topic: "Rede social (TikTok)", work: 3}
+  - {suffix: byteoversea.com,      classification: NAO_TRABALHO, topic: "Rede social (TikTok)", work: 3}
+  - {suffix: ibytedtos.com,        classification: NAO_TRABALHO, topic: "Rede social (TikTok)", work: 3}
+  - {suffix: ttwstatic.com,        classification: NAO_TRABALHO, topic: "Rede social (TikTok)", work: 3}
+  - {suffix: tiktokcdn-us.com,     classification: NAO_TRABALHO, topic: "Rede social (TikTok)", work: 3}
+  - {suffix: msn.com,              classification: NAO_TRABALHO, topic: "Notícias/entretenimento (MSN)", work: 30}
+
+  # ---------------- Publicidade/rastreamento (não trabalho; não malicioso por si)
+  - {suffix: pangle.io,            classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: applovin.com,         classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: applvn.com,           classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: appsflyer.com,        classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 10}
+  - {suffix: adjust.com,           classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 10}
+  - {suffix: branch.io,            classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 10}
+  - {suffix: mintegral.com,        classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: rayjump.com,          classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: inmobi.com,           classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: vungle.com,           classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: app-measurement.com,  classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 15}
+  - {suffix: facebook.net,         classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 10}
+  - {suffix: doubleclick.net,      classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 10}
+  - {suffix: googlesyndication.com, classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 10}
+  - {suffix: googleadservices.com, classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 10}
+  - {suffix: google-analytics.com, classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 15}
+  - {suffix: adnxs.com,            classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: criteo.com,           classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: taboola.com,          classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: outbrain.com,         classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: scorecardresearch.com, classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: adsrvr.org,           classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}
+  - {suffix: amazon-adsystem.com,  classification: NAO_TRABALHO, topic: "Publicidade/rastreamento", work: 5}

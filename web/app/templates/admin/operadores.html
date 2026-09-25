@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Operadores{% endblock %}
+{% block content %}
+<h1>Operadores</h1>
+<div class="card">
+  <h2>Novo operador</h2>
+  <form method="post" action="{{ url_for('operadores.criar') }}">
+    <div class="row">
+      <div><label>Nome</label><input type="text" name="nome"></div>
+      <div><label>E-mail</label><input type="email" name="email" required></div>
+      <div><label>Senha local <span class="mut">(opcional com login único)</span></label><input type="text" name="senha" minlength="8"></div>
+    </div>
+    <label class="mut" style="margin-top:.6rem"><input type="checkbox" name="is_super"> Super-admin (gerencia operadores)</label>
+    <div style="margin-top:.6rem"><button class="primary">Criar</button></div>
+  </form>
+</div>
+<div class="card">
+  <h2>Operadores · {{ lista|length }}</h2>
+  <table>
+    <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Nova senha</th><th>Último acesso</th><th>Ativo</th></tr></thead>
+    <tbody>
+    {% for a in lista %}
+      {% set pendente = not a.ativo and not a.last_login %}
+      <tr>
+        <td>{{ a.nome }}{% if pendente %}<br><span style="font-size:.75rem;font-weight:700;color:#b45309">⏳ aguardando liberação (login único)</span>{% endif %}</td>
+        <td>{{ a.email }}</td>
+        <td style="white-space:nowrap">
+          <form method="post" action="{{ url_for('operadores.acesso', oid=a.id) }}" style="display:inline-flex;gap:.3rem;align-items:center">
+            <label class="mut" style="margin:0;font-size:.8rem;white-space:nowrap"><input type="checkbox" name="is_super" {{ 'checked' if a.is_super }}> Super</label>
+            {% if pendente %}<input type="hidden" name="ativar" value="1"><button class="primary">Liberar</button>
+            {% else %}<button>Salvar</button>{% endif %}
+          </form>
+        </td>
+        <td style="white-space:nowrap">
+          <form method="post" action="{{ url_for('operadores.senha', oid=a.id) }}" style="display:inline">
+            <input type="text" name="senha" placeholder="nova senha" required minlength="8" style="width:130px">
+            <button>Salvar</button>
+          </form>
+        </td>
+        <td class="mut" style="white-space:nowrap">{{ a.last_login|dt_sp if a.last_login else '—' }}</td>
+        <td style="white-space:nowrap">
+          {{ '✔' if a.ativo else '✖' }}
+          {% if a.id != adm.id and not pendente %}
+          <form method="post" action="{{ url_for('operadores.ativo', oid=a.id) }}" style="display:inline">
+            <input type="hidden" name="ativo" value="{{ '0' if a.ativo else '1' }}">
+            <button>{{ 'Desativar' if a.ativo else 'Ativar' }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="mut" style="font-size:.8rem">Todo operador ativo usa todas as telas de DNS; o papel <b>Super</b> só acrescenta esta tela.
+    {% if config.SSO_LOGIN_URL %}Quem entra pelo login único 2D (usuário do ERP) aparece aqui como <b>aguardando liberação</b>.{% endif %}</p>
+</div>
+{% endblock %}

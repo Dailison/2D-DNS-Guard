@@ -1,0 +1,255 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+<p><a href="{{ url_for('analise.dominios', t=tid) }}">← Domínios</a></p>
+{% if not d %}
+  <div class="card mut">Domínio <b>{{ nome }}</b> não encontrado para este cliente.</div>
+{% else %}
+{% set dm = d.domain %}{% set tv = d.tenant_view or {} %}
+{% set cls = tv.classification or dm.classification %}
+<div class="card">
+  <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:center">
+    <h2 style="margin:0;font-size:1.3rem">{{ dm.name }}</h2>
+    {{ m.badge(cls) }} {{ m.cat(dm.category) }}
+    {% if blq %}{% if blq.estado %}<span class="stt blk">🔒 Bloqueado</span>{% else %}<span class="stt ok">🔓 Liberado</span>{% endif %}{% endif %}
+    {% if tv.review_status %}<span class="tag">{{ {'blocked':'decidido: bloquear','allowed':'decidido: manter liberado'}.get(tv.review_status) }} · {{ tv.reviewed_by or '' }}</span>{% endif %}
+    {% if tv.overridden %}<span class="tag">ajuste manual neste cliente</span>{% endif %}
+    {{ m.origem(dm.classified_by, dm.llm_pending) }}
+  </div>
+  <div class="m-grid" style="margin-top:.8rem">
+    <div class="metric"><div class="n">{{ dm.risk_score if dm.risk_score is not none else '—' }}</div><div class="l">RISK_SCORE</div></div>
+    <div class="metric"><div class="n">{{ tv.work_score if tv.work_score is not none else (dm.work_score if dm.work_score is not none else '—') }}</div><div class="l">WORK_SCORE</div></div>
+    <div class="metric"><div class="n">{{ ((dm.confidence or 0) * 100)|round|int }}%</div><div class="l">Confiança</div></div>
+    <div class="metric"><div class="n" style="font-size:1rem;padding-top:.4rem">{{ {'NONE':'Nenhuma','MONITOR':'Monitorar','REVIEW':'Revisar','BLOCK_CANDIDATE':'Candidato a bloqueio'}.get(dm.recommended_action, dm.recommended_action or '—') }}</div><div class="l">Ação recomendada</div></div>
+    <div class="metric"><div class="n">{{ tv.total_queries or 0 }}</div><div class="l">Consultas (cliente)</div></div>
+    <div class="metric"><div class="n">{{ tv.clients_count or 0 }}</div><div class="l">Computadores</div></div>
+  </div>
+  <p class="mut" style="margin:.2rem 0 0;font-size:.88rem">
+    Assunto: <b>{{ dm.topic or '—' }}</b> ·
+    1º acesso: {{ tv.first_seen|dt_sp }} · último: {{ tv.last_seen|dt_sp }} ·
+    Tranco: {{ ('#' ~ dm.popularity_rank) if dm.popularity_rank else 'fora do top 1M' }} ·
+    Registro: {{ dm.registered_at or '—' }} ·
+    Analisado: {{ dm.analyzed_at|dt_sp }}{% if dm.model %} ({{ dm.model }}){% endif %}
+  </p>
+  {% set rv = tv if tv.corp_action else dm %}
+  {% if rv.corp_action %}
+  <p style="margin:.7rem 0 0">Recomendação para a empresa (ambiente corporativo): {{ m.rec(rv, full=true) }}</p>
+  {% endif %}
+  {% if dm.recommended_action == 'BLOCK_CANDIDATE' %}
+  <p class="flash erro" style="margin:.8rem 0 0">Candidato a bloqueio. Nada foi bloqueado automaticamente: para bloquear, use <a href="#bloqueio">Ações → Bloqueio no DNS</a> (aprovação humana).</p>
+  {% endif %}
+</div>
+
+<div class="two">
+  <div class="card">
+    <h2>Por que essa classificação?</h2>
+    <table>
+      <thead><tr><th style="width:3rem">Evid.</th><th>Justificativa</th><th>Fonte</th></tr></thead>
+      <tbody>
+      {% for r in dm.reasons %}
+        <tr><td>{% if r.evidence_id %}<code>{{ r.evidence_id }}</code>{% endif %}</td><td>{{ r.text }}</td>
+            <td class="mut">{{ {'ia':'IA','regras':'regras','sistema':'sistema'}.get(r.by, r.by) }}</td></tr>
+      {% else %}<tr><td colspan="3" class="mut">Sem justificativas registradas.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">A IA só pode justificar citando uma evidência (E0, E1, …) da lista ao lado; justificativas sem evidência são descartadas automaticamente.</p>
+  </div>
+
+  <div class="card">
+    <h2>Evidências usadas</h2>
+    <table>
+      <tbody>
+      {% for e in dm.evidence %}
+        <tr><td style="width:3rem"><code>{{ e.id }}</code></td>
+            <td>{{ e.text }}{% if e.risk %} <span class="tag" style="color:#ea580c;border-color:#fdba74">risco</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Reputação (Threat Intelligence)</h2>
+    {% if dm.ti_hits %}
+    <table>
+      <thead><tr><th>Fonte</th><th>Tipo</th><th>Confiança</th><th>Entrada</th></tr></thead>
+      <tbody>
+      {% for h in dm.ti_hits %}
+        <tr><td>{{ h.label }}</td><td>{{ h.threat }}</td><td>{{ h.confidence }}</td><td><code>{{ h.matched }}</code></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="mut">Não consta nas listas de ameaça consultadas. <b>Isso não significa que é seguro</b> — só que não há registro conhecido.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Consultas por dia (30 dias)</h2>
+    {% set mx = (d.timeline|map(attribute='queries')|max) if d.timeline else 1 %}
+    <div style="display:flex;align-items:flex-end;gap:2px;height:90px">
+      {% for p in d.timeline %}
+        <div title="{{ p.day|dt_sp('%d/%m') }}: {{ p.queries }}" style="flex:1;background:var(--b);min-width:3px;height:{{ ((p.queries / mx) * 100)|round|int }}%"></div>
+      {% else %}<span class="mut">Sem consultas nos últimos 30 dias.</span>{% endfor %}
+    </div>
+  </div>
+
+  {% if todos and d.by_tenant %}
+  <div class="card">
+    <h2>Acessado por empresa ({{ d.by_tenant|length }})</h2>
+    <table>
+      <thead><tr><th>Empresa</th><th class="num">Consultas</th><th class="num">PCs</th><th>Último acesso</th><th>Ajuste manual</th></tr></thead>
+      <tbody>
+      {% for e in d.by_tenant %}
+        <tr><td><a href="{{ url_for('analise.dominio', nome=dm.name, t=e.id) }}"><b>{{ e.name }}</b></a></td>
+            <td class="num">{{ e.total_queries }}</td><td class="num">{{ e.clients_count }}</td>
+            <td class="mut" style="white-space:nowrap">{{ e.last_seen|dt_sp }}</td>
+            <td>{{ m.badge(e.override_classification) if e.override_classification else '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Computadores que acessaram</h2>
+    <table>
+      <thead><tr><th>Computador</th>{% if todos %}<th>Empresa</th>{% endif %}<th class="num">Consultas</th><th class="num">Bloq.</th><th>Primeiro</th><th>Último</th></tr></thead>
+      <tbody>
+      {% for c in d.clients %}
+        <tr><td>{{ m.pc(c.ip, c.tenant_id) }}</td>{% if todos %}<td>{{ m.emp(c.tenant_name, c.tenant_id) }}</td>{% endif %}<td class="num">{{ c.queries }}</td><td class="num">{{ c.blocked }}</td>
+            <td class="mut" style="white-space:nowrap">{{ c.first_seen|dt_sp }}</td><td class="mut" style="white-space:nowrap">{{ c.last_seen|dt_sp }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Subdomínios observados</h2>
+    <table>
+      <thead><tr><th>Nome</th><th class="num">Consultas</th><th>Último</th></tr></thead>
+      <tbody>
+      {% for f in d.fqdns %}
+        <tr><td><code>{{ f.name }}</code></td><td class="num">{{ f.queries }}</td><td class="mut" style="white-space:nowrap">{{ f.last_seen|dt_sp }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Histórico da classificação</h2>
+    <table>
+      <thead><tr><th>Quando</th><th>Classe</th><th class="num">Risco</th><th class="num">Trab.</th><th>Origem</th></tr></thead>
+      <tbody>
+      {% for h in d.history %}
+        <tr><td class="mut" style="white-space:nowrap">{{ h.created_at|dt_sp }}</td><td>{{ m.badge(h.classification) if h.classification else '<span class="mut">override removido</span>'|safe }}</td>
+            <td class="num">{{ h.risk_score if h.risk_score is not none else '—' }}</td><td class="num">{{ h.work_score if h.work_score is not none else '—' }}</td>
+            <td class="mut">{{ m.origem(h.source, false) }}{% if h.tenant_name %} <span style="font-size:.75rem">· {{ h.tenant_name }}</span>{% endif %}{% if h.note %}<br><span style="font-size:.75rem">{{ h.note }}</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Ações</h2>
+    {% if blq %}
+    {% set ge = blq.grupos_empresa %}
+    {% macro shared(g) -%}
+      {%- if blq.compartilham.get(g) %} <span class="mut" style="font-size:.78rem">(também: {{ blq.compartilham[g]|join(', ') }})</span>{% endif -%}
+    {%- endmacro %}
+    <div id="bloqueio" style="border:1px solid var(--bd);border-radius:10px;padding:.7rem .8rem;margin-bottom:1rem;background:#fafbfc">
+      <label style="margin-top:0">Bloqueio no DNS (Technitium) — <code>{{ blq.nome }}</code></label>
+      {% if blq.estado %}
+        <p style="margin:.3rem 0">🔒 <b>Bloqueado</b> em:</p>
+        <ul style="margin:.2rem 0 .5rem 1.1rem;padding:0;font-size:.88rem">
+          {% for g, ents in blq.estado.items() %}
+            <li><b>{{ g }}</b>{{ ' ← grupo desta empresa' if g in ge }} —
+              {% for e, tipo in ents[:4] %}<code>{{ e }}</code>{{ {'exata':'','pai':' (domínio pai: bloqueia tudo abaixo)','sub':' (subdomínio)'}[tipo] }}{{ ', ' if not loop.last }}{% endfor %}{% if ents|length > 4 %} +{{ ents|length - 4 }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p style="margin:.3rem 0">🔓 <b>Não está bloqueado</b> em nenhum grupo de bloqueio.</p>
+      {% endif %}
+      <p class="mut" style="font-size:.82rem;margin:.2rem 0 .6rem">Grupos de <b>{{ tenant.name if tenant else 'esta empresa' }}</b>:
+        {% for g, redes in ge.items() %}<b>{{ g }}</b> ({{ redes|join(', ') }}){{ shared(g) }}{{ '; ' if not loop.last }}{% else %}nenhum (redes sem grupo no Technitium){% endfor %}</p>
+
+      {% if blq.protegido %}
+        <div class="flash erro" style="margin:.4rem 0">⚠ Este domínio é <b>infraestrutura protegida</b> (catálogo). Bloqueá-lo pode quebrar sistemas de trabalho (login, atualizações, Office…).</div>
+      {% endif %}
+
+      <div class="row" style="align-items:flex-end;gap:.6rem">
+        {% if blq.estado %}
+        <form method="post" action="{{ url_for('analise.dominio_liberar', nome=dm.name) }}"
+              onsubmit="return confirm('Liberar {{ blq.nome }} no escopo escolhido? Remove o domínio e seus subdomínios das listas de bloqueio desses grupos (afeta todas as empresas de cada grupo).')">
+          <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">
+          <label>Liberar em</label>
+          <div style="display:flex;gap:.3rem">
+            <select name="escopo">
+              <option value="todos">todos os grupos onde está bloqueado ({{ blq.estado|length }})</option>
+              {% if blq.bloqueado_empresa %}<option value="empresa">só nos grupos desta empresa ({{ blq.bloqueado_empresa|join(', ') }})</option>{% endif %}
+              {% for g in blq.estado %}<option value="g:{{ g }}">só no grupo {{ g }}</option>{% endfor %}
+            </select>
+            <button class="btn" style="background:#16a34a;box-shadow:none;white-space:nowrap">🔓 Liberar</button>
+          </div>
+        </form>
+        {% endif %}
+        {% if not blq.bloqueado_empresa or blq.estado|length < blq.todos|length %}
+        <form method="post" action="{{ url_for('analise.dominio_bloquear', nome=dm.name) }}"
+              onsubmit="return confirm('{{ '⚠ INFRAESTRUTURA PROTEGIDA! ' if blq.protegido }}Bloquear {{ blq.nome }} (e todos os subdomínios) no escopo escolhido? Vale para TODAS as empresas de cada grupo.')">
+          <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">
+          <label>Bloquear em</label>
+          <div style="display:flex;gap:.3rem">
+            <select name="escopo">
+              {% if ge %}<option value="empresa">grupos desta empresa ({{ ge.keys()|join(', ') }})</option>{% endif %}
+              <option value="todos">todos os grupos de bloqueio ({{ blq.todos|length }})</option>
+              {% for g in blq.todos if g not in blq.estado %}<option value="g:{{ g }}">só no grupo {{ g }}</option>{% endfor %}
+            </select>
+            <button class="danger" style="white-space:nowrap">🔒 Bloquear</button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+      <p class="hint" style="margin-top:.5rem">Grupos de bloqueio são compartilhados: a mudança vale para todas as empresas do grupo. Tem efeito na próxima consulta (o cache do domínio é limpo). Para exceções só de alguns computadores, use DNS → Liberados.</p>
+    </div>
+    {% endif %}
+    {% if todos %}
+    <p class="mut" style="font-size:.88rem">O ajuste manual da classificação vale <b>por empresa</b>: abra o domínio na visão de uma empresa (quadro "Acessado por empresa") para ajustar.</p>
+    {% else %}
+    <form method="post" action="{{ url_for('analise.dominio_override', nome=dm.name) }}">
+      <input type="hidden" name="tid" value="{{ tid }}">
+      <label>Ajustar classificação <b>só para {{ tenant.name if tenant else 'este cliente' }}</b></label>
+      <div class="row" style="align-items:flex-end">
+        <div><select name="classe">
+          {% for c, l in CLASSES %}<option value="{{ c }}" {{ 'selected' if c == cls }}>{{ l }}</option>{% endfor %}
+        </select></div>
+        <div><input type="number" name="work_score" min="0" max="100" placeholder="WORK_SCORE (opcional)"></div>
+      </div>
+      <input type="text" name="nota" placeholder="Motivo (ex.: sistema de agendamento usado pela clínica)" style="margin-top:.4rem">
+      <div style="margin-top:.5rem;display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="primary">Salvar ajuste</button>
+        {% if tv.overridden %}
+          <button class="danger" name="remover" value="1" formnovalidate>Remover ajuste</button>
+        {% endif %}
+      </div>
+    </form>
+    {% endif %}
+    <hr style="border:0;border-top:1px solid var(--bd);margin:1rem 0">
+    {% if dm.ti_hits %}
+    <form method="post" action="{{ url_for('analise.dominio_fp', nome=dm.name) }}" onsubmit="return confirm('Marcar {{ dm.name }} como falso positivo? As listas deixam de pesar para este domínio.')">
+      <input type="hidden" name="tid" value="{{ tid }}">
+      <label>Falso positivo em lista de ameaça</label>
+      <div class="row" style="align-items:flex-end">
+        <div><select name="fonte"><option value="">Todas as fontes</option>
+          {% for h in dm.ti_hits %}<option value="{{ h.source }}">{{ h.label }}</option>{% endfor %}</select></div>
+        <div style="flex:0"><button class="btn">Marcar falso positivo</button></div>
+      </div>
+    </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('analise.dominio_reanalisar', nome=dm.name) }}" style="margin-top:.8rem">
+      <input type="hidden" name="tid" value="{{ tid }}">
+      <button class="btn">Reanalisar (regras + IA)</button>
+      <span class="hint">útil depois de mudar fontes ou se a classificação parecer errada</span>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

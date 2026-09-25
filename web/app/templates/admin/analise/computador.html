@@ -1,0 +1,49 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+<p><a href="{{ url_for('analise.computadores', t=tid) }}">← Computadores</a></p>
+{% if not c %}
+  <div class="card mut">Computador <code>{{ ip }}</code> sem consultas no período para este cliente.</div>
+{% else %}
+{% set p = c.client %}
+<div class="card">
+  <h2 style="font-size:1.25rem"><code>{{ p.ip }}</code></h2>
+  <div class="m-grid">
+    <div class="metric"><div class="n">{{ p.anomaly_score }}</div><div class="l">Score de anomalia</div></div>
+    <div class="metric"><div class="n">{{ p.queries }}</div><div class="l">Consultas</div></div>
+    <div class="metric"><div class="n">{{ p.domains }}</div><div class="l">Domínios</div></div>
+    <div class="metric"><div class="n">{{ m.pct(p.nonwork_share) }}</div><div class="l">Não trabalho</div></div>
+    <div class="metric"><div class="n">{{ (p.susp or 0) + (p.mal or 0) }}</div><div class="l">Suspeitos/malic.</div></div>
+    <div class="metric"><div class="n">{{ p.new_domains_24h }}</div><div class="l">Domínios inéditos 24h</div></div>
+  </div>
+</div>
+<div class="two">
+  <div class="card">
+    <h2>Domínios acessados</h2>
+    <table>
+      <thead><tr><th>Domínio</th><th>Classe</th><th class="num">Consultas</th><th>Último</th></tr></thead>
+      <tbody>
+      {% for d in c.domains %}
+        <tr><td>{{ m.dom(d.name) }}{% if d.topic %}<br><span class="mut" style="font-size:.75rem">{{ d.topic }}</span>{% endif %}</td>
+            <td>{{ m.badge(d.classification) }}</td><td class="num">{{ d.queries }}</td>
+            <td class="mut" style="white-space:nowrap">{{ d.last_seen|dt_sp }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Alertas deste computador</h2>
+    <table>
+      <thead><tr><th>Quando</th><th>Sev.</th><th>Alerta</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for a in c.alerts %}
+        <tr class="{{ 'muted-row' if a.status != 'open' }}"><td class="mut" style="white-space:nowrap">{{ a.created_at|dt_sp }}</td>
+            <td><span class="sev {{ a.severity }}">{{ a.severity }}</span></td><td>{{ a.title }}</td>
+            <td class="mut">{{ {'open':'aberto','ack':'visto','closed':'fechado'}.get(a.status, a.status) }}</td></tr>
+      {% else %}<tr><td colspan="4" class="mut">Nenhum alerta.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

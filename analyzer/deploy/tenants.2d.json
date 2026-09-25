@@ -1,0 +1,22 @@
+[
+  {"empresa": "Semetra",           "unidade": "",           "cidr": "10.7.0.0/16"},
+  {"empresa": "Barretos",          "unidade": "",           "cidr": "10.9.0.0/16"},
+  {"empresa": "Tropical",          "unidade": "",           "cidr": "10.11.0.0/16"},
+  {"empresa": "Locan",             "unidade": "",           "cidr": "10.17.0.0/16"},
+  {"empresa": "Casa Nova",         "unidade": "",           "cidr": "10.23.0.0/16"},
+  {"empresa": "Inclua Mais",       "unidade": "",           "cidr": "10.24.0.0/16"},
+  {"empresa": "Dom Bosco",         "unidade": "",           "cidr": "10.28.0.0/16"},
+  {"empresa": "Estacio",           "unidade": "",           "cidr": "10.29.0.0/16"},
+  {"empresa": "Economize",         "unidade": "Novo",       "cidr": "10.33.0.0/16"},
+  {"empresa": "Economize",         "unidade": "Ice Beer",   "cidr": "10.34.0.0/16"},
+  {"empresa": "Moderna",           "unidade": "",           "cidr": "10.35.0.0/16"},
+  {"empresa": "Madá",              "unidade": "",           "cidr": "10.43.0.0/16"},
+  {"empresa": "Norte Sul",         "unidade": "I",          "cidr": "10.51.0.0/16"},
+  {"empresa": "Norte Sul",         "unidade": "II",         "cidr": "10.52.0.0/16"},
+  {"empresa": "Moral Auto Peças",  "unidade": "PBS",        "cidr": "10.57.0.0/16"},
+  {"empresa": "Moral Auto Peças",  "unidade": "CAN",        "cidr": "10.58.0.0/16"},
+  {"empresa": "JN Materiais",      "unidade": "",           "cidr": "10.64.0.0/16"},
+  {"empresa": "Posto ISO",         "unidade": "",           "cidr": "10.65.0.0/16"},
+  {"empresa": "G&D",               "unidade": "Matriz",     "cidr": "10.70.0.0/16"},
+  {"empresa": "2D Tecnologia",     "unidade": "Escritório", "cidr": "10.100.0.0/16"}
+]

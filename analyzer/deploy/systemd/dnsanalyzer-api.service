@@ -1,0 +1,22 @@
+[Unit]
+Description=2D DNS Analyzer - API interna (consumida pelo portal)
+After=network-online.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=dnsanalyzer
+Group=dnsanalyzer
+EnvironmentFile=/etc/2d-dnsanalyzer/analyzer.env
+WorkingDirectory=/opt/2d-dnsanalyzer/app
+ExecStart=/opt/2d-dnsanalyzer/venv/bin/python -m dnsanalyzer api
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/2d-dnsanalyzer /var/lib/2d-dnsanalyzer
+
+[Install]
+WantedBy=multi-user.target

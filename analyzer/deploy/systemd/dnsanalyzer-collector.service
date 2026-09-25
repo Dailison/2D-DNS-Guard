@@ -1,0 +1,24 @@
+[Unit]
+Description=2D DNS Analyzer - coletor (Technitium -> PostgreSQL, feeds TI, comportamento)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=dnsanalyzer
+Group=dnsanalyzer
+EnvironmentFile=/etc/2d-dnsanalyzer/analyzer.env
+WorkingDirectory=/opt/2d-dnsanalyzer/app
+ExecStart=/opt/2d-dnsanalyzer/venv/bin/python -m dnsanalyzer run-collector
+Restart=always
+RestartSec=15
+Nice=5
+TimeoutStopSec=90
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/2d-dnsanalyzer /var/lib/2d-dnsanalyzer
+
+[Install]
+WantedBy=multi-user.target

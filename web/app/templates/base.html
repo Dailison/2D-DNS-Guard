@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Admin{% endblock %} · 2D DNS Guard</title>
+  <style>
+    :root{--b:#0f72bc;--b2:#1483d4;--navy:#1b3a6b;--bg:#eef1f6;--card:#fff;--txt:#1f2937;--mut:#6b7280;--bd:#e5e7eb}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+    header{background:linear-gradient(100deg,var(--navy),#12294f 60%,#0e1f42);color:#fff;padding:.6rem 1rem;
+           display:flex;flex-wrap:wrap;gap:.4rem 1rem;align-items:center;box-shadow:0 2px 10px rgba(9,20,45,.25)}
+    header .brand{display:flex;align-items:center;gap:.5rem;font-weight:700;margin-right:.5rem;letter-spacing:.01em}
+    header .brand .mk{font-family:'Arial Black',Arial,sans-serif;font-weight:900;font-size:1.15rem}
+    header .brand .mk .b2{color:#4aa8e8}header .brand .mk .bd{color:#fff}
+    header .brand .nm{font-size:.9rem;color:#cdd9ef;font-weight:600}
+    header nav{display:flex;flex-wrap:wrap;gap:.2rem .8rem}
+    header a{color:#c3d2ea;text-decoration:none;font-size:.92rem;padding:.2rem 0;border-bottom:2px solid transparent}
+    header a:hover,header a.on{color:#fff;border-bottom-color:#4aa8e8}
+    header .sp{margin-left:auto}
+    .tenant-sel{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.28);
+                border-radius:8px;padding:.35rem .55rem;font-size:.88rem;max-width:210px;cursor:pointer}
+    .tenant-sel:focus{outline:0;border-color:#4aa8e8;box-shadow:0 0 0 3px rgba(74,168,232,.25)}
+    .tenant-sel option{color:#111}
+    .bnd{display:inline-block;font-size:.72rem;font-weight:700;padding:.08rem .4rem;border-radius:6px;color:#fff;white-space:nowrap}
+    .bnd.b24{background:#d97706}.bnd.b5{background:#2563eb}.bnd.b6{background:#7c3aed}.bnd.fio{background:#64748b}
+    .sig{font-size:.82rem;letter-spacing:1px;color:#16a34a}
+    .sig.w{color:#d97706}.sig.x{color:#dc2626}
+    main{max-width:1050px;margin:1.2rem auto;padding:0 1rem}
+    .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem;
+          box-shadow:0 1px 3px rgba(15,27,46,.05)}
+    h1{font-size:1.35rem;margin:.2rem 0 1rem;color:var(--navy)} h2{font-size:1.05rem;margin:.2rem 0 .8rem;color:var(--navy)}
+    table{width:100%;border-collapse:collapse;font-size:.9rem}
+    th,td{text-align:left;padding:.5rem .5rem;border-bottom:1px solid var(--bd);vertical-align:top}
+    th{color:var(--mut);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.03em}
+    input,select,button{font:inherit;padding:.5rem .6rem;border:1px solid var(--bd);border-radius:8px;background:#fff}
+    input:focus,select:focus{outline:0;border-color:var(--b);box-shadow:0 0 0 3px rgba(15,114,188,.13)}
+    .card input:not([type=checkbox]):not([type=radio]),.card select{width:100%}
+    input[type=checkbox],input[type=radio]{accent-color:var(--b);width:1.05rem;height:1.05rem;vertical-align:-2px}
+    label{display:block;font-size:.82rem;color:var(--mut);margin:.4rem 0 .15rem}
+    .card>label{font-weight:600;color:#334155}
+    /* grade de campos: colunas iguais que quebram sozinhas */
+    .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.5rem 1rem;align-items:end}
+    .row>div{min-width:0}
+    .row>div label,.row>div .lbl{display:block;font-size:.82rem;color:#334155;font-weight:600;margin:.1rem 0 .25rem}
+    .row>label{display:flex;align-items:center;gap:.45rem;font-size:.9rem;color:#334155;margin:.2rem 0;font-weight:500}
+    .chk{display:flex;align-items:center;gap:.5rem;font-size:.92rem;color:#334155;font-weight:500;margin:.3rem 0}
+    .chk input{flex:0 0 auto}
+    .hint{color:var(--mut);font-size:.8rem;line-height:1.5;margin:.6rem 0 0}
+    .hint code{background:#e8eefb}
+    button.primary,.btn{background:linear-gradient(135deg,var(--b2),var(--b) 60%,var(--navy));color:#fff;border:0;
+          cursor:pointer;text-decoration:none;display:inline-block;padding:.55rem .9rem;border-radius:8px;font-size:.9rem;
+          font-weight:600;box-shadow:0 4px 12px rgba(15,114,188,.28)}
+    button.primary:hover,.btn:hover{filter:brightness(1.04)}
+    button.danger{background:#dc2626;color:#fff;border:0;cursor:pointer;font-weight:600}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem}
+    .metric{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:.9rem;position:relative;overflow:hidden}
+    .metric::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(var(--b2),var(--navy))}
+    .metric .n{font-size:1.7rem;font-weight:700;color:var(--navy)}.metric .l{color:var(--mut);font-size:.85rem}
+    .flash{padding:.6rem .8rem;border-radius:8px;margin-bottom:.6rem;font-size:.9rem}
+    .flash.ok{background:#dcfce7;color:#166534}.flash.erro{background:#fee2e2;color:#991b1b}
+    .mut{color:var(--mut)} code{background:#e8eefb;color:var(--navy);padding:.1rem .35rem;border-radius:5px}
+    a{color:var(--b)}
+    .dd{position:relative;display:inline-block}
+    .dd>.ddbtn{cursor:pointer}
+    .dd .ddmenu{display:none;position:absolute;top:100%;left:0;background:var(--card);min-width:150px;
+      border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.28);z-index:60;padding:.3rem 0;margin-top:.25rem}
+    .dd:hover .ddmenu,.dd:focus-within .ddmenu{display:block}
+    .dd .ddmenu::before{content:"";position:absolute;left:0;right:0;top:-.6rem;height:.6rem}  /* ponte: o vão não fecha o menu */
+    .dd .ddmenu a{display:block;color:var(--navy);padding:.5rem .95rem;white-space:nowrap;text-decoration:none}
+    .dd .ddmenu a:hover{background:#eef1f6}
+  </style>
+</head>
+<body>
+    <header>
+    {% if portal_kit_url and adm %}
+    <twod-launcher current="dns-guard" style="--twod-text:#fff"></twod-launcher>
+    <script src="{{ portal_kit_url }}" defer></script>
+    {% endif %}
+    <span class="brand"><span class="mk"><span class="b2">2</span><span class="bd">D</span></span>
+      <span class="nm">DNS Guard</span></span>
+    <nav>
+      {% if adm %}
+      {% if config.ANALYZER_ENABLED %}
+      <a href="{{ url_for('analise.painel') }}" class="{{ 'on' if request.blueprint == 'analise' and request.endpoint not in ('analise.empresas', 'analise.decisoes') }}">Análise (IA)</a>
+      <a href="{{ url_for('analise.decisoes') }}" class="{{ 'on' if request.endpoint == 'analise.decisoes' }}">Decisões</a>{% endif %}
+      {% if config.TECHNITIUM_ENABLED %}
+      <a href="{{ url_for('admin.bloqueios') }}" class="{{ 'on' if request.endpoint == 'admin.bloqueios' }}">Bloqueios</a>
+      <a href="{{ url_for('admin.liberados') }}" class="{{ 'on' if request.endpoint == 'admin.liberados' }}">Liberados</a>
+      <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs DNS</a>{% endif %}
+      {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">Empresas</a>{% endif %}
+      {% if adm.is_super %}<a href="{{ url_for('operadores.lista') }}" class="{{ 'on' if request.blueprint == 'operadores' }}">Operadores</a>{% endif %}
+      {% endif %}
+    </nav>
+    <span class="sp"></span>
+    {% if adm %}<span class="mut" style="color:#a9b8d4;font-size:.85rem">{{ adm.nome }}</span>{% endif %}
+    {% if adm %}<a href="{{ url_for('auth.logout') }}">Sair</a>{% endif %}
+  </header>
+  <main>
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% for cat,msg in msgs %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+    <footer style="text-align:center;color:var(--mut);font-size:.8rem;margin:2rem 0 1rem">
+      ⚡ powered by <a href="https://www.2dtecnologia.com" target="_blank" rel="noopener" style="color:var(--b);text-decoration:none;font-weight:600">2D Tecnologia</a>
+    </footer>
+  </main>
+</body>
+</html>

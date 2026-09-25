@@ -1,0 +1,60 @@
+{% extends "admin/analise/_base.html" %}
+{% import "admin/analise/_macros.html" as m with context %}
+{% block an %}
+<div class="card">
+  <form method="get" class="row" style="align-items:flex-end">
+    <input type="hidden" name="t" value="{{ tid }}">
+    <div><label>Buscar domínio</label><input type="text" name="q" value="{{ f.q }}" placeholder="parte do nome"></div>
+    <div><label>Classificação</label>
+      <select name="classe"><option value="">— Todas —</option>
+        {% for c, l in CLASSES %}<option value="{{ c }}" {{ 'selected' if f.classification == c }}>{{ l }}</option>{% endfor %}
+      </select></div>
+    <div><label>Categoria</label>
+      <select name="categoria"><option value="">— Todas —</option>
+        {% for code, c in scats.items() %}<option value="{{ code }}" {{ 'selected' if f.category == code }}>{{ c.label }}</option>{% endfor %}
+      </select></div>
+    <div><label>Recomendação</label>
+      <select name="rec"><option value="">— Todas —</option>
+        {% for c, l in [('BLOQUEAR','Bloquear'),('REVISAR','Revisar'),('LIBERAR','Liberar')] %}<option value="{{ c }}" {{ 'selected' if f.corp == c }}>{{ l }}</option>{% endfor %}
+      </select></div>
+    <div><label>Ordenar por</label>
+      <select name="ordem">
+        {% for o, l in [('queries','Mais consultas'),('risk','Maior risco'),('last_seen','Acesso mais recente'),('first_seen','Mais novos'),('work','Menos relacionados ao trabalho')] %}
+          <option value="{{ o }}" {{ 'selected' if f.sort == o }}>{{ l }}</option>{% endfor %}
+      </select></div>
+    <div style="flex:0"><button class="primary">Filtrar</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>{{ res.total }} domínio(s)</h2>
+  <table>
+    <thead><tr><th>Domínio</th><th>Categoria</th><th>Classe</th><th>Recomendação</th><th>Risco</th><th class="num">Trabalho</th><th class="num">Consultas</th><th class="num">PCs</th>{% if todos %}<th class="num">Empresas</th>{% endif %}<th>Último acesso</th><th>Origem</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for d in res["items"] %}
+      <tr>
+        <td>{{ m.dom(d.name) }}{% if d.topic %}<br><span class="mut" style="font-size:.78rem">{{ d.topic }}</span>{% endif %}</td>
+        <td>{{ m.cat(d.category) }}</td>
+        <td>{{ m.badge(d.classification) }}{% if d.overridden %} <span class="tag" title="ajuste manual neste cliente">manual</span>{% endif %}</td>
+        <td>{{ m.rec(d) }}</td>
+        <td>{{ m.riskbar(d.risk_score) }}<span class="mut" style="font-size:.75rem">{{ d.risk_score if d.risk_score is not none else '—' }}</span></td>
+        <td class="num">{{ d.work_score if d.work_score is not none else '—' }}</td>
+        <td class="num">{{ d.total_queries }}</td><td class="num">{{ d.clients_count }}</td>
+        {% if todos %}<td class="num">{{ d.tenants }}</td>{% endif %}
+        <td class="mut" style="white-space:nowrap">{{ d.last_seen|dt_sp }}</td>
+        <td>{{ m.origem(d.classified_by, d.llm_pending) }}</td>
+        <td>{{ m.status(d.name) }}{% if d.review_status %}<br><span class="tag" title="decisão registrada">{{ {'blocked':'decidido: bloquear','allowed':'decidido: manter'}.get(d.review_status) }}</span>{% endif %}</td>
+        <td>{{ m.acao(d.name) }}</td>
+      </tr>
+    {% else %}<tr><td colspan="13" class="mut">Nenhum domínio no filtro/período.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% if res.total > 100 %}
+  <p style="margin-top:.8rem;display:flex;gap:.5rem">
+    {% if f.offset > 0 %}<a class="btn" href="{{ url_for('analise.dominios', t=tid, q=f.q, classe=f.classification, categoria=f.category, rec=f.corp, ordem=f.sort, offset=[f.offset-100,0]|max) }}">← Anteriores</a>{% endif %}
+    {% if f.offset + 100 < res.total %}<a class="btn" href="{{ url_for('analise.dominios', t=tid, q=f.q, classe=f.classification, categoria=f.category, rec=f.corp, ordem=f.sort, offset=f.offset+100) }}">Próximos →</a>{% endif %}
+    <span class="mut" style="align-self:center">{{ f.offset + 1 }}–{{ [f.offset + 100, res.total]|min }} de {{ res.total }}</span>
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

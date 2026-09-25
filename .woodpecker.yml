@@ -1,0 +1,40 @@
+# Pipeline Woodpecker do 2D DNS Guard.
+# Builda o console web (web/) e faz deploy no k3s (namespace `dns-guard`).
+# O analisador (analyzer/) roda na VM 10.100.10.4 e é publicado à parte (ver README).
+# Secrets globais já existentes: registry_user, registry_pass, deploy_kubeconfig.
+when:
+  - event: [push, manual]
+    branch: main
+    path:
+      exclude: ["analyzer/**", "*.md", "docs/**"]
+
+steps:
+  build-and-push:
+    image: docker:27-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      REGISTRY: registry.2dtecnologia.com
+      REG_USER:
+        from_secret: registry_user
+      REG_PASS:
+        from_secret: registry_pass
+    commands:
+      - export TAG=${CI_COMMIT_SHA:0:12}
+      - echo "$REG_PASS" | docker login "$REGISTRY" -u "$REG_USER" --password-stdin
+      - docker build -t $REGISTRY/dailison/2d-dns-guard:$TAG -t $REGISTRY/dailison/2d-dns-guard:latest ./web
+      - docker push $REGISTRY/dailison/2d-dns-guard:$TAG
+      - docker push $REGISTRY/dailison/2d-dns-guard:latest
+
+  deploy:
+    image: alpine/k8s:1.34.1
+    environment:
+      REG: registry.2dtecnologia.com/dailison
+      KC:
+        from_secret: deploy_kubeconfig
+    commands:
+      - export TAG=${CI_COMMIT_SHA:0:12}
+      - mkdir -p $HOME/.kube && printf '%s' "$KC" > $HOME/.kube/config
+      # O SA de deploy só faz patch de imagem; ns/svc/ingress são aplicados por admin (k3s/deploy.yaml).
+      - kubectl -n dns-guard set image deployment/web web="$REG/2d-dns-guard:$TAG"
+      - kubectl -n dns-guard rollout status deployment/web --timeout=150s

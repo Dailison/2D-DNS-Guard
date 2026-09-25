@@ -1,0 +1,51 @@
+{# fila "Aguardando decisão" (só o que está LIBERADO), uma linha por site — painel e aba Decisões #}
+<form method="post" action="{{ url_for('analise.decisoes_lote') }}" id="filaLote" class="lote">
+  <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">
+  <span class="mut" style="font-size:.85rem"><b id="filaN">0</b> selecionado(s)</span>
+  <button type="button" class="mini blk" onclick="filaAcao('bloquear')">Bloquear selecionados…</button>
+  <button type="button" class="mini ok" onclick="filaAcao('liberar')">Manter liberados</button>
+</form>
+<table>
+  <thead><tr><th style="width:1.5rem"><input type="checkbox" title="selecionar todos" onclick="filaTodos(this)" style="width:auto"></th>
+    <th>Domínio</th>{% if todos %}<th>Empresa</th>{% endif %}<th>Categoria</th><th>Classe</th><th>Recomendação p/ empresa</th><th>Risco</th><th class="num">Consultas</th><th class="num">PCs</th><th>1º acesso</th><th>Decisão</th></tr></thead>
+  <tbody>
+  {% for d in fila %}
+    {% set itens = d.itens or [d.tenant_id ~ '|' ~ d.name] %}
+    <tr>
+      <td><input type="checkbox" class="selFila" data-itens='{{ itens|tojson }}' onclick="filaConta()" style="width:auto"></td>
+      <td>{{ m.dom(d.name) }}{% if d.topic %}<br><span class="mut" style="font-size:.78rem">{{ d.topic }}</span>{% endif %}</td>
+      {% if todos %}<td>{{ m.empresas(d.empresas or [{'id': d.tenant_id, 'name': d.tenant_name}]) }}</td>{% endif %}
+      <td>{{ m.cat(d.category) }}</td>
+      <td>{{ m.badge(d.classification) }}</td>
+      <td style="max-width:280px">{{ m.rec(d, full=true) }}</td>
+      <td>{{ m.riskbar(d.risk_score) }}<span class="mut" style="font-size:.75rem">{{ d.risk_score if d.risk_score is not none else '—' }}</span></td>
+      <td class="num">{{ d.total_queries }}</td><td class="num">{{ d.clients_count }}</td>
+      <td class="mut" style="white-space:nowrap">{{ d.first_seen|dt_sp }}</td>
+      <td style="white-space:nowrap">
+        <button type="button" class="mini blk" data-itens='{{ itens|tojson }}' onclick="abrirBloqueio(this)">Bloquear…</button>
+        <form method="post" action="{{ url_for('analise.decisoes_lote') }}" style="display:inline">
+          <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">
+          {% for it in itens %}<input type="hidden" name="itens" value="{{ it }}">{% endfor %}
+          <button class="mini ok" title="some da fila; o site continua liberado">Manter liberado</button></form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="11" class="mut">Nada aguardando decisão. 👍</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<script>
+function filaSel() { return Array.from(document.querySelectorAll(".selFila:checked")); }
+function filaConta() { document.getElementById("filaN").textContent = filaSel().length; }
+function filaTodos(cb) { document.querySelectorAll(".selFila").forEach(function (c) { c.checked = cb.checked; }); filaConta(); }
+function filaAcao(acao) {
+  const itens = [].concat.apply([], filaSel().map(function (c) { return JSON.parse(c.dataset.itens); }));
+  if (!itens.length) { alert("Selecione pelo menos um domínio."); return; }
+  if (acao === "bloquear") { abrirBloqueio(itens); return; }
+  if (!confirm("Manter liberados " + filaSel().length + " domínio(s)? Eles saem da fila.")) return;
+  const f = document.getElementById("filaLote");
+  f.querySelectorAll('input[name="itens"]').forEach(function (i) { i.remove(); });
+  itens.forEach(function (it) { const i = document.createElement("input"); i.type = "hidden"; i.name = "itens"; i.value = it; f.appendChild(i); });
+  f.submit();
+}
+</script>

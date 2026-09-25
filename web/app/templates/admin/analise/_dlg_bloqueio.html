@@ -1,0 +1,59 @@
+{# Diálogo "Bloquear em quais listas?" — usado pelos botões Bloquear… (um ou vários domínios) #}
+<dialog id="dlgBlq" class="dlg">
+  <form method="post" action="{{ url_for('analise.decisoes_lote') }}" onsubmit="return dlgValida(this)">
+    <input type="hidden" name="acao" value="bloquear">
+    <input type="hidden" name="voltar" value="{{ request.full_path }}">
+    <div id="dlgItens"></div>
+    <h2 style="margin:0 0 .3rem">Bloquear em quais listas?</h2>
+    <p class="mut" id="dlgNomes" style="margin:0 0 .6rem;font-size:.85rem;word-break:break-all"></p>
+    <p class="hint" style="margin:0 0 .4rem">Já vêm marcadas as listas das empresas que acessaram. O domínio é bloqueado com todos os subdomínios.</p>
+    <div style="max-height:45vh;overflow:auto;border-top:1px solid var(--bd)">
+      {% for g in grp.grupos %}
+      <label class="dlg-grp"><input type="checkbox" name="grupos" value="{{ g.nome }}">
+        <span><b>{{ g.nome }}</b><br><span class="mut" style="font-size:.78rem">{{ g.empresas|join(', ') if g.empresas else ('demais redes (padrão)' if g.nome == 'default' else 'nenhuma empresa cadastrada') }}</span></span></label>
+      {% endfor %}
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
+      <button type="button" onclick="document.getElementById('dlgBlq').close()">Cancelar</button>
+      <button type="button" class="danger" style="background:#7f1d1d" onclick="dlgTodas(this.form)"
+              title="marca todas as listas e bloqueia">Bloquear em todas</button>
+      <button class="danger">Bloquear</button>
+    </div>
+  </form>
+</dialog>
+<script>
+(function () {
+  const POR_TENANT = {{ grp.por_tenant|tojson }};
+  const dlg = document.getElementById("dlgBlq");
+  // itens: ["tid|dominio", ...] (vindo de data-itens de um botão, ou lista pronta)
+  window.abrirBloqueio = function (src) {
+    const itens = Array.isArray(src) ? src : JSON.parse(src.dataset.itens || "[]");
+    if (!itens.length) return;
+    const box = document.getElementById("dlgItens");
+    box.innerHTML = "";
+    const pre = new Set(), nomes = new Set();
+    itens.forEach(function (it) {
+      const inp = document.createElement("input");
+      inp.type = "hidden"; inp.name = "itens"; inp.value = it; box.appendChild(inp);
+      const [t, n] = [it.split("|")[0], it.slice(it.indexOf("|") + 1)];
+      nomes.add(n);
+      (POR_TENANT[t] || []).forEach(function (g) { pre.add(g); });
+    });
+    const lista = Array.from(nomes);
+    document.getElementById("dlgNomes").textContent =
+      lista.length + " domínio(s): " + lista.slice(0, 12).join(", ") + (lista.length > 12 ? " …" : "");
+    dlg.querySelectorAll('input[name="grupos"]').forEach(function (c) { c.checked = pre.has(c.value); });
+    dlg.showModal();
+  };
+  window.dlgTodas = function (f) {
+    const cs = f.querySelectorAll('input[name="grupos"]');
+    cs.forEach(function (c) { c.checked = true; });
+    if (confirm("Bloquear em TODAS as " + cs.length + " listas?")) f.submit();
+  };
+  window.dlgValida = function (f) {
+    const g = Array.from(f.querySelectorAll('input[name="grupos"]:checked')).map(function (c) { return c.value; });
+    if (!g.length) { alert("Escolha pelo menos uma lista."); return false; }
+    return confirm("Bloquear em: " + g.join(", ") + "?");
+  };
+})();
+</script>

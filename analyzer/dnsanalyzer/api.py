@@ -451,8 +451,10 @@ def domain_detail(tid: int, name: str):
             "h.created_at, t.name AS tenant_name FROM classification_history h LEFT JOIN tenants t ON t.id=h.tenant_id "
             "WHERE h.domain_id=%(d)s AND (h.tenant_id IS NULL OR %(t)s = 0 OR h.tenant_id=%(t)s) "
             "ORDER BY h.created_at DESC LIMIT 30", p).fetchall()
+        glob = c.execute("SELECT status, reviewed_by, reviewed_at FROM global_reviews WHERE domain_id=%(d)s",
+                         p).fetchone()
         out = {"domain": d, "tenant_view": td, "override": ov, "clients": clients, "fqdns": fqdns,
-               "timeline": timeline, "history": history}
+               "timeline": timeline, "history": history, "global_review": glob}
         if tid == ALL:
             out["by_tenant"] = c.execute(
                 "SELECT t.id, t.name, td.total_queries, td.clients_count, td.first_seen, td.last_seen, "
@@ -478,7 +480,9 @@ def review_queue(tid: int, days: int = 30, limit: int = Query(200, le=1000)):
             " v.corp_action, v.corp_reason, v.corp_by, "
             " v.work_score, v.total_queries, v.clients_count, v.first_seen, v.last_seen "
             "FROM v_tenant_domains v JOIN tenants t ON t.id=v.tenant_id "
+            "LEFT JOIN global_reviews g ON g.domain_id=v.domain_id "
             f"WHERE {_tf('v')} AND v.last_seen >= %(s)s AND v.review_status IS NULL AND v.kind='public' "
+            " AND g.status IS DISTINCT FROM 'allowed' "
             " AND (v.classification IN ('NAO_TRABALHO','SUSPEITO','MALICIOSO') OR (v.classification='DESCONHECIDO' "
             "      AND v.classified_by='llm' AND NOT v.llm_pending)) "
             "ORDER BY (v.classification='MALICIOSO') DESC, (v.classification='SUSPEITO') DESC, "
@@ -505,6 +509,25 @@ def review_decide(tid: int, name: str, body: ReviewIn):
             (body.status, body.by or None, body.status, reg, tid)).fetchone()
         if not r:
             raise HTTPException(404, "domínio não observado nesta empresa")
+        return {"ok": True, "domain": reg, "status": body.status}
+
+
+@app.post("/domains/{name}/review", dependencies=[Depends(auth)])
+def review_global(name: str, body: ReviewIn):
+    """Decisão global do site (visão "Todos os clientes"); status None remove."""
+    if body.status not in (None, "blocked", "allowed"):
+        raise HTTPException(400, "status inválido")
+    reg = _domain_name(name)
+    with db.conn() as c:
+        d = c.execute("SELECT id FROM domains WHERE name=%s", (reg,)).fetchone()
+        if not d:
+            raise HTTPException(404, "domínio nunca observado")
+        if body.status is None:
+            c.execute("DELETE FROM global_reviews WHERE domain_id=%s", (d["id"],))
+        else:
+            c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s,%s,%s) "
+                      "ON CONFLICT (domain_id) DO UPDATE SET status=EXCLUDED.status, "
+                      "reviewed_by=EXCLUDED.reviewed_by, reviewed_at=now()", (d["id"], body.status, body.by or None))
         return {"ok": True, "domain": reg, "status": body.status}
 
 

@@ -13,6 +13,10 @@
     {{ m.badge(cls) }} {{ m.cat(dm.category) }}
     {% if blq %}{% if blq.estado %}<span class="stt blk">🔒 Bloqueado</span>{% else %}<span class="stt ok">🔓 Liberado</span>{% endif %}{% endif %}
     {% if tv.review_status %}<span class="tag">{{ {'blocked':'decidido: bloquear','allowed':'decidido: manter liberado'}.get(tv.review_status) }} · {{ tv.reviewed_by or '' }}</span>{% endif %}
+    {% if d.global_review %}{% set gr = d.global_review %}
+    <span class="tag" title="decidido na visão Todos os clientes em {{ gr.reviewed_at|dt_sp }}: vale para empresas sem decisão própria, inclusive as que acessarem depois">🌐 {{ {'blocked':'decisão global: bloquear','allowed':'decisão global: manter liberado'}.get(gr.status) }} · {{ gr.reviewed_by or '' }}
+      <form method="post" action="{{ url_for('analise.dominio_decisao_global', nome=dm.name) }}" style="display:inline" onsubmit="return confirm('Desfazer a decisão global? Empresas sem decisão própria voltam para a fila.')">
+        <input type="hidden" name="tid" value="{{ tid }}"><button class="mini neu" style="margin-left:.3rem">desfazer</button></form></span>{% endif %}
     {% if tv.overridden %}<span class="tag">ajuste manual neste cliente</span>{% endif %}
     {{ m.origem(dm.classified_by, dm.llm_pending) }}
   </div>

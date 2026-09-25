@@ -3,6 +3,7 @@
   <form method="post" action="{{ url_for('analise.decisoes_lote') }}" onsubmit="return dlgValida(this)">
     <input type="hidden" name="acao" value="bloquear">
     <input type="hidden" name="voltar" value="{{ request.full_path }}">
+    {% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
     <div id="dlgItens"></div>
     <h2 style="margin:0 0 .3rem">Bloquear em quais listas?</h2>
     <p class="mut" id="dlgNomes" style="margin:0 0 .6rem;font-size:.85rem;word-break:break-all"></p>

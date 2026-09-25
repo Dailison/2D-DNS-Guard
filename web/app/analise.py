@@ -290,6 +290,7 @@ def decisoes_lote():
     if not itens:
         flash("Nenhum domínio selecionado.", "erro")
         return redirect(voltar)
+    todos = request.form.get("visao") == "todos"   # decidido na visão "Todos os clientes"
     try:
         if acao == "bloquear":
             ativos = set(dnslib.grupos_ativos(dnslib._get_config()))
@@ -300,6 +301,9 @@ def decisoes_lote():
             res = dnslib.bloquear_varios_em(grupos, [n for _, n in itens])
             for t, n in itens:
                 _registrar_decisao(t, n, "blocked")
+            if todos:
+                for n in dict.fromkeys(n for _, n in itens):
+                    _registrar_global(n, "blocked")
             novos = sum(len(r["adicionados"]) for r in res.values())
             current_app.logger.info("DNS: %s BLOQUEOU %s em %s (decisão em lote)", _quem(),
                                     [n for _, n in itens], grupos)
@@ -308,7 +312,11 @@ def decisoes_lote():
         elif acao == "liberar":
             for t, n in itens:
                 _registrar_decisao(t, n, "allowed")
-            flash(f"{len(itens)} domínio(s) mantido(s) liberado(s) (decisão registrada).", "ok")
+            if todos:
+                for n in dict.fromkeys(n for _, n in itens):
+                    _registrar_global(n, "allowed")
+            flash(f"{len(itens)} domínio(s) mantido(s) liberado(s) (decisão registrada"
+                  + (", vale também para empresas que acessarem depois" if todos else "") + ").", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha: {e}", "erro")
     return redirect(voltar)
@@ -442,9 +450,19 @@ def _voltar(nome: str, tid):
     return redirect(v if v.startswith("/admin/") else url_for("analise.dominio", nome=nome, t=tid))
 
 
+def _registrar_global(dominio: str, status: str | None) -> None:
+    """Decisão da visão "Todos os clientes": vale também p/ empresas que acessarem depois."""
+    try:
+        api.post(f"/domains/{quote(dominio, safe='')}/review", {"status": status, "by": _quem()})
+    except AnalyzerError:
+        pass
+
+
 def _registrar_decisao(tid, dominio: str, status: str) -> None:
-    """Bloquear/liberar pela tela também conta como decisão da empresa (sai da fila)."""
+    """Bloquear/liberar pela tela também conta como decisão da empresa (sai da fila).
+    Sem empresa (visão "Todos os clientes") = decisão global do site."""
     if not tid:
+        _registrar_global(dominio, status)
         return
     try:
         api.post(f"/tenants/{tid}/review/{quote(dominio, safe='')}", {"status": status, "by": _quem()})
@@ -494,6 +512,15 @@ def dominio_liberar(nome):
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao liberar: {e}", "erro")
     return _voltar(nome, tid)
+
+
+@analise_bp.post("/dominio/<path:nome>/decisao-global")
+def dominio_decisao_global(nome):
+    """Desfaz a decisão global: empresas sem decisão própria voltam para a fila."""
+    tid = request.form.get("tid", type=int) or 0
+    _registrar_global(nome, None)
+    flash(f"{nome}: decisão global removida (empresas sem decisão própria voltam para a fila).", "ok")
+    return redirect(url_for("analise.dominio", nome=nome, t=tid))
 
 
 @analise_bp.post("/dominio/<path:nome>/override")

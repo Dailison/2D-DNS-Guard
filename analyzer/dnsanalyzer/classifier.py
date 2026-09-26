@@ -422,6 +422,20 @@ def run_forever(stop=lambda: False) -> None:
                  cfg.llm_extra_workers)
     last_stale = 0.0
     backoff = 0
+    extras = [OllamaClient(u) for u in cfg.ollama_extra_urls]
+    extra_ok: dict[str, tuple[float, bool]] = {}
+
+    def cliente_etapa2() -> OllamaClient:
+        """Etapa 2 (busca na web + IA) no reforço com GPU quando ele está no ar; senão na VM."""
+        for x in extras:
+            t, ok = extra_ok.get(x.url, (0.0, False))
+            if time.monotonic() - t > 60:
+                ok = x.available()[0]
+                extra_ok[x.url] = (time.monotonic(), ok)
+            if ok:
+                return x
+        return client
+
     with db.conn() as c:
         cats = categories(c)
     while not stop():
@@ -439,7 +453,7 @@ def run_forever(stop=lambda: False) -> None:
                 continue
             status = phase_b(client, cats)
             if status == "idle":            # etapa 1 vazia: etapa 2 (busca na web)
-                status = phase_c(client, cats)
+                status = phase_c(cliente_etapa2(), cats)
             if status == "idle":
                 time.sleep(20)
             elif status == "unavailable":

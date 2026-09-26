@@ -150,6 +150,48 @@ _ultima_busca = 0.0
 _busca_lock = threading.Lock()
 
 
+_motores: tuple[float, set[str]] = (0.0, set())
+
+
+def _motores_web(cfg) -> set[str]:
+    """Buscadores de web habilitados no SearXNG (categorias general+web), com cache de 1 h.
+    Falhou ao consultar: conjunto vazio (= comportamento antigo, conservador)."""
+    import time
+    global _motores
+    if time.monotonic() - _motores[0] < 3600 and _motores[1]:
+        return _motores[1]
+    try:
+        r = httpx.get(cfg.web_search_url.rstrip("/") + "/config", timeout=15)
+        r.raise_for_status()
+        nomes = {e["name"] for e in r.json().get("engines", [])   # geral + web (fora imagens/vídeos)
+                 if e.get("enabled") and {"general", "web"} <= set(e.get("categories") or [])}
+    except (httpx.HTTPError, ValueError, KeyError):
+        return set()
+    _motores = (time.monotonic(), nomes)
+    return nomes
+
+
+def _consulta(cfg, q: str, relevante=None) -> tuple[list[dict], list[str]]:
+    """Uma consulta ao SearXNG: (resultados limpos, buscadores sem resposta)."""
+    r = httpx.get(cfg.web_search_url.rstrip("/") + "/search", timeout=40,
+                  params={"q": q, "format": "json", "language": "pt-BR", "safesearch": 0})
+    r.raise_for_status()
+    j = r.json()
+    out = []
+    for x in j.get("results", []):
+        url = x.get("url") or ""
+        host = (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
+        title, snippet = _clean(x.get("title"), 120), _clean(x.get("content"), 220)
+        if not host or not (title or snippet):
+            continue
+        if relevante and not relevante(f"{url} {title or ''} {snippet or ''}".lower()):
+            continue
+        out.append({"title": title, "snippet": snippet, "host": host, "url": url[:300]})
+        if len(out) >= cfg.web_search_results:
+            break
+    return out, [e[0] for e in j.get("unresponsive_engines") or []]
+
+
 def search(c, domain: str, fetch: bool, wait: bool = True) -> list[dict] | None:
     """Etapa 2: resultados de busca na web (SearXNG local) sobre o domínio. Texto de
     TERCEIROS (pista, não prova). Cache permanente em lookup_cache kind='search'."""
@@ -172,23 +214,17 @@ def search(c, domain: str, fetch: bool, wait: bool = True) -> list[dict] | None:
         _ultima_busca = time.monotonic()
     finally:
         _busca_lock.release()
-    r = httpx.get(cfg.web_search_url.rstrip("/") + "/search", timeout=40,
-                  params={"q": f'"{domain}"', "format": "json", "language": "pt-BR", "safesearch": 0})
-    r.raise_for_status()
-    j = r.json()
-    out, hosts = [], set()
-    for x in j.get("results", []):
-        url = x.get("url") or ""
-        host = (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
-        title, snippet = _clean(x.get("title"), 120), _clean(x.get("content"), 220)
-        if not host or not (title or snippet):
-            continue
-        out.append({"title": title, "snippet": snippet, "host": host, "url": url[:300]})
-        hosts.add(host)
-        if len(out) >= cfg.web_search_results:
-            break
-    fora = [e[0] for e in j.get("unresponsive_engines") or []]
-    if not out and fora:
+    out, fora = _consulta(cfg, f'"{domain}"')
+    if not out:
+        # entre aspas o Bing às vezes volta vazio sem erro (e o DuckDuckGo quebra); sem aspas acha,
+        # mas vem ruído: só entram resultados que citam o domínio (ou o nome dele, se distintivo)
+        label = domain.split(".")[0]
+        alvo = (domain, label) if len(label) >= 5 else (domain,)
+        out2, fora2 = _consulta(cfg, domain, lambda t: any(a in t for a in alvo))
+        out, fora = out2, sorted(set(fora) & set(fora2))
+    # sem resultado só é "indisponível" se NENHUM buscador de web respondeu. Alguns vivem
+    # suspensos (captcha): antes, domínio sem presença na web era retentado para sempre.
+    if not out and fora and not (_motores_web(cfg) - set(fora)):
         raise BuscaIndisponivel("buscadores sem resposta: " + ", ".join(fora))
     c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('search', %s, true, %s) "
               "ON CONFLICT (kind, key) DO UPDATE SET value=EXCLUDED.value, ok=true, fetched_at=now()",

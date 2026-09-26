@@ -12,52 +12,158 @@
   </form>
 </div>
 
+<style>
+  .pol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:.8rem}
+  .pol{border:1px solid var(--bd);border-radius:12px;padding:.75rem .85rem;background:var(--card)}
+  .pol.sel{border-color:var(--b);box-shadow:0 0 0 2px rgba(15,114,188,.12)}
+  .pol h3{margin:0 0 .15rem;font-size:1rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+  .pol .st{font-size:.78rem;color:var(--mut);margin-bottom:.45rem}
+  .pol .lb{font-size:.72rem;color:var(--mut);text-transform:uppercase;letter-spacing:.03em;margin:.45rem 0 .25rem}
+  .chips{display:flex;flex-wrap:wrap;gap:.3rem}
+  .chip{font-size:.78rem;padding:.2rem .55rem;border-radius:999px;border:1px solid var(--bd);background:transparent;color:var(--mut);cursor:pointer;line-height:1.3}
+  .chip:hover{border-color:var(--b)}
+  .chip.on.blk{background:#b91c1c;border-color:#b91c1c;color:#fff}
+  .chip.on.lib{background:#16a34a;border-color:#16a34a;color:#fff}
+  .chip.auto::after{content:" ⚡";font-size:.7rem}
+  .chip:disabled{opacity:.5;cursor:wait}
+  .tagx{font-size:.7rem;border:1px solid var(--bd);border-radius:6px;padding:0 .35rem;color:var(--mut);font-weight:400}
+  .mapa-f{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:.6rem}
+  .mapa-f>div{flex:1;min-width:180px}
+  #mapa td{vertical-align:middle}
+  #mapa select{width:auto;min-width:190px;padding:.3rem .45rem}
+  #mapa .vale{font-size:.78rem;color:var(--mut)}
+  #gToasts{position:fixed;right:16px;bottom:16px;z-index:200;display:flex;flex-direction:column;gap:.4rem;max-width:min(420px,calc(100vw - 32px))}
+</style>
+
 <div class="card">
-  <h2>Grupos <span class="mut" style="font-size:.8rem">· cada rede/empresa usa um grupo; o grupo define o que é bloqueado</span></h2>
-  <table>
-    <thead><tr><th>Grupo</th><th>Filtra?</th><th class="num">Domínios</th><th class="num">Redes</th><th>Empresas</th><th></th></tr></thead>
+  <h2>Políticas de bloqueio <span class="mut" style="font-size:.8rem">· cada política = categorias que bloqueia + serviços que libera como exceção · clique para ligar/desligar (salva na hora)</span></h2>
+  <div class="pol-grid">
+  {% for r in resumo %}
+    {% set lib = r.nome == config.TECHNITIUM_LIBERADOS_GROUP %}
+    <div class="pol {{ 'sel' if r.nome == grupo }}" data-grupo="{{ r.nome }}">
+      <h3><a href="{{ url_for('admin.grupos', grupo=r.nome) }}#detalhe">{{ r.nome }}</a>
+        {% if not r.bloqueia %}<span class="tagx">isenção — não bloqueia</span>{% endif %}
+        {% if r.bloqueia %}<button type="button" class="chip esp {{ 'on blk' if r.especifico }}" data-esp="{{ 1 if r.especifico else 0 }}" title="específico: fica de fora do “Bloquear em todas” (listas temáticas/catálogo)">específico</button>{% endif %}
+      </h3>
+      <div class="st">{{ r.redes }} rede(s){% if r.empresas %} · {{ r.empresas|length }} empresa(s){% endif %} · <a href="{{ url_for('admin.dominios', grupo=r.nome) }}">{{ r.dominios }} domínio(s) na lista própria</a></div>
+      {% if r.bloqueia %}
+      <div class="lb">Bloqueia (listas por categoria)</div>
+      <div class="chips" data-tipo="listas">
+        {% for c, rot in categorias_lista %}<button type="button" class="chip {{ 'on blk' if c in r.listas }} {{ 'auto' if c in categorias_risco }}" data-v="{{ c }}" title="{{ 'bloqueio automático nesta categoria' if c in categorias_risco else 'lista montada pela classificação da IA' }}">{{ rot }}</button>{% endfor %}
+      </div>
+      <div class="lb">Libera como exceção (vence os bloqueios)</div>
+      <div class="chips" data-tipo="pacotes">
+        {% for k, rot, doms in pacotes %}<button type="button" class="chip {{ 'on lib' if k in r.pacotes }}" data-v="{{ k }}" title="{{ doms|join(', ') }}">{{ rot }}</button>{% endfor %}
+      </div>
+      {% else %}
+      <div class="st" style="margin-top:.4rem">Redes/IPs aqui não passam por filtro nenhum (gerenciados em <a href="{{ url_for('admin.liberados') }}">Liberados</a>).</div>
+      {% endif %}
+    </div>
+  {% endfor %}
+  </div>
+  <p class="mut" style="font-size:.82rem;margin:.7rem 0 0">⚡ = bloqueio automático (ameaças, VPN/proxy, adulto, apostas, jogos com recomendação Bloquear entram sozinhos). As outras listas são montadas pela classificação da IA. O Technitium baixa as listas de novo a cada 1 h; exceções e a lista própria do grupo valem na hora. Conteúdo das listas: <a href="{{ url_for('admin.listas_categoria') }}">Listas por categoria</a>.</p>
+</div>
+
+<div class="card">
+  <h2>Empresas e políticas <span class="mut" style="font-size:.8rem">· cada rede do cadastro usa uma política · troque no seletor (salva na hora)</span></h2>
+  <div class="mapa-f">
+    <div><label>Buscar empresa, unidade ou rede</label><input type="text" id="mBusca" placeholder="ex.: Moderna, 10.35, Matriz"></div>
+    <div><label>Política em uso</label>
+      <select id="mFiltro"><option value="">— Todas —</option>{% for g in grupos %}<option>{{ g }}</option>{% endfor %}</select></div>
+    <div style="flex:0 0 auto"><label class="chk" style="margin:0"><input type="checkbox" id="mAuto"> <span>mostrar redes detectadas nos logs (sem cadastro)</span></label></div>
+  </div>
+  <div class="tbl"><table id="mapa">
+    <thead><tr><th>Empresa</th><th>Unidade</th><th>Rede</th><th>Política da rede</th><th>Vale de fato</th></tr></thead>
     <tbody>
-    {% for r in resumo %}
-      <tr {% if r.nome == grupo %}style="background:#eef4fb"{% endif %}>
-        <td><a href="{{ url_for('admin.grupos', grupo=r.nome) }}"><b>{{ r.nome }}</b></a>{% if r.nome in especificos %} <span class="tag" style="font-size:.7rem;border:1px solid var(--bd);border-radius:6px;padding:0 .3rem" title="fica de fora do Bloquear em todas">específico</span>{% endif %}</td>
-        <td>{{ 'sim' if r.bloqueia else 'não (liberado)' }}</td>
-        <td class="num"><a href="{{ url_for('admin.dominios', grupo=r.nome) }}">{{ r.dominios }}</a></td>
-        <td class="num">{{ r.redes }}</td>
-        <td style="font-size:.85rem">{{ r.empresas|join(', ') or '—' }}</td>
-        <td style="text-align:right;white-space:nowrap"><a href="{{ url_for('admin.dominios', grupo=r.nome) }}">domínios →</a></td>
+    {% for m in mapa %}
+      <tr data-busca="{{ (m.empresa ~ ' ' ~ m.unidade ~ ' ' ~ m.cidr)|lower }}" data-vale="{{ m.vale }}" data-auto="{{ 1 if m.auto else 0 }}" {% if m.auto %}hidden{% endif %}>
+        <td>{{ m.empresa }}{% if m.auto %} <span class="tagx" title="criada a partir dos logs">logs</span>{% endif %}</td>
+        <td class="mut">{{ m.unidade or '—' }}</td>
+        <td><code>{{ m.cidr }}</code></td>
+        <td><select data-cidr="{{ m.cidr }}" data-atual="{{ m.grupo }}">
+          <option value="" {{ 'selected' if not m.grupo }}>— herda (faixa maior / default)</option>
+          {% for g in grupos %}<option value="{{ g }}" {{ 'selected' if m.grupo == g }}>{{ g }}</option>{% endfor %}
+        </select></td>
+        <td class="vale">{{ m.vale }}</td>
       </tr>
+    {% else %}
+      <tr><td colspan="5" class="mut">Nenhuma empresa com rede cadastrada — cadastre em <a href="{{ url_for('analise.empresas') }}">Empresas</a>.</td></tr>
     {% endfor %}
     </tbody>
-  </table>
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Rede sem grupo usa o <code>default</code>. Quando uma faixa está em mais de um grupo, vale a mais específica (ex.: <code>/32</code> vence <code>/16</code>).</p>
+  </table></div>
+  <p class="mut" style="font-size:.82rem;margin:.6rem 0 0"><b>Vale de fato</b>: a política que o Technitium aplica — a da própria rede ou, sem ela, a da faixa maior que a contém (ou o <code>default</code>). Uma rede usa uma política; para uma empresa ter bloqueios diferentes por unidade, escolha por linha.</p>
 </div>
 {% if sem_grupo %}
-<div class="card" style="border-left:4px solid #d97706">
-  <h2>Sem grupo <span class="mut" style="font-size:.8rem">· {{ sem_grupo|length }} rede(s) do cadastro/logs que nenhum grupo cobre — filtram pelo <code>default</code></span></h2>
-  <table>
-    <thead><tr><th>Empresa · unidade</th><th>Rede</th><th class="num" title="computadores vistos nos logs, somando todas as redes da empresa">PCs (empresa)</th><th>Visto por último</th><th>Situação</th><th>Atribuir a</th></tr></thead>
+<details class="card"><summary style="cursor:pointer"><b>Sem grupo</b> <span class="mut" style="font-size:.85rem">· {{ sem_grupo|length }} rede(s) do cadastro/logs que filtram pelo <code>default</code></span></summary>
+  <table style="margin-top:.6rem">
+    <thead><tr><th>Empresa · unidade</th><th>Rede</th><th class="num">PCs (empresa)</th><th>Visto por último</th><th>Situação</th></tr></thead>
     <tbody>
     {% for r in sem_grupo %}
-      <tr>
-        <td>{{ r.empresa }}{% if r.unidade %} · {{ r.unidade }}{% endif %}
-          {% if r.auto %}<br><span class="tag" style="font-size:.72rem;color:#b45309" title="criada sozinha a partir de IPs vistos nos logs">detectada nos logs — <a href="{{ url_for('analise.empresas') }}">cadastrar</a></span>{% endif %}</td>
-        <td><code>{{ r.cidr }}</code></td>
-        <td class="num">{{ r.pcs if r.pcs is not none else '—' }}</td>
+      <tr><td>{{ r.empresa }}{% if r.unidade %} · {{ r.unidade }}{% endif %}{% if r.auto %} <span class="tagx">logs</span>{% endif %}</td>
+        <td><code>{{ r.cidr }}</code></td><td class="num">{{ r.pcs if r.pcs is not none else '—' }}</td>
         <td class="mut" style="white-space:nowrap">{{ r.visto|dt_sp if r.visto else '—' }}</td>
-        <td style="font-size:.82rem">{% if r.parciais %}parcial: {% for c, g in r.parciais %}<code>{{ c }}</code> em <a href="{{ url_for('admin.grupos', grupo=g) }}">{{ g }}</a>{{ ', ' if not loop.last }}{% endfor %}; o resto usa o default
-          {% else %}<span class="mut">toda a rede usa o default</span>{% endif %}</td>
-        <td style="white-space:nowrap">
-          <form method="post" action="{{ url_for('admin.bloqueios_rede_add') }}" style="display:inline-flex;gap:.3rem" onsubmit="return confirm('Atribuir {{ r.cidr }} ({{ r.empresa }}) a ' + this.grupo.value + '?')">
-            <input type="hidden" name="rede" value="{{ r.cidr }}">
-            <select name="grupo" style="width:auto">{% for g in grupos %}<option {{ 'selected' if g == grupo }}>{{ g }}</option>{% endfor %}</select>
-            <button class="primary" style="padding:.35rem .6rem;font-size:.85rem">Atribuir</button>
-          </form></td>
-      </tr>
+        <td style="font-size:.82rem">{% if r.parciais %}parcial: {% for c, g in r.parciais %}<code>{{ c }}</code> em {{ g }}{{ ', ' if not loop.last }}{% endfor %}{% else %}<span class="mut">toda a rede usa o default</span>{% endif %}</td></tr>
     {% endfor %}
     </tbody>
   </table>
-</div>
+</details>
 {% endif %}
+<div id="gToasts"></div>
+<script>
+(function () {
+  const U = {listas: {{ url_for('admin.grupos_api_listas')|tojson }}, pacotes: {{ url_for('admin.grupos_api_pacotes')|tojson }},
+             esp: {{ url_for('admin.grupos_api_especifico')|tojson }}, rede: {{ url_for('admin.grupos_api_rede')|tojson }}};
+  function toast(ok, msg) {
+    const d = document.createElement("div"); d.className = "flash " + (ok ? "ok" : "erro"); d.textContent = msg;
+    d.style.margin = "0"; d.style.boxShadow = "0 6px 20px rgba(0,0,0,.18)";
+    document.getElementById("gToasts").appendChild(d);
+    setTimeout(() => d.remove(), ok ? 4500 : 9000);
+  }
+  async function post(url, body) {
+    const r = await fetch(url, {method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(body)});
+    let j = {}; try { j = await r.json(); } catch (e) { j = {ok: false, msg: "sessão expirou? recarregue a página"}; }
+    toast(!!j.ok, j.msg || (j.ok ? "salvo" : "falha")); return j;
+  }
+  // cartões: listas por categoria, serviços liberados e "específico"
+  document.querySelectorAll(".pol").forEach(card => {
+    const grupo = card.dataset.grupo;
+    card.querySelectorAll(".chips").forEach(box => {
+      const tipo = box.dataset.tipo, cls = tipo === "listas" ? "blk" : "lib";
+      box.addEventListener("click", async ev => {
+        const b = ev.target.closest(".chip"); if (!b) return;
+        b.classList.toggle("on"); b.classList.toggle(cls, b.classList.contains("on"));
+        const sel = [...box.querySelectorAll(".chip.on")].map(x => x.dataset.v);
+        box.querySelectorAll(".chip").forEach(x => x.disabled = true);
+        const j = tipo === "listas" ? await post(U.listas, {grupo, cats: sel}) : await post(U.pacotes, {grupo, servicos: sel});
+        const final = j.ok ? (j.listas || j.pacotes || []) : sel.filter(v => v !== b.dataset.v).concat(b.classList.contains("on") ? [] : [b.dataset.v]);
+        box.querySelectorAll(".chip").forEach(x => { const on = final.includes(x.dataset.v); x.classList.toggle("on", on); x.classList.toggle(cls, on); x.disabled = false; });
+      });
+    });
+    const e = card.querySelector(".chip.esp");
+    if (e) e.addEventListener("click", async () => {
+      const novo = e.dataset.esp !== "1"; e.disabled = true;
+      const j = await post(U.esp, {grupo, especifico: novo}); e.disabled = false;
+      if (j.ok) { e.dataset.esp = novo ? "1" : "0"; e.classList.toggle("on", novo); e.classList.toggle("blk", novo); }
+    });
+  });
+  // mapa empresas x política
+  const busca = document.getElementById("mBusca"), filtro = document.getElementById("mFiltro"), auto = document.getElementById("mAuto");
+  function filtra() {
+    const q = busca.value.trim().toLowerCase(), f = filtro.value, a = auto.checked;
+    document.querySelectorAll("#mapa tbody tr[data-busca]").forEach(tr => {
+      tr.hidden = (q && !tr.dataset.busca.includes(q)) || (f && tr.dataset.vale !== f) || (!a && tr.dataset.auto === "1");
+    });
+  }
+  [busca, filtro, auto].forEach(x => x.addEventListener(x === busca ? "input" : "change", filtra));
+  document.querySelectorAll("#mapa select[data-cidr]").forEach(sel => sel.addEventListener("change", async () => {
+    const tr = sel.closest("tr"); sel.disabled = true;
+    const j = await post(U.rede, {cidr: sel.dataset.cidr, grupo: sel.value}); sel.disabled = false;
+    if (j.ok) { sel.dataset.atual = sel.value; tr.dataset.vale = j.vale; tr.querySelector(".vale").textContent = j.vale; }
+    else sel.value = sel.dataset.atual;
+  }));
+})();
+</script>
 <div class="card">
   <h2>Criar grupo</h2>
   <form method="post" action="{{ url_for('admin.bloqueios_grupo') }}" class="row" style="align-items:flex-end">
@@ -73,6 +179,7 @@
 </div>
 
 {% if grupo %}
+<a id="detalhe"></a>
 {% set protegido = grupo in ['default', config.TECHNITIUM_LIBERADOS_GROUP] %}
 {% if grupo != config.TECHNITIUM_LIBERADOS_GROUP %}
 <div class="card">
@@ -86,21 +193,6 @@
   </form>
 </div>
 {% endif %}
-<div class="card">
-  <h2>Listas por categoria assinadas por <b>{{ grupo }}</b></h2>
-  <form method="post" action="{{ url_for('admin.grupo_listas') }}">
-    <input type="hidden" name="grupo" value="{{ grupo }}">
-    <div style="display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;margin:.2rem 0 .6rem">
-      {% for c, rot in categorias_lista %}
-      <label class="chk" style="margin:0"><input type="checkbox" name="cats" value="{{ c }}" {{ 'checked' if c in assinadas }}> <span>{{ rot }}</span></label>
-      {% endfor %}
-    </div>
-    <button class="primary">Salvar listas</button>
-    <a href="{{ url_for('admin.listas_categoria') }}" style="margin-left:.8rem;font-size:.88rem">ver o conteúdo das listas →</a>
-  </form>
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">O <b>bloqueio automático</b> põe nessas listas os sites de jogos, apostas, conteúdo adulto, VPN/proxy e ameaças com recomendação Bloquear; o grupo que assina a lista bloqueia todos eles, sem precisar do site na lista do próprio grupo. O Technitium baixa as listas de novo a cada 1 h.
-  {% if not grupo_bloqueia %}<br><b>Atenção:</b> este grupo está com o bloqueio desligado ({{ 'isenção' if grupo == config.TECHNITIUM_LIBERADOS_GROUP else 'sem bloqueio' }}) — as listas assinadas não valem para ele.{% endif %}</p>
-</div>
 {% if not protegido %}
 <div class="card">
   <h2>Gerenciar grupo <b>{{ grupo }}</b></h2>

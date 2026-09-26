@@ -267,8 +267,30 @@ def grupo_da_rede(cidr, ngm):
 
 # ------------------------------------------------ listas por categoria (assinadas pelos grupos)
 # O analisador publica /listas/<categoria>.txt; cada grupo assina as que quiser (blockListUrls).
-CATEGORIAS_LISTA = [("jogos", "Jogos"), ("apostas", "Apostas"), ("adulto", "Conteúdo adulto"),
-                    ("vpn_proxy", "VPN / Proxy"), ("ameaca", "Ameaças")]
+CATEGORIAS_LISTA = [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("adulto", "Conteúdo adulto"),
+                    ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
+                    ("streaming", "Vídeo e streaming"), ("publicidade", "Publicidade e rastreamento"),
+                    ("compras", "Compras"), ("noticias", "Notícias")]
+CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "adulto", "apostas", "jogos"}   # bloqueio automático
+
+# Serviços que uma política pode LIBERAR como exceção (vai p/ o "allowed" do grupo, que vence
+# qualquer bloqueio — inclusive as listas assinadas). Ex.: "Redes sociais, exceto Instagram e Facebook".
+PACOTES = {
+    "instagram": ("Instagram", ["instagram.com", "cdninstagram.com", "instagr.am", "ig.me"]),
+    "facebook": ("Facebook", ["facebook.com", "facebook.net", "fbcdn.net", "fbsbx.com", "fb.com", "fb.me",
+                              "messenger.com", "m.me", "facebook.com.br"]),
+    "whatsapp": ("WhatsApp", ["whatsapp.com", "whatsapp.net", "wa.me"]),
+    "youtube": ("YouTube", ["youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com",
+                            "ggpht.com"]),
+    "linkedin": ("LinkedIn", ["linkedin.com", "licdn.com", "lnkd.in"]),
+    "tiktok": ("TikTok", ["tiktok.com", "tiktokcdn.com", "tiktokv.com", "tiktokcdn-us.com", "ttwstatic.com",
+                          "ibytedtos.com", "byteoversea.com", "bytedance.com"]),
+    "x": ("X (Twitter)", ["twitter.com", "x.com", "twimg.com", "t.co"]),
+    "telegram": ("Telegram", ["telegram.org", "telegram.me", "t.me", "telesco.pe"]),
+    "spotify": ("Spotify", ["spotify.com", "scdn.co", "spotifycdn.com"]),
+    "netflix": ("Netflix", ["netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net"]),
+    "kwai": ("Kwai", ["kwai.com", "kwai.net", "kwaicdn.com", "kslawin.com", "yximgs.com", "kuaishou.com"]),
+}
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")
 
 
@@ -306,19 +328,39 @@ def assinar_listas(grupo, cats):
 
 
 def dominios_das_listas(cats):
-    """{categoria: set(domínios)} (do analisador; cache por requisição). Falha = vazio."""
+    """{categoria: set(domínios)} (do analisador, 1 chamada; cache por requisição). Falha = vazio."""
     from flask import g as fg
     from app import analyzer_client as api
     cache = fg.setdefault("_listas_cat", {})
-    out = {}
-    for c in cats:
-        if c not in cache:
-            try:
-                cache[c] = {r["domain"] for r in api.get(f"/listas/{c}", limit=20000)}
-            except Exception:  # noqa: BLE001
-                cache[c] = set()
-        out[c] = cache[c]
-    return out
+    falta = [c for c in cats if c not in cache]
+    if falta:
+        try:
+            r = api.get("/listas-dominios", cats=falta)
+        except Exception:  # noqa: BLE001
+            r = {}
+        for c in falta:
+            cache[c] = set(r.get(c) or [])
+    return {c: cache[c] for c in cats}
+
+
+def pacotes_liberados(g):
+    """Serviços (PACOTES) cujos domínios estão todos no 'allowed' do grupo."""
+    permitidos = {x.lower() for x in g.get("allowed") or []}
+    return [k for k, (_, doms) in PACOTES.items() if set(doms) <= permitidos]
+
+
+def liberar_pacotes(grupo, servicos):
+    """Deixa o grupo liberando exatamente `servicos` como exceção; mantém outras exceções manuais."""
+    cfg = _get_config()
+    g = _grupo_obj(cfg, grupo)
+    if g is None:
+        raise ValueError(f"grupo {grupo} não existe")
+    todos = {d for _, doms in PACOTES.values() for d in doms}
+    quer = {d for k in servicos if k in PACOTES for d in PACOTES[k][1]}
+    manuais = [x for x in g.get("allowed") or [] if x.lower() not in todos]
+    g["allowed"] = sorted(set(manuais) | quer)
+    _set_config(cfg)
+    return pacotes_liberados(g)
 
 
 def indice_bloqueio(cfg=None):
@@ -329,13 +371,14 @@ def indice_bloqueio(cfg=None):
     ativos = [g for g in cfg.get("groups", []) if g.get("name") and g.get("enableBlocking", True)]
     cats = sorted({c for g in ativos for c in listas_assinadas(g)})
     doms = dominios_das_listas(cats) if cats else {}
-    grupos = {}
+    grupos, permitidos = {}, {}
     for g in ativos:
         s = {x.lower() for x in g.get("blocked", [])}
         for c in listas_assinadas(g):
             s |= doms.get(c, set())
         grupos[g["name"]] = s
-    return {"grupos": grupos, "ngm": ngm_de(cfg), "ativos": sorted(grupos)}
+        permitidos[g["name"]] = {x.lower() for x in g.get("allowed") or []}
+    return {"grupos": grupos, "permitidos": permitidos, "ngm": ngm_de(cfg), "ativos": sorted(grupos)}
 
 
 def bloqueado_em(indice, dominio, grupos=None):
@@ -345,7 +388,9 @@ def bloqueado_em(indice, dominio, grupos=None):
     parts = d.split(".")
     cands = {".".join(parts[i:]) for i in range(len(parts))}
     alvo = grupos if grupos is not None else indice["ativos"]
-    return [g for g in alvo if indice["grupos"].get(g, set()) & cands]
+    perm = indice.get("permitidos") or {}
+    # exceção liberada no grupo (allowed) vence qualquer bloqueio dele
+    return [g for g in alvo if indice["grupos"].get(g, set()) & cands and not (perm.get(g, set()) & cands)]
 
 
 def bloquear_em(grupos, dominio):

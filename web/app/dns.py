@@ -165,12 +165,39 @@ def grupos():
                         "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
                        for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
     gobj = next((x for x in cfg.get("groups", []) if x.get("name") == grupo), {})
-    return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes,
+    esp = emp.grupos_especificos()
+    por_nome = {x.get("name"): x for x in cfg.get("groups", [])}
+    for r in resumo:
+        r["listas"] = dnslib.listas_assinadas(por_nome.get(r["nome"], {}))
+        r["pacotes"] = dnslib.pacotes_liberados(por_nome.get(r["nome"], {}))
+        r["especifico"] = r["nome"] in esp
+    mapa = _mapa_empresas(emp.lista(), cfg)
+    return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes, mapa=mapa,
                            categorias_lista=dnslib.CATEGORIAS_LISTA, assinadas=dnslib.listas_assinadas(gobj),
+                           categorias_risco=sorted(dnslib.CATEGORIAS_RISCO),
+                           pacotes=[(k, v[0], v[1]) for k, v in dnslib.PACOTES.items()],
                            grupo_bloqueia=gobj.get("enableBlocking", True),
                            redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro,
                            faixas=faixas, ips=ips, desc_ip=desc_ip, especificos=emp.grupos_especificos(),
                            sem_grupo=_sem_grupo(emp.lista(), ngm))
+
+
+def _mapa_empresas(empresas: list[dict], cfg: dict) -> list[dict]:
+    """Uma linha por rede (CIDR) do cadastro de Empresas: o grupo atribuído a ELA (exato) e o
+    que vale de fato (exato, herdado de uma faixa maior ou o default)."""
+    ngm = dnslib.ngm_de(cfg)
+    exato = {str(k): v for k, v in ngm.items()}
+    out = []
+    for e in empresas:
+        for n in e.get("networks") or []:
+            cidr = dnslib.norm_ip(n.get("cidr")) or n.get("cidr")
+            try:
+                vale = dnslib.grupo_da_rede(cidr, ngm) or "default"
+            except ValueError:
+                continue
+            out.append({"empresa": e["name"], "tid": e["id"], "unidade": n.get("unit") or "", "cidr": cidr,
+                        "grupo": exato.get(cidr, ""), "vale": vale, "auto": bool(e.get("auto_created"))})
+    return sorted(out, key=lambda r: (r["auto"], r["empresa"].lower(), r["unidade"].lower(), dnslib._sort_key(r["cidr"])))
 
 
 def _sem_grupo(empresas: list[dict], ngm: dict) -> list[dict]:
@@ -809,3 +836,75 @@ def listas_categoria_add():
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")
     return redirect(url_for("admin.listas_categoria", cat=cat))
+
+
+# ------------------------------------------------- Grupos: ações sem recarregar (JSON)
+def _json(ok: bool, msg: str, **kw):
+    from flask import jsonify
+    return jsonify(ok=ok, msg=msg, **kw), (200 if ok else 400)
+
+
+@admin_bp.post("/grupos/api/rede")
+@login_required
+def grupos_api_rede():
+    """Grupo de UMA rede do cadastro. grupo vazio = tira a atribuição (vale a faixa maior/default)."""
+    d = request.get_json(silent=True) or {}
+    cidr, grupo = (d.get("cidr") or "").strip(), (d.get("grupo") or "").strip()
+    try:
+        cfg = dnslib._get_config()
+        atual = next((v for k, v in cfg.get("networkGroupMap", {}).items() if dnslib.norm_ip(k) == dnslib.norm_ip(cidr)), "")
+        if not grupo:
+            if atual:
+                dnslib.remover_rede(cidr, atual)
+            msg = f"{cidr}: sem grupo próprio (vale a faixa maior ou o default)."
+        else:
+            ipn, ant = dnslib.atribuir_rede(cidr, grupo)
+            if not ipn:
+                return _json(False, ant)
+            msg = f"{ipn} → {grupo}" + (f" (antes: {ant})" if ant else "")
+        vale = dnslib.grupo_da_rede(cidr, dnslib.ngm_de(dnslib._get_config())) or "default"
+        current_app.logger.info("DNS: %s: rede %s -> %s", admin_atual().email, cidr, grupo or "(sem grupo)")
+        return _json(True, msg, vale=vale)
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
+@admin_bp.post("/grupos/api/listas")
+@login_required
+def grupos_api_listas():
+    d = request.get_json(silent=True) or {}
+    grupo = (d.get("grupo") or "").strip()
+    try:
+        ass = dnslib.assinar_listas(grupo, d.get("cats") or [])
+        current_app.logger.info("DNS: %s: grupo %s assina listas %s", admin_atual().email, grupo, ass)
+        rot = dict(dnslib.CATEGORIAS_LISTA)
+        return _json(True, f"{grupo}: " + (", ".join(rot[c] for c in ass) if ass else "nenhuma lista por categoria"), listas=ass)
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
+@admin_bp.post("/grupos/api/especifico")
+@login_required
+def grupos_api_especifico():
+    d = request.get_json(silent=True) or {}
+    grupo, esp = (d.get("grupo") or "").strip(), bool(d.get("especifico"))
+    try:
+        api.put("/console/group-settings", {"name": grupo, "especifico": esp, "by": admin_atual().email})
+        return _json(True, f"{grupo}: " + ("específico (fora do “Bloquear em todas”)" if esp else "entra no “Bloquear em todas”"))
+    except AnalyzerError as e:
+        return _json(False, f"Falha: {e}")
+
+
+@admin_bp.post("/grupos/api/pacotes")
+@login_required
+def grupos_api_pacotes():
+    """Serviços liberados como exceção no grupo (vencem as listas assinadas)."""
+    d = request.get_json(silent=True) or {}
+    grupo = (d.get("grupo") or "").strip()
+    try:
+        lib = dnslib.liberar_pacotes(grupo, d.get("servicos") or [])
+        current_app.logger.info("DNS: %s: grupo %s libera %s", admin_atual().email, grupo, lib)
+        return _json(True, f"{grupo}: libera " + (", ".join(dnslib.PACOTES[k][0] for k in lib) if lib else "nenhum serviço"),
+                     pacotes=lib)
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")

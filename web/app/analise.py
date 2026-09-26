@@ -713,7 +713,15 @@ def empresas():
         flash(f"Não foi possível carregar as políticas: {e}", "erro")
     return render_template("admin/analise/empresas.html", aba="empresas", pol=resumo, pol_default=default,
                            cats=dnslib.CATEGORIAS_LISTA, cats_risco=sorted(dnslib.CATEGORIAS_RISCO),
-                           pacotes=[(k, v[0]) for k, v in dnslib.PACOTES.items()], **ctx)
+                           pacotes=_listas_liberacao(), **ctx)
+
+
+def _listas_liberacao() -> list[dict]:
+    """Serviços (com categoria = sublista de uma lista de bloqueio) e listas de liberação avulsas."""
+    try:
+        return api.get("/liberacao")
+    except AnalyzerError:
+        return []
 
 
 @analise_bp.post("/empresas")

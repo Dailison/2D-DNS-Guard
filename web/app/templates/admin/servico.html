@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Listas de liberação' if modo == 'liberacao' else 'Serviço' }}{% endblock %}
+{% block content %}
+{% set rot = dict(categorias) %}
+<style>
+  dialog.dlg{border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;background:var(--card);color:var(--txt)} dialog.dlg::backdrop{background:rgba(15,23,42,.45)}
+  .mini{padding:.25rem .5rem;font-size:.8rem}
+</style>
+{% if modo == 'liberacao' %}
+<h1>Listas de liberação <span class="mut" style="font-size:.8rem">· whitelist: vence qualquer lista de bloqueio nas empresas que a aplicam</span></h1>
+{% set avulsas = todas|rejectattr('category')|list %}
+<div class="card">
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
+    {% for x in avulsas %}
+    <a href="{{ url_for('admin.listas_liberacao', slug=x.slug) }}" style="text-decoration:none;padding:.45rem .8rem;border:1px solid {{ 'var(--b)' if servico and x.slug == servico.slug else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if servico and x.slug == servico.slug }}">{{ x.name }} <span class="mut">({{ x.total }})</span></a>
+    {% else %}<span class="mut">Nenhuma lista de liberação avulsa ainda.</span>{% endfor %}
+  </div>
+  <form method="post" action="{{ url_for('admin.servico_criar') }}" class="row" style="align-items:flex-end;margin-top:.8rem">
+    <div style="flex:1"><label>Nova lista de liberação</label><input type="text" name="nome" placeholder="ex.: Sistemas do Cliente X, Bancos" required></div>
+    <div style="flex:0"><button class="primary">Criar</button></div>
+  </form>
+  <p class="mut" style="font-size:.82rem;margin:.6rem 0 0">Os serviços de cada lista de bloqueio (Instagram em Redes sociais, Roblox em Jogos…) ficam na página <a href="{{ url_for('admin.listas_categoria') }}">Listas de bloqueio</a>; lá cada empresa pode bloquear ou liberar um serviço sozinho.</p>
+</div>
+{% else %}
+<h1>Serviço {% if servico %}<b>{{ servico.name }}</b>{% endif %} <span class="mut" style="font-size:.8rem">· {% if servico and servico.category %}na lista <a href="{{ url_for('admin.listas_categoria', cat=servico.category) }}">{{ rot.get(servico.category, servico.category) }}</a>{% else %}lista de liberação avulsa{% endif %}</span></h1>
+{% endif %}
+
+{% if servico %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
+    <div class="mut" style="font-size:.85rem;flex:1;min-width:260px">
+      {% if bloqueia %}<b style="color:#b91c1c">Bloqueado sozinho por:</b> {{ bloqueia|join(', ') }}<br>{% endif %}
+      <b style="color:#16a34a">Liberado por:</b> {{ libera|join(', ') if libera else 'nenhuma empresa' }}
+      {% if servico.category %}<br>Quem aplica a lista {{ rot.get(servico.category) }} inteira já bloqueia este serviço — a não ser que o libere.{% endif %}
+      <br>O DNS baixa a lista de novo a cada 1 h.
+    </div>
+    <div style="display:flex;gap:.4rem">
+      <button type="button" class="primary" onclick="document.getElementById('dlgLib').showModal()">Empresas que liberam…</button>
+      <form method="post" action="{{ url_for('admin.servico_apagar', slug=servico.slug) }}" onsubmit="return confirm('Apagar {{ servico.name }}? Sai de todas as empresas que o usam.')"><button class="danger">Apagar</button></form>
+    </div>
+  </div>
+  <form method="post" action="{{ url_for('admin.servico_editar', slug=servico.slug) }}" class="row" style="align-items:flex-end;margin-top:.7rem">
+    <input type="hidden" name="voltar" value="{{ request.full_path }}">
+    <div style="flex:1"><label>Nome</label><input type="text" name="nome" value="{{ servico.name }}"></div>
+    <div style="flex:1"><label>Faz parte da lista de bloqueio</label>
+      <select name="categoria"><option value="">— nenhuma (liberação avulsa) —</option>
+        {% for c, r in categorias if c != 'outros_bloqueios' %}<option value="{{ c }}" {{ 'selected' if servico.category == c }}>{{ r }}</option>{% endfor %}</select></div>
+    <div style="flex:0"><button class="btn">Salvar</button></div>
+  </form>
+</div>
+<div class="card">
+  <form method="post" action="{{ url_for('admin.servico_dominios', slug=servico.slug) }}" class="row" style="align-items:flex-end">
+    <input type="hidden" name="voltar" value="{{ request.full_path }}">
+    <div style="flex:1"><label>Adicionar domínios (um por linha ou separados por vírgula; vale com os subdomínios)</label><textarea name="dominio" rows="2" placeholder="ex.: erp.cliente.com.br" required></textarea></div>
+    <div style="flex:0"><button class="primary">Adicionar</button></div>
+  </form>
+  <table style="margin-top:.6rem">
+    <thead><tr><th>Domínio</th><th>Entrou por</th><th></th></tr></thead>
+    <tbody>
+    {% for d in doms %}
+      <tr><td>{{ d.domain }}</td><td class="mut" style="font-size:.85rem">{{ d.added_by or '—' }}</td>
+        <td style="text-align:right"><form method="post" action="{{ url_for('admin.servico_dominios', slug=servico.slug) }}" style="display:inline">
+          <input type="hidden" name="acao" value="rem"><input type="hidden" name="dominio" value="{{ d.domain }}"><input type="hidden" name="voltar" value="{{ request.full_path }}">
+          <button class="danger mini">✕</button></form></td></tr>
+    {% else %}<tr><td colspan="3" class="mut">Sem domínios ainda.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<dialog id="dlgLib" class="dlg" style="max-width:560px;width:calc(100vw - 32px)">
+  <h2 style="margin:0 0 .3rem">Quem libera {{ servico.name }}</h2>
+  <div style="max-height:55vh;overflow:auto;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:.3rem 0">
+    <label class="chk" style="margin:.2rem 0;font-weight:600"><input type="checkbox" id="lDefault" {{ 'checked' if default_tem }}> <span>Redes sem cadastro (padrão)</span></label>
+    {% for e in empresas_pol %}<label class="chk" style="margin:.2rem 0;font-weight:400"><input type="checkbox" class="lTid" value="{{ e.id }}" {{ 'checked' if e.tem }}> <span>{{ e.nome }}</span></label>{% endfor %}
+  </div>
+  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.7rem">
+    <button type="button" onclick="document.getElementById('dlgLib').close()">Cancelar</button>
+    <button type="button" class="primary" id="lSalvar">Salvar e aplicar</button>
+  </div>
+</dialog>
+<script>
+document.getElementById("lSalvar").addEventListener("click", async (ev) => {
+  const b = ev.target; b.disabled = true;
+  try {
+    const r = await fetch({{ url_for('admin.liberacao_empresas')|tojson }}, {method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
+      body: JSON.stringify({slug: {{ servico.slug|tojson }}, default: document.getElementById("lDefault").checked,
+                            tenants: [...document.querySelectorAll("#dlgLib .lTid:checked")].map(c => +c.value)})});
+    const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+  } catch (e) { alert("Falha ao salvar (sessão expirou?)"); }
+  b.disabled = false;
+});
+</script>
+{% endif %}
+{% endblock %}

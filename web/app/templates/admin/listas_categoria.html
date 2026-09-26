@@ -23,6 +23,21 @@
   </div>
 </div>
 
+{% set srvs = servicos|selectattr('category', 'equalto', cat)|list %}
+{% if cat != 'outros_bloqueios' %}
+<div class="card">
+  <h2>Serviços de {{ rot.get(cat, cat) }} <span class="mut" style="font-size:.8rem">· sublistas: cada empresa pode bloquear ou liberar um serviço sozinho (no modal da empresa)</span></h2>
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+    {% for x in srvs %}<a href="{{ url_for('admin.servico', slug=x.slug) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid var(--bd);border-radius:999px;font-size:.88rem">{{ x.name }} <span class="mut">({{ x.total }})</span></a>
+    {% else %}<span class="mut" style="font-size:.85rem">Nenhum serviço nesta lista.</span>{% endfor %}
+  </div>
+  <form method="post" action="{{ url_for('admin.servico_criar') }}" class="row" style="align-items:flex-end;margin-top:.6rem">
+    <input type="hidden" name="categoria" value="{{ cat }}">
+    <div style="flex:1"><label>Novo serviço em {{ rot.get(cat, cat) }}</label><input type="text" name="nome" placeholder="ex.: Kick" required></div>
+    <div style="flex:0"><button class="btn">Criar serviço</button></div>
+  </form>
+</div>
+{% endif %}
 <div class="card">
   <div class="row" style="align-items:flex-end;gap:1rem">
     <form method="get" class="row" style="align-items:flex-end;flex:1;margin:0">

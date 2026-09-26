@@ -42,7 +42,8 @@ def resumo_empresas(empresas: list[dict], pol: dict[str, dict]) -> dict[int, dic
             u = n.get("unit") or ""
             pu = pol.get(f"unit:{e['id']}:{u}") if u else None
             if pu:
-                un[u] = {"lists": pu.get("lists") or [], "services": pu.get("services") or []}
+                un[u] = {"lists": pu.get("lists") or [], "services": pu.get("services") or [],
+                         "blocked": pu.get("services_blocked") or []}
         out[e["id"]] = {"lists": p.get("lists") or [], "services": p.get("services") or [],
-                        "definida": bool(p), "unidades": un}
+                        "blocked": p.get("services_blocked") or [], "definida": bool(p), "unidades": un}
     return out

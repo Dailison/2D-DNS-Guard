@@ -804,9 +804,13 @@ def listas_categoria():
     except AnalyzerError as e:
         flash(f"Falha ao carregar políticas/sugestões: {e}", "erro")
     empresas_pol.sort(key=lambda x: x["nome"].lower())
+    try:
+        servicos = api.get("/liberacao")
+    except AnalyzerError:
+        servicos = []
     return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, itens=itens,
                            categorias=dnslib.CATEGORIAS_LISTA, sugestoes=sugestoes, empresas_pol=empresas_pol,
-                           default_tem=default_tem)
+                           default_tem=default_tem, servicos=servicos)
 
 
 def _tirar_da_lista(cat: str, dominio: str) -> None:
@@ -938,7 +942,7 @@ def empresa_politica(tid):
             api.delete(f"/policies/{quote(scope, safe='')}")
         else:
             api.put(f"/policies/{quote(scope, safe='')}", {"lists": d.get("lists") or [], "services": d.get("services") or [],
-                                                           "by": admin_atual().email})
+                                                           "services_blocked": d.get("blocked") or [], "by": admin_atual().email})
         r = pol.sincronizar()
         current_app.logger.info("DNS: %s: política %s = %s / %s", admin_atual().email, scope, d.get("lists"), d.get("services"))
         return _json(True, "Salvo e aplicado no DNS (listas valem em até 1 h; exceções na hora).", redes=r["redes"])
@@ -968,6 +972,7 @@ def lista_empresas():
             novo = ls | {cat} if liga else ls - {cat}
             if novo != ls and (p or liga):
                 api.put(f"/policies/{quote(scope, safe='')}", {"lists": sorted(novo), "services": p.get("services") or [],
+                                                               "services_blocked": p.get("services_blocked") or [],
                                                                "by": admin_atual().email})
                 mudou += 1
         r = pol.sincronizar() if mudou else {"redes": None}
@@ -1003,5 +1008,144 @@ def dominio_listas():
         alvo = doms[0] if len(doms) == 1 else f"{len(doms)} domínios"
         return _json(True, f"{alvo}: " + (", ".join(rot[c] for c in quer) if quer else "fora de todas as listas (manter liberado)")
                      + ". O DNS atualiza em até 1 h.")
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
+# ------------------------------------------------- Listas de liberação avulsas + serviços (sublistas)
+def _servico_ctx(slug: str) -> dict:
+    """Dados de um serviço/lista de liberação: domínios e quem bloqueia/libera."""
+    from app import empresas as emp
+    from app import politicas as pol
+    todas = api.get("/liberacao")
+    s = next((x for x in todas if x["slug"] == slug), None)
+    if not s:
+        return {"servico": None, "todas": todas}
+    doms = api.get(f"/liberacao/{quote(slug, safe='')}", limit=20000)
+    por = pol.por_escopo()
+    nomes = {f"tenant:{e['id']}": e["name"] for e in emp.lista() if not e.get("auto_created")}
+    nomes["default"] = "Redes sem cadastro (padrão)"
+    libera = sorted(nomes.get(k, k) for k, v in por.items() if slug in (v.get("services") or []) and not k.startswith("unit:"))
+    bloqueia = sorted(nomes.get(k, k) for k, v in por.items() if slug in (v.get("services_blocked") or []) and not k.startswith("unit:"))
+    empresas_pol = sorted(({"id": e["id"], "nome": e["name"], "tem": slug in ((por.get(f"tenant:{e['id']}") or {}).get("services") or [])}
+                           for e in emp.lista() if not e.get("auto_created")), key=lambda x: x["nome"].lower())
+    return {"servico": s, "todas": todas, "doms": doms, "libera": libera, "bloqueia": bloqueia,
+            "empresas_pol": empresas_pol, "default_tem": slug in ((por.get("default") or {}).get("services") or [])}
+
+
+@admin_bp.get("/listas-liberacao")
+@login_required
+def listas_liberacao():
+    """Listas de liberação avulsas (whitelist): vencem qualquer lista de bloqueio."""
+    ctx = {"servico": None, "todas": []}
+    try:
+        todas = api.get("/liberacao")
+        avulsas = [x for x in todas if not x.get("category")]
+        slug = request.args.get("slug") or (avulsas[0]["slug"] if avulsas else "")
+        ctx = _servico_ctx(slug) if slug else {"servico": None, "todas": todas}
+    except AnalyzerError as e:
+        flash(f"Falha ao carregar as listas de liberação: {e}", "erro")
+    return render_template("admin/servico.html", modo="liberacao", categorias=dnslib.CATEGORIAS_LISTA, **ctx)
+
+
+@admin_bp.get("/servicos/<slug>")
+@login_required
+def servico(slug):
+    try:
+        ctx = _servico_ctx(slug)
+    except AnalyzerError as e:
+        flash(f"Falha ao carregar o serviço: {e}", "erro")
+        ctx = {"servico": None, "todas": []}
+    return render_template("admin/servico.html", modo="servico", categorias=dnslib.CATEGORIAS_LISTA, **ctx)
+
+
+def _volta_servico(slug: str):
+    v = request.form.get("voltar") or ""
+    return redirect(v if next_local(v) else url_for("admin.servico", slug=slug))
+
+
+@admin_bp.post("/servicos/criar")
+@login_required
+def servico_criar():
+    nome, cat = (request.form.get("nome") or "").strip(), (request.form.get("categoria") or "").strip() or None
+    try:
+        r = api.post("/liberacao", {"name": nome, "category": cat, "by": admin_atual().email})
+        flash(f"{nome} criado." + ("" if cat else " Vincule às empresas no botão Empresas…"), "ok")
+        return redirect(url_for("admin.servico", slug=r["slug"]) if cat else url_for("admin.listas_liberacao", slug=r["slug"]))
+    except AnalyzerError as e:
+        flash(f"Falha ao criar: {e}", "erro")
+        return redirect(request.referrer or url_for("admin.listas_liberacao"))
+
+
+@admin_bp.post("/servicos/<slug>/editar")
+@login_required
+def servico_editar(slug):
+    try:
+        api.put(f"/liberacao/{quote(slug, safe='')}", {"name": request.form.get("nome") or slug,
+                                                       "category": (request.form.get("categoria") or None)})
+        from app import politicas as pol
+        pol.sincronizar()
+        flash("Salvo.", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"Falha: {e}", "erro")
+    return _volta_servico(slug)
+
+
+@admin_bp.post("/servicos/<slug>/apagar")
+@login_required
+def servico_apagar(slug):
+    try:
+        api.delete(f"/liberacao/{quote(slug, safe='')}")
+        from app import politicas as pol
+        pol.sincronizar()
+        flash(f"{slug} apagado (e retirado das empresas que o usavam).", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"Falha: {e}", "erro")
+    return redirect(url_for("admin.listas_liberacao"))
+
+
+@admin_bp.post("/servicos/<slug>/dominios")
+@login_required
+def servico_dominios(slug):
+    acao, dom = request.form.get("acao"), (request.form.get("dominio") or "").strip().lower().rstrip(".")
+    try:
+        if acao == "rem":
+            api.delete(f"/liberacao/{quote(slug, safe='')}/dominios/{quote(dom, safe='')}")
+            flash(f"{dom} saiu.", "ok")
+        else:
+            doms = [x.strip() for x in (request.form.get("dominio") or "").replace(",", "\n").splitlines() if x.strip()]
+            r = api.post(f"/liberacao/{quote(slug, safe='')}/dominios", {"domains": doms, "by": admin_atual().email})
+            flash(f"{r.get('dominios', 0)} domínio(s) adicionado(s). Vale no DNS em até 1 h.", "ok")
+    except AnalyzerError as e:
+        flash(f"Falha: {e}", "erro")
+    return _volta_servico(slug)
+
+
+@admin_bp.post("/listas-liberacao/empresas")
+@login_required
+def liberacao_empresas():
+    """Modal: quais empresas (e o padrão) liberam esta lista/serviço."""
+    from app import empresas as emp
+    from app import politicas as pol
+    d = request.get_json(silent=True) or {}
+    slug = (d.get("slug") or "").strip()
+    quer = {int(x) for x in d.get("tenants") or []}
+    try:
+        atual = pol.por_escopo()
+        mudou = 0
+        alvos = [(f"tenant:{e['id']}", e["id"] in quer) for e in emp.lista() if not e.get("auto_created")]
+        alvos.append(("default", bool(d.get("default"))))
+        for scope, liga in alvos:
+            p = atual.get(scope) or {}
+            sv = set(p.get("services") or [])
+            novo = sv | {slug} if liga else sv - {slug}
+            if novo != sv and (p or liga):
+                api.put(f"/policies/{quote(scope, safe='')}", {"lists": p.get("lists") or [], "services": sorted(novo),
+                                                               "services_blocked": p.get("services_blocked") or [],
+                                                               "by": admin_atual().email})
+                mudou += 1
+        if mudou:
+            pol.sincronizar()
+        return _json(True, f"{mudou} política(s) alterada(s) e aplicadas no DNS." if mudou else "Nada mudou.")
     except Exception as e:  # noqa: BLE001
         return _json(False, f"Falha: {e}")

@@ -268,7 +268,7 @@ def grupo_da_rede(cidr, ngm):
 # ------------------------------------------------ listas por categoria (assinadas pelos grupos)
 # O analisador publica /listas/<categoria>.txt; cada grupo assina as que quiser (blockListUrls).
 CATEGORIAS_LISTA = [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("adulto", "Conteúdo adulto"),
-                    ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
+                    ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"), ("mensageiros", "Mensageiros"),
                     ("streaming", "Vídeo e streaming"), ("publicidade", "Publicidade e rastreamento"),
                     ("compras", "Compras"), ("noticias", "Notícias"), ("outros_bloqueios", "Outros bloqueios")]
 CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "adulto", "apostas", "jogos"}   # bloqueio automático
@@ -343,6 +343,19 @@ def dominios_das_listas(cats):
     return {c: cache[c] for c in cats}
 
 
+def dominios_liberacao(slug):
+    """Domínios de uma lista de liberação (do analisador; cache por requisição). Falha = vazio."""
+    from flask import g as fg
+    from app import analyzer_client as api
+    cache = fg.setdefault("_lib_cat", {})
+    if slug not in cache:
+        try:
+            cache[slug] = {r["domain"] for r in api.get(f"/liberacao/{slug}", limit=20000)}
+        except Exception:  # noqa: BLE001
+            cache[slug] = set()
+    return cache[slug]
+
+
 def pacotes_liberados(g):
     """Serviços (PACOTES) cujos domínios estão todos no 'allowed' do grupo."""
     permitidos = {x.lower() for x in g.get("allowed") or []}
@@ -376,8 +389,14 @@ def indice_bloqueio(cfg=None):
         s = {x.lower() for x in g.get("blocked", [])}
         for c in listas_assinadas(g):
             s |= doms.get(c, set())
+        for u in g.get("blockListUrls") or []:
+            m = _LIB_RE.search(str(u))
+            if m:
+                s |= dominios_liberacao(m.group(1))
         grupos[g["name"]] = s
         permitidos[g["name"]] = {x.lower() for x in g.get("allowed") or []}
+        for slug in listas_liberacao_do_grupo(g):
+            permitidos[g["name"]] |= dominios_liberacao(slug)
     return {"grupos": grupos, "permitidos": permitidos, "ngm": ngm_de(cfg), "ativos": sorted(grupos)}
 
 
@@ -965,18 +984,36 @@ def plano_politicas(empresas, politicas):
             p, nome = (pu, nome_grupo(e["name"], unidade)) if pu else (pe, nome_grupo(e["name"]))
             if not p:
                 continue
-            grupos[nome] = {"lists": sorted(p.get("lists") or []), "services": sorted(p.get("services") or [])}
+            grupos[nome] = {"lists": sorted(p.get("lists") or []), "services": sorted(p.get("services") or []),
+                            "blocked": sorted(p.get("services_blocked") or [])}
             mapa[cidr] = nome
     d = pol.get("default") or {}
-    return grupos, mapa, {"lists": sorted(d.get("lists") or []), "services": sorted(d.get("services") or [])}
+    return grupos, mapa, {"lists": sorted(d.get("lists") or []), "services": sorted(d.get("services") or []),
+                          "blocked": sorted(d.get("services_blocked") or [])}
 
 
-def _aplica_politica(g, lists, services):
-    outras = [u for u in (g.get("blockListUrls") or []) if not _LISTA_RE.search(str(u))]
-    g["blockListUrls"] = outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(lists)]
-    todos = {d for _, doms in PACOTES.values() for d in doms}
-    manuais = [x for x in g.get("allowed") or [] if x.lower() not in todos]
-    g["allowed"] = sorted(set(manuais) | {d for k in services if k in PACOTES for d in PACOTES[k][1]})
+_LIB_RE = re.compile(r"/(?:liberacao|servico)/([a-z0-9-]+)\.txt$")
+
+
+def url_liberacao(slug):
+    """URL de um serviço / lista de liberação (a mesma serve p/ bloquear ou liberar)."""
+    return (current_app.config.get("ANALYZER_URL") or "").rstrip("/") + f"/servico/{slug}.txt"
+
+
+def listas_liberacao_do_grupo(g):
+    return sorted({m.group(1) for u in (g.get("allowListUrls") or []) if (m := _LIB_RE.search(str(u)))})
+
+
+def _aplica_politica(g, lists, services, bloqueados=()):
+    """Listas de bloqueio + serviços bloqueados -> blockListUrls; serviços/listas de liberação
+    liberados -> allowListUrls (vencem o bloqueio). URLs de terceiros e liberações manuais ficam."""
+    outras = [u for u in (g.get("blockListUrls") or []) if not _LISTA_RE.search(str(u)) and not _LIB_RE.search(str(u))]
+    g["blockListUrls"] = (outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(lists)]
+                          + [url_liberacao(s) for s in sorted(set(bloqueados) - set(services))])
+    outras = [u for u in (g.get("allowListUrls") or []) if not _LIB_RE.search(str(u))]
+    g["allowListUrls"] = outras + [url_liberacao(s) for s in sorted(set(services))]
+    pacotes = {d for _, doms in PACOTES.values() for d in doms}   # (antes as liberações iam coladas no grupo)
+    g["allowed"] = sorted(x for x in g.get("allowed") or [] if x.lower() not in pacotes)
 
 
 def sincronizar_politicas(empresas, politicas, aplicar=True):
@@ -1001,9 +1038,9 @@ def sincronizar_politicas(empresas, politicas, aplicar=True):
         else:
             atualizados.append(nome)
         g["enableBlocking"] = True
-        _aplica_politica(g, p["lists"], p["services"])
+        _aplica_politica(g, p["lists"], p["services"], p["blocked"])
     if "default" in existentes:
-        _aplica_politica(existentes["default"], default["lists"], default["services"])
+        _aplica_politica(existentes["default"], default["lists"], default["services"], default["blocked"])
     ngm = cfg.setdefault("networkGroupMap", {})
     for k in list(ngm):
         v = ngm[k]

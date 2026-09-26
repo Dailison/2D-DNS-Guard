@@ -12,8 +12,10 @@
   .mini{padding:.25rem .5rem;font-size:.8rem}
   .lchip{display:inline-block;font-size:.72rem;padding:.05rem .45rem;border-radius:999px;background:#fee2e2;color:#7f1d1d;margin:0 .2rem .2rem 0;white-space:nowrap}
   html[data-theme="dark"] .lchip{background:#4c1d1d;color:#fecaca}
-  #dlgPol .grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.25rem .8rem;margin:.3rem 0 .6rem}
-  #dlgPol label.chk{margin:0;font-weight:400}
+  #dlgPol .pcat{padding:.35rem 0;border-bottom:1px dashed var(--bd)}
+  #dlgPol .psrv{display:flex;flex-wrap:wrap;gap:.3rem .8rem;margin:.25rem 0 0 1.6rem}
+  #dlgPol .ps{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem}
+  #dlgPol .ps select{width:auto;padding:.1rem .3rem;font-size:.8rem}
 </style>
 
 {% if sem %}
@@ -87,7 +89,10 @@
         <td style="max-width:300px">
           {% if p.lists %}{% for c in p.lists %}<span class="lchip">{{ dict(cats).get(c, c) }}</span>{% endfor %}
           {% else %}<span class="mut" style="font-size:.8rem">{{ 'nenhuma (não bloqueia nada)' if p.definida else 'padrão das redes sem cadastro' }}</span>{% endif %}
-          {% if p.services %}<div style="font-size:.75rem;color:#16a34a;margin-top:.15rem">libera: {% for s in p.services %}{{ dict(pacotes).get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+          {% set nomes_srv = {} %}
+          {% for x in pacotes %}{% set _ = nomes_srv.update({x.slug: x.name}) %}{% endfor %}
+          {% if p.blocked %}<div style="font-size:.75rem;color:#b91c1c;margin-top:.15rem">bloqueia também: {% for s in p.blocked %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+          {% if p.services %}<div style="font-size:.75rem;color:#16a34a;margin-top:.15rem">libera: {% for s in p.services %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
           {% if p.unidades %}<div style="font-size:.75rem;color:var(--mut);margin-top:.15rem">exceção: {{ p.unidades.keys()|join(', ') }}</div>{% endif %}
           <div><button type="button" class="btn mini" style="margin-top:.25rem" data-pol='{{ {"tid": t.id, "nome": t.name, "unidades": t.networks|map(attribute="unit")|select|unique|list, "pol": p}|tojson }}' onclick="abrirPolitica(this)">Listas…</button></div>
         </td>
@@ -147,15 +152,23 @@ II 10.52.0.0/16"></textarea>
     <div><label>Aplicar a</label><select id="pEscopo"></select></div>
     <label class="chk" id="pHerdarBox" style="margin:0 0 .45rem;display:none"><input type="checkbox" id="pHerdar"> <span>usar as listas da empresa</span></label>
   </div>
-  <div id="pCampos">
-    <label style="margin:.2rem 0 0">Bloquear as listas</label>
-    <div class="grade" id="pListas">
-      {% for c, rot in cats %}<label class="chk"><input type="checkbox" value="{{ c }}"> <span>{{ rot }}{{ ' ⚡' if c in cats_risco }}</span></label>{% endfor %}
+  <div id="pCampos" style="max-height:58vh;overflow:auto;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:.3rem 0">
+    {% for c, rot in cats %}
+    {% set srvs = pacotes|selectattr('category', 'equalto', c)|list %}
+    <div class="pcat">
+      <label class="chk" style="margin:0;font-weight:600"><input type="checkbox" class="pLista" value="{{ c }}"> <span>{{ rot }}{{ ' ⚡' if c in cats_risco }}</span></label>
+      {% if srvs %}<div class="psrv">
+        {% for x in srvs %}<span class="ps"><span>{{ x.name }}</span>
+          <select data-srv="{{ x.slug }}"><option value="">herda</option><option value="bloquear">bloquear</option><option value="liberar">liberar</option></select></span>{% endfor %}
+      </div>{% endif %}
     </div>
-    <label style="margin:.2rem 0 0">Liberar como exceção <span class="mut" style="font-weight:400;font-size:.8rem">(vence qualquer lista)</span></label>
-    <div class="grade" id="pServ">
-      {% for k, rot in pacotes %}<label class="chk"><input type="checkbox" value="{{ k }}"> <span>{{ rot }}</span></label>{% endfor %}
+    {% endfor %}
+    {% set avulsas = pacotes|rejectattr('category')|list %}
+    {% if avulsas %}
+    <div class="pcat"><div style="font-weight:600;margin:.2rem 0">Listas de liberação avulsas <span class="mut" style="font-weight:400;font-size:.8rem">(vencem qualquer bloqueio)</span></div>
+      <div class="psrv">{% for x in avulsas %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" class="pAvulsa" value="{{ x.slug }}"> <span>{{ x.name }}</span></label>{% endfor %}</div>
     </div>
+    {% endif %}
   </div>
   <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = a IA põe os sites sozinha. Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 1 h; as exceções, na hora.</p>
   <div style="display:flex;gap:.5rem;justify-content:flex-end">
@@ -170,8 +183,10 @@ II 10.52.0.0/16"></textarea>
   const URL = {{ url_for('admin.empresa_politica', tid=0)|tojson }};
   let atual = null;
   function marca(p) {
-    dlg.querySelectorAll("#pListas input").forEach(i => i.checked = (p.lists || []).includes(i.value));
-    dlg.querySelectorAll("#pServ input").forEach(i => i.checked = (p.services || []).includes(i.value));
+    dlg.querySelectorAll(".pLista").forEach(i => i.checked = (p.lists || []).includes(i.value));
+    dlg.querySelectorAll("select[data-srv]").forEach(s => s.value = (p.services || []).includes(s.dataset.srv) ? "liberar"
+                                                                 : (p.blocked || []).includes(s.dataset.srv) ? "bloquear" : "");
+    dlg.querySelectorAll(".pAvulsa").forEach(i => i.checked = (p.services || []).includes(i.value));
   }
   function mostra() {
     const u = esc.value, pu = (atual.pol.unidades || {})[u];
@@ -192,9 +207,11 @@ II 10.52.0.0/16"></textarea>
   herdar.addEventListener("change", () => { document.getElementById("pCampos").style.opacity = herdar.checked ? .45 : 1; if (herdar.checked) marca(atual.pol); });
   document.getElementById("pSalvar").addEventListener("click", async (ev) => {
     const b = ev.target; b.disabled = true;
+    const sel = v => [...dlg.querySelectorAll("select[data-srv]")].filter(s => s.value === v).map(s => s.dataset.srv);
     const body = {unidade: esc.value, herdar: herdar.checked,
-      lists: [...dlg.querySelectorAll("#pListas input:checked")].map(i => i.value),
-      services: [...dlg.querySelectorAll("#pServ input:checked")].map(i => i.value)};
+      lists: [...dlg.querySelectorAll(".pLista:checked")].map(i => i.value),
+      services: sel("liberar").concat([...dlg.querySelectorAll(".pAvulsa:checked")].map(i => i.value)),
+      blocked: sel("bloquear")};
     try {
       const r = await fetch(URL.replace("/0/", "/" + atual.tid + "/"), {method: "POST", credentials: "same-origin",
         headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(body)});

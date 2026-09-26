@@ -30,6 +30,7 @@ from psycopg.types.json import Jsonb
 
 from . import db, webintel
 from .config import settings
+from . import listas_ia
 from .listas_ia import LISTAS_IA, NENHUMA, _contexto, salvar
 
 log = logging.getLogger(__name__)
@@ -319,7 +320,8 @@ def fase(categorias: list[str]) -> str:
     for nivel, buscar in ((vol, False), (reforco, False), (busca if pode_buscar else [], True)):
         # próximo nível (modelo maior) se não há resposta, se ela não tem certeza ou se DISCORDA da IA local
         if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")) \
-                and not (revalidar and not meta.get("nivel_reforco")):
+                and not (revalidar and not meta.get("nivel_reforco")) \
+                and not (obj.get("lista") in listas_ia._DOIS_MODELOS and not meta.get("nivel_reforco")):
             break
         if obj is not None and meta.get("nivel_reforco") and nivel is not busca:
             break

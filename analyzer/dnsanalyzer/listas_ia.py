@@ -189,10 +189,12 @@ PARA_REVISAR = "para_revisar"
 # "de trabalho" e são populares (WhatsApp = comunicação, ChatGPT = produtividade, Dropbox = TI) — as travas
 # de categoria e de popularidade as deixariam vazias. Só a do catálogo (protegidos) vale.
 _USO_MISTO = {"mensageiros", "ia_chatbots", "nuvem_remoto"}
-# DoH/DNS nunca entra sozinha (incidente 2026-09-26): nomes de DNS de CDN/plataforma (impervadns.net,
-# apple-dns.net, herokudns.com…) parecem "resolvedor" p/ as IAs, e são destino de CNAME de milhares de
-# sites — um erro derruba tudo o que está atrás deles. A IA sugere; uma pessoa confirma em Decisões.
-_SO_MANUAL = {"doh_dns"}
+# DoH/DNS (incidente 2026-09-26): nomes de DNS de CDN/plataforma (impervadns.net, apple-dns.net,
+# herokudns.com…) parecem "resolvedor" p/ as IAs e são destino de CNAME de milhares de sites — um erro
+# derruba tudo o que está atrás deles. Só entra sozinha com DOIS modelos online de acordo (volume + segunda
+# opinião), ambos ≥ 0,95 (os acertos vieram com 1,0; os erros da IA online, bibledns/dnzdns, com 0,8-0,85).
+_DOIS_MODELOS = {"doh_dns"}
+_DOIS_MODELOS_CONF = 0.95
 
 
 def guardado(r: dict, cat: str | None = None) -> str | None:
@@ -201,12 +203,19 @@ def guardado(r: dict, cat: str | None = None) -> str | None:
     resposta da IA online, só quando AS DUAS IAs dão categoria de trabalho (a local erra justamente aí:
     CMP de cookies = "produtividade"); site de trabalho popular (Tranco ≤ 10.000; classificação da IA
     online quando é ela quem responde). Listas de uso misto (Mensageiros, IA/Chatbots, Nuvem/Acesso
-    remoto) só têm a trava do catálogo (ver _USO_MISTO); DoH/DNS é sempre revisão (ver _SO_MANUAL)."""
+    remoto) só têm a trava do catálogo (ver _USO_MISTO); DoH/DNS exige dois modelos online de acordo
+    (ver _DOIS_MODELOS)."""
     e = catalog.match(r["name"])
     if e and e.get("protected"):
         return "trava: infraestrutura protegida (catálogo)"
-    if cat in _SO_MANUAL:
-        return "trava: DoH/DNS só com revisão (DNS de CDN também parece resolvedor)"
+    if cat in _DOIS_MODELOS:
+        antes = r.get("antes") or {}
+        try:
+            ok = ((r.get("lista_fonte") or "").startswith("online") and (r.get("lista_conf") or 0) >= _DOIS_MODELOS_CONF
+                  and antes.get("lista") == cat and float(antes.get("confianca") or 0) >= _DOIS_MODELOS_CONF)
+        except (TypeError, ValueError):
+            ok = False
+        return None if ok else "trava: DoH/DNS exige dois modelos online de acordo (≥ 95%)"
     if cat in _USO_MISTO:
         return None
     online = (r.get("lista_fonte") or "").startswith("online")
@@ -245,6 +254,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
         " d.popularity_rank, d.corp_action, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
+        " d.online_resp->'_meta'->'antes' AS antes, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
         " EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id AND (td.review_status = 'allowed' "

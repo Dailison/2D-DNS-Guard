@@ -384,16 +384,24 @@ def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
         listas_ia.aplicar(c)
         m = em(c, "talvez-nada.com")
     assert "IA online sem certeza" in m.get("para_revisar", ""), m
-    # 5) DoH/DNS nunca entra sozinha (incidente: impervadns.net/apple-dns.net pareciam resolvedor) -> Decisões
+    # 5) DoH/DNS: só com dois modelos online de acordo (≥ 0,95); um só (ou 0,85) -> Decisões
+    from psycopg.types.json import Jsonb
     with db.conn() as c:
         i = novo(c, "dns.google", "TRABALHO", "infraestrutura", rank=50)
-        listas_ia.salvar(c, i, "doh_dns", 0.9, "", "", "online:gemini")
+        listas_ia.salvar(c, i, "doh_dns", 1.0, "", "", "online:gemini")
+        c.execute("UPDATE domains SET online_resp = %s WHERE id = %s",
+                  (Jsonb({"_meta": {"antes": {"lista": "doh_dns", "confianca": 1.0}}}), i))
         j2 = novo(c, "impervadns.net", "TRABALHO", "infraestrutura", rank=506)
-        listas_ia.salvar(c, j2, "doh_dns", 1.0, "", "", "online:gemini")
+        listas_ia.salvar(c, j2, "doh_dns", 1.0, "", "", "online:gemini")   # um modelo só
+        j3 = novo(c, "bibledns.com", "TRABALHO", "infraestrutura", rank=24340)
+        listas_ia.salvar(c, j3, "doh_dns", 0.85, "", "", "online:gemini")
+        c.execute("UPDATE domains SET online_resp = %s WHERE id = %s",
+                  (Jsonb({"_meta": {"antes": {"lista": "doh_dns", "confianca": 0.85}}}), j3))
         listas_ia.aplicar(c)
-        m, m2 = em(c, "dns.google"), em(c, "impervadns.net")
-    assert "doh_dns" not in m and "DoH/DNS só com revisão" in m.get("para_revisar", ""), m
-    assert "doh_dns" not in m2 and "para_revisar" in m2, m2
+        m, m2, m3 = em(c, "dns.google"), em(c, "impervadns.net"), em(c, "bibledns.com")
+    assert "doh_dns" in m and "para_revisar" not in m, m
+    assert "doh_dns" not in m2 and "dois modelos" in m2.get("para_revisar", ""), m2
+    assert "doh_dns" not in m3 and "para_revisar" in m3, m3
     # 5b) uso misto (Mensageiros) popular e "comunicação" entra (só a trava do catálogo vale)
     with db.conn() as c:
         i = novo(c, "viber.com", "TRABALHO", "comunicacao", rank=900)
@@ -412,3 +420,23 @@ def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
     # travado aparece em Decisões (fase 5) mesmo sem a IA online ter avaliado
     j = env.get("/listas/para_revisar/detalhes", headers=H, params={"fase5": True, "limit": 1000}).json()
     assert {"banco-x.com.br", "microsoft.com", "talvez-nada.com"} <= {r["domain"] for r in j["items"]}
+
+
+def test_doh_pede_segunda_opiniao(env, monkeypatch):
+    from dnsanalyzer import config, db, online
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, lista_duvida) "
+                  "VALUES ('doh.exemplo.net', 'TRABALHO', 'infraestrutura', now(), 5000, true)")
+    vistos = []
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)
+
+    def falso(d, cats, buscar, modelo):
+        vistos.append((d["name"], modelo))
+        return {"lista": "doh_dns", "confianca": 1.0, "classificacao": "TRABALHO", "reconhecido": True}, {"model": modelo}
+    monkeypatch.setattr(online, "perguntar", falso)
+    online.fase(["infraestrutura"])
+    assert [m for n, m in vistos if n == "doh.exemplo.net"] == ["gemini-3.5-flash-lite", "gemma-4-31b-it"]
+    with db.conn() as c:
+        antes = c.execute("SELECT online_resp->'_meta'->'antes' AS a FROM domains WHERE name='doh.exemplo.net'").fetchone()["a"]
+    assert antes["lista"] == "doh_dns" and antes["confianca"] == 1.0

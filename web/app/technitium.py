@@ -212,15 +212,16 @@ def grupo_da_rede(cidr, ngm):
 # O analisador publica /listas/<categoria>.txt; cada grupo assina as que quiser (blockListUrls).
 # organização das listas (pedido do usuário 2026-09-26): seções só p/ a tela; ⚡ = risco (só destaque)
 SECOES_LISTA = [
-    ("🔒 Segurança", [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS")]),
+    ("🔒 Segurança", [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
+                     ("adware", "Adware / Apps indesejados")]),
     ("🚫 Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
-                    ("streaming", "Streaming"), ("mensageiros", "Mensageiros")]),
+                    ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
     ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),
     ("🏢 Trabalho", [("compras", "Compras"), ("ia_chatbots", "IA / Chatbots"), ("nuvem_remoto", "Nuvem / Acesso remoto")]),
     ("🔧 Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros"), ("para_revisar", "Para revisar")]),
 ]
 CATEGORIAS_LISTA = [x for _, itens in SECOES_LISTA for x in itens]
-CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adulto", "apostas"}   # ⚡ (só destaque visual)
+CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas"}   # ⚡ (só destaque visual)
 CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # a IA não põe sozinha
 
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")

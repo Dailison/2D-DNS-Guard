@@ -28,12 +28,17 @@ LISTAS_IA = {
     "vpn_proxy": "VPN de uso pessoal, proxy, anonimizador, Tor, qualquer coisa para contornar o filtro "
                  "(VPN CORPORATIVA — Fortinet, GlobalProtect, Cisco AnyConnect, Zscaler — é nenhuma)",
     "doh_dns": "resolvedor DNS público e DNS sobre HTTPS/TLS (dns.google, cloudflare-dns, quad9, nextdns, adguard-dns, opendns)",
+    "adware": "adware e software indesejado (PUP): sequestradores de navegador, extensões e 'utilitários' que empurram "
+              "propaganda (leitor de PDF, calendário, clima, conversor grátis), falso antivírus/otimizador, mineração de "
+              "cripto no navegador (sem ser golpe confirmado — golpe/malware é ameaca)",
     "adulto": "pornografia, conteúdo sexual, encontros adultos, acompanhantes",
     "apostas": "bets, cassino online, apostas esportivas, loterias e jogos de azar online",
     "jogos": "jogos online, lojas e launchers de games, servidores e fóruns de jogos, cheats",
     "redes_sociais": "redes sociais (Facebook, Instagram, TikTok, X, Kwai, Pinterest, Reddit, Threads, Snapchat)",
     "streaming": "vídeo, música e lives sob demanda (YouTube, Netflix, Spotify, Deezer, Twitch, Globoplay, Prime Video)",
     "mensageiros": "mensageiros e chat pessoal (WhatsApp, Telegram, Discord, Signal, Messenger, WeChat)",
+    "cripto_trading": "criptomoedas e trading especulativo: corretoras de cripto (Binance, OKX), carteiras, opções binárias, "
+                      "forex/day trade, sinais de trading, pirâmides (bancos e corretoras tradicionais são nenhuma)",
     "publicidade": "redes de anúncio, rastreamento, analytics, pixels, atribuição de apps",
     "compras": "lojas online, marketplaces, varejo, atacado, supermercado, delivery, cupons (conta como trabalho: compras da empresa)",
     "noticias": "portais de notícias, revistas, fofoca e entretenimento",
@@ -48,7 +53,7 @@ NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
 # o site precisa ser coerente com a classificação principal p/ entrar sozinho (senão: Para revisar)
 _EXIGE_NAO_TRABALHO = {"vpn_proxy", "adulto", "apostas", "jogos", "redes_sociais", "streaming", "publicidade", "pirataria",
-                       "noticias"}   # site TRABALHO nessas = contradição -> revisão (Compras conta como trabalho)
+                       "noticias", "adware", "cripto_trading"}   # site TRABALHO nessas = contradição -> revisão (Compras conta como trabalho)
 
 SYSTEM = """Você organiza sites em LISTAS de filtro de DNS para empresas brasileiras.
 A lista diz O QUE O SITE É — não se ele é de trabalho (cada empresa escolhe depois quais listas bloqueia).

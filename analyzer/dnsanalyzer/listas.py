@@ -18,8 +18,8 @@ log = logging.getLogger(__name__)
 CATEGORIAS_RISCO = ("jogos", "apostas", "adulto", "vpn_proxy", "ameaca")
 # nova organização (pedido do usuário 2026-09-26): a IA põe o site em QUALQUER destas listas quando tem
 # certeza (etapa "lista", listas_ia.py); sem certeza, vai p/ Para revisar com a sugestão
-CATEGORIAS_CURADAS = ("doh_dns", "redes_sociais", "streaming", "mensageiros", "publicidade", "compras", "noticias",
-                      "pirataria", "ia_chatbots", "nuvem_remoto")
+CATEGORIAS_CURADAS = ("doh_dns", "adware", "redes_sociais", "streaming", "mensageiros", "cripto_trading", "publicidade",
+                      "compras", "noticias", "pirataria", "ia_chatbots", "nuvem_remoto")
 CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado)
 # Sistema = só manual. infra_bloqueio ("Infraestrutura"): NÃO é a categoria "infraestrutura" da IA (serviços
 # de trabalho); outros_bloqueios ("Outros"); para_revisar: dúvidas da IA + sobras da migração, ninguém aplica

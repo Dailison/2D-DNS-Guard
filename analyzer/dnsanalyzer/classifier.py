@@ -529,7 +529,7 @@ def run_forever(stop=lambda: False) -> None:
                              name=f"whois-{i}").start()
         log.info("etapa 3 (WHOIS) em paralelo: %d worker(s)", cfg.whois_workers)
     threading.Thread(target=_online_worker, args=(stop,), daemon=True, name="online").start()
-    log.info("fase 3 (IA online): %s", f"{cfg.gemini_model}, {cfg.gemini_rpm}/min, {cfg.gemini_rpd}/dia"
+    log.info("fase 4 (IA online): %s", " | ".join(",".join(f"{m} {r}/min {d}/dia" for m, r, d in n) for n in online.niveis())
              if online.habilitado() else "desligada (sem GEMINI_API_KEY)")
     while not stop():
         try:

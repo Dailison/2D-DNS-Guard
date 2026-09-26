@@ -64,9 +64,10 @@ class OnlineIndisponivel(Exception):
 
 
 class _Cota:
-    """Respeita GEMINI_RPM e GEMINI_RPD; 429 pausa até o próximo minuto/dia (meia-noite do Pacífico)."""
+    """Cota de UM modelo (RPM/RPD do plano gratuito); 429 pausa até o próximo minuto/dia (meia-noite do Pacífico)."""
 
-    def __init__(self):
+    def __init__(self, modelo: str, rpm: int, rpd: int):
+        self.modelo, self.rpm, self.rpd = modelo, max(rpm, 1), max(rpd, 1)
         self.lock, self.ultimo, self.dia, self.n, self.pausa_ate = threading.Lock(), 0.0, None, 0, 0.0
 
     @staticmethod
@@ -74,16 +75,15 @@ class _Cota:
         return datetime.now(ZoneInfo("America/Los_Angeles")).date()
 
     def esperar(self) -> bool:
-        cfg = settings()
         with self.lock:
             if time.time() < self.pausa_ate:
                 return False
             if self.dia != self._hoje():
                 self.dia, self.n = self._hoje(), 0
-            if self.n >= cfg.gemini_rpd:
+            if self.n >= self.rpd:
                 self.pausar_dia()
                 return False
-            falta = 60.0 / max(cfg.gemini_rpm, 1) - (time.monotonic() - self.ultimo)
+            falta = 60.0 / self.rpm - (time.monotonic() - self.ultimo)
             if falta > 0:
                 time.sleep(falta)
             self.ultimo, self.n = time.monotonic(), self.n + 1
@@ -93,18 +93,36 @@ class _Cota:
         agora = datetime.now(ZoneInfo("America/Los_Angeles"))
         amanha = (agora + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
         self.pausa_ate = time.time() + (amanha - agora).total_seconds()
-        log.info("IA online: cota do dia esgotada; volta às %s (Pacífico)", amanha.strftime("%H:%M"))
+        log.info("IA online: cota do dia do %s esgotada; volta às %s (Pacífico)", self.modelo, amanha.strftime("%H:%M"))
 
     def pausar(self, segundos: float):
         self.pausa_ate = max(self.pausa_ate, time.time() + segundos)
 
 
-COTA = _Cota()
+_COTAS: dict[str, _Cota] = {}
+
+
+def niveis() -> list[list[tuple[str, int, int]]]:
+    """[volume, reforço, busca]: cada nível = [(modelo, rpm, rpd)] na ordem de uso (ver config)."""
+    cfg = settings()
+    return [cfg.gemini_modelos, cfg.gemini_reforco, cfg.gemini_busca]
+
+
+def cota(modelo: str) -> _Cota:
+    if modelo not in _COTAS:
+        rpm, rpd = next(((r, d) for nivel in niveis() for m, r, d in nivel if m == modelo), (5, 20))
+        _COTAS[modelo] = _Cota(modelo, rpm, rpd)
+    return _COTAS[modelo]
+
+
+def _com_busca(modelo: str) -> bool:
+    """Busca no Google (grounding) no plano grátis desta conta: só nos modelos 2.x/2.5 (3.x = 0/dia)."""
+    return modelo.startswith("gemini-2")
 
 
 def habilitado() -> bool:
     cfg = settings()
-    return bool(cfg.gemini_api_key) and cfg.online_enabled
+    return bool(cfg.gemini_api_key) and cfg.online_enabled and bool(cfg.gemini_modelos)
 
 
 def _json_da_resposta(texto: str) -> dict:
@@ -114,39 +132,40 @@ def _json_da_resposta(texto: str) -> dict:
     return json.loads(m.group(0))
 
 
-def perguntar(d: dict, categorias: list[str], buscar: bool) -> tuple[dict, dict]:
+def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None = None) -> tuple[dict, dict]:
     cfg = settings()
+    modelo = modelo or cfg.gemini_modelos[0][0]
     listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
-    corpo: dict = {
-        "systemInstruction": {"parts": [{"text": SYSTEM.format(listas=listas, categorias=", ".join(categorias))}]},
-        "contents": [{"role": "user", "parts": [{"text": _contexto(d) + "\n\nClassifique este domínio."}]}],
-        "generationConfig": {"temperature": 0},
-    }
-    if buscar:   # desconhecido: deixa o Gemini pesquisar no Google (resposta em texto; o JSON é extraído)
-        corpo["tools"] = [{"google_search": {}}]
+    sistema = SYSTEM.format(listas=listas, categorias=", ".join(categorias))
+    pergunta = _contexto(d) + "\n\nClassifique este domínio."
+    corpo: dict = {"generationConfig": {"temperature": 0}}
+    if modelo.startswith("gemma"):   # Gemma pela API: sem instrução de sistema nem modo JSON (JSON extraído do texto)
+        corpo["contents"] = [{"role": "user", "parts": [{"text": sistema + "\n\n" + pergunta}]}]
+        buscar = False
     else:
-        corpo["generationConfig"]["responseMimeType"] = "application/json"
+        corpo["systemInstruction"] = {"parts": [{"text": sistema}]}
+        corpo["contents"] = [{"role": "user", "parts": [{"text": pergunta}]}]
+        buscar = buscar and _com_busca(modelo)
+        if buscar:   # desconhecido: pesquisa no Google (resposta em texto; o JSON é extraído)
+            corpo["tools"] = [{"google_search": {}}]
+        else:
+            corpo["generationConfig"]["responseMimeType"] = "application/json"
     t0 = time.monotonic()
-    modelo = cfg.gemini_model
-    for tentativa in (cfg.gemini_model, cfg.gemini_fallback_model):
-        if not tentativa:
-            continue
-        modelo = tentativa
-        try:
-            r = httpx.post(URL.format(model=modelo), json=corpo, timeout=90, headers={"x-goog-api-key": cfg.gemini_api_key})
-        except httpx.HTTPError as e:
-            raise OnlineIndisponivel(f"Gemini: {e.__class__.__name__}") from e
-        if r.status_code not in (500, 503):   # sobrecarga do modelo: tenta o reserva (flash-lite)
-            break
+    ct = cota(modelo)
+    try:
+        r = httpx.post(URL.format(model=modelo), json=corpo, timeout=150 if modelo.startswith("gemma") else 60,
+                       headers={"x-goog-api-key": cfg.gemini_api_key})
+    except httpx.HTTPError as e:
+        raise OnlineIndisponivel(f"Gemini {modelo}: {e.__class__.__name__}") from e
     if r.status_code == 429:
         dia = "day" in r.text.lower() or "perday" in r.text.lower().replace("_", "")
-        COTA.pausar_dia() if dia else COTA.pausar(65)
-        raise OnlineIndisponivel("Gemini: cota esgotada (429)")
-    if r.status_code >= 500:
-        COTA.pausar(120)
-        raise OnlineIndisponivel(f"Gemini: HTTP {r.status_code}")
+        ct.pausar_dia() if dia else ct.pausar(65)
+        raise OnlineIndisponivel(f"Gemini {modelo}: cota esgotada (429)")
+    if r.status_code >= 500:   # sobrecarga do modelo
+        ct.pausar(90)
+        raise OnlineIndisponivel(f"Gemini {modelo}: HTTP {r.status_code}")
     if r.status_code != 200:
-        COTA.pausar(600)   # chave inválida/modelo inexistente: não martela
+        ct.pausar(600)   # chave inválida/modelo inexistente: não martela
         raise OnlineIndisponivel(f"Gemini: HTTP {r.status_code}: {r.text[:200]}")
     j = r.json()
     partes = ((j.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
@@ -173,33 +192,62 @@ def _reservar(c) -> dict | None:
         "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence").fetchone()
 
 
+def _certo(obj: dict) -> bool:
+    try:
+        conf = float(obj.get("confianca") or 0)
+    except (TypeError, ValueError):
+        return False
+    return conf >= settings().lista_confianca_min and (obj.get("lista") in LISTAS_IA or bool(obj.get("reconhecido")))
+
+
+def _buscas_no_mes(c) -> int:
+    """Buscas no Google (grounding) já feitas no mês: o plano grátis dá 5.000/mês p/ os modelos 3.x."""
+    return c.execute("SELECT count(*) AS n FROM domains WHERE online_at >= date_trunc('month', now()) "
+                     "AND online_resp->'_meta'->>'busca' = 'true'").fetchone()["n"]
+
+
+def _consultar(nivel, d, categorias, buscar) -> tuple[dict, dict] | None:
+    """Primeiro modelo do nível com cota que responder."""
+    for modelo, _, _ in nivel:
+        if not cota(modelo).esperar():
+            continue
+        try:
+            return perguntar(d, categorias, buscar, modelo)
+        except OnlineIndisponivel as e:
+            log.info("%s", e)
+        except (ValueError, KeyError, json.JSONDecodeError) as e:
+            log.warning("IA online (%s) para %s: resposta inválida: %s", modelo, d["name"], e)
+    return None
+
+
 def fase(categorias: list[str]) -> str:
-    """Uma consulta à IA online. 'idle' = nada na fila; 'unavailable' = sem chave/cota/fora."""
+    """Uma consulta à IA online, por níveis (cada modelo com a sua cota do plano grátis):
+    1 volume (flash-lite 3.5 -> 3.1 -> Gemma 4 31B); 2 reforço sem certeza (3.8 flash); 3 busca no Google
+    para desconhecido que seguiu desconhecido (2.5 flash / flash-lite: únicos com busca no plano grátis).
+    'idle' = nada na fila; 'unavailable' = sem chave/cota/fora."""
     if not habilitado():
         return "idle"
+    cfg = settings()
     with db.conn() as c:
         d = _reservar(c)
+        pode_buscar = (d is not None and d["classification"] == "DESCONHECIDO" and cfg.gemini_grounding
+                       and _buscas_no_mes(c) < cfg.gemini_grounding_month)
     if not d:
         return "idle"
-    if not COTA.esperar():
-        with db.conn() as c:
-            c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (d["id"],))
-        return "unavailable"
-    try:
-        obj, meta = perguntar(d, categorias, buscar=d["classification"] == "DESCONHECIDO" and settings().gemini_grounding)
-    except OnlineIndisponivel as e:
-        log.info("%s", e)
-        with db.conn() as c:
-            c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (d["id"],))
-        return "unavailable"
-    except (ValueError, KeyError, json.JSONDecodeError) as e:
-        log.warning("IA online para %s: resposta inválida: %s", d["name"], e)
-        with db.conn() as c:
-            c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, "
-                      "online_resp = %s WHERE id = %s", (Jsonb({"erro": str(e)[:300]}), d["id"]))
-            _fase4_se_duvida(c, d["id"])
-        return "done"
+    vol, reforco, busca = niveis()
+    obj = meta = None
+    for nivel, buscar in ((vol, False), (reforco, False), (busca if pode_buscar else [], True)):
+        if obj is not None and _certo(obj):
+            break
+        r = _consultar(nivel, d, categorias, buscar)
+        if r:
+            if obj is not None:
+                r[1]["antes"] = {"modelo": meta.get("model"), "lista": obj.get("lista"), "confianca": obj.get("confianca")}
+            obj, meta = r
     with db.conn() as c:
+        if obj is None:   # nenhum modelo respondeu (cota/sobrecarga): tenta de novo depois
+            c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (d["id"],))
+            return "unavailable"
         gravar(c, d, obj, meta, categorias)
     return "done"
 
@@ -211,6 +259,8 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     except (TypeError, ValueError):
         conf = 0.0
     cls = obj.get("classificacao") if obj.get("classificacao") in CLASSES else "DESCONHECIDO"
+    if cls == "MALICIOSO":   # regra do sistema: MALICIOSO só com lista de ameaça; palpite da IA = SUSPEITO (fase 5)
+        cls = "SUSPEITO"
     cat = obj.get("categoria") if obj.get("categoria") in categorias else None
     servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:300]
     salvar(c, d["id"], lista, conf, motivo, servico, fonte)
@@ -233,7 +283,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     log.info("IA online: %s -> %s / %s (%.2f)%s", d["name"], cls, lista, conf, " [busca]" if meta.get("busca") else "")
 
 
-def _fase4_se_duvida(c, domain_id: int) -> None:
+def _fase5_se_duvida(c, domain_id: int) -> None:
     """Resposta inválida da IA online numa dúvida de lista: segue para a fase 4 (manual)."""
     r = c.execute("SELECT name, lista_ia FROM domains WHERE id = %s", (domain_id,)).fetchone()
     if r and r["lista_ia"]:
@@ -245,5 +295,14 @@ def status(c) -> dict:
     r = c.execute("SELECT count(*) FILTER (WHERE " + _FILA.replace("(d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') AND ", "") +
                   ") AS fila, count(*) FILTER (WHERE d.online_at > now() - interval '24 hours') AS ult_24h "
                   "FROM domains d").fetchone()
-    return {**r, "habilitado": habilitado(), "modelo": settings().gemini_model,
-            "pausado_ate": datetime.fromtimestamp(COTA.pausa_ate, timezone.utc).isoformat() if COTA.pausa_ate > time.time() else None}
+    cfg = settings()
+    modelos = {}
+    for m in dict.fromkeys(x for nivel in niveis() for x, _, _ in nivel):
+        if m:
+            ct = cota(m)
+            modelos[m] = {"hoje": ct.n if ct.dia == ct._hoje() else 0, "limite_dia": ct.rpd,
+                          "pausado_ate": datetime.fromtimestamp(ct.pausa_ate, timezone.utc).isoformat() if ct.pausa_ate > time.time() else None}
+    with db.conn() as c2:
+        buscas = _buscas_no_mes(c2)
+    return {**r, "habilitado": habilitado(), "modelos": modelos, "buscas_google_mes": buscas,
+            "limite_buscas_mes": cfg.gemini_grounding_month}

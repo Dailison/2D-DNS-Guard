@@ -20,6 +20,16 @@ def _load_dotenv(path: Path) -> None:
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
+def _modelos(nome: str, padrao: str) -> list[tuple[str, int, int]]:
+    """"modelo:rpm:rpd,..." -> [(modelo, rpm, rpd)] (sem rpm/rpd: 5/min e 20/dia)."""
+    out = []
+    for item in (os.environ.get(nome) or padrao).split(","):
+        p = [x.strip() for x in item.split(":")]
+        if p[0]:
+            out.append((p[0], int(p[1]) if len(p) > 1 and p[1].isdigit() else 5, int(p[2]) if len(p) > 2 and p[2].isdigit() else 20))
+    return out
+
+
 def _bool(v: str | None, default: bool = False) -> bool:
     if v is None or v == "":
         return default
@@ -91,10 +101,10 @@ class Settings:
     lista_confianca_min: float
     online_enabled: bool
     gemini_api_key: str
-    gemini_model: str
-    gemini_fallback_model: str
-    gemini_rpm: int
-    gemini_rpd: int
+    gemini_modelos: list
+    gemini_reforco: list
+    gemini_busca: list
+    gemini_grounding_month: int
     gemini_grounding: bool
     lists_allowed_ips: list[str]
 
@@ -180,10 +190,15 @@ def load_settings() -> Settings:
         lista_confianca_min=float(os.environ.get("LISTA_CONFIANCA_MIN") or 0.9),
         online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 3 (só com GEMINI_API_KEY)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip(),
-        gemini_fallback_model=os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite").strip(),   # se o principal der 503
-        gemini_rpm=max(_int("GEMINI_RPM", 5), 1),
-        gemini_rpd=max(_int("GEMINI_RPD", 200), 1),
+        # plano grátis desta conta (AI Studio, 2026-09-26) — "modelo:rpm:rpd", na ordem de uso:
+        # volume: 3.5/3.1 Flash-Lite 15/min 500/dia, Gemma 4 31B 30/min 14.400/dia (lento: ~40-75 s);
+        # reforço: 3.8 Flash 5/min 20/dia
+        gemini_modelos=_modelos("GEMINI_MODELS", "gemini-3.5-flash-lite:14:480,gemini-3.1-flash-lite:14:480,gemma-4-31b-it:28:14000"),
+        gemini_reforco=_modelos("GEMINI_ESCALATE_MODELS", "gemini-3.8-flash:5:18"),
+        # busca no Google (grounding): indisponível nesta conta (2.5 fechado p/ contas novas; 3.x = 0/dia) —
+        # a IA online avalia o que a fase 3 (busca na web) já achou. Ex.: GEMINI_SEARCH_MODELS=gemini-2.5-flash:5:18
+        gemini_busca=_modelos("GEMINI_SEARCH_MODELS", ""),
+        gemini_grounding_month=_int("GEMINI_GROUNDING_MONTH", 4500),   # buscas no Google/mês (grátis: 5.000)
         gemini_grounding=_bool(os.environ.get("GEMINI_GROUNDING"), True),   # busca no Google p/ desconhecidos
         # quem pode baixar /listas/<categoria>.txt sem token (o Technitium)
         lists_allowed_ips=_list("LISTS_ALLOWED_IPS", "10.100.10.15,127.0.0.1"),

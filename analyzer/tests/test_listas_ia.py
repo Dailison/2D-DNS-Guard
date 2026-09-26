@@ -155,11 +155,22 @@ def test_fase3_gemini(env, monkeypatch):
                                 "reconhecido": True, "servico": "Loja de ferramentas", "motivo": "atacado"},
             "ninguem-sabe.com": {"lista": "nenhuma", "confianca": 0.3, "classificacao": "DESCONHECIDO", "reconhecido": False}}
     buscou = []
-    monkeypatch.setattr(online.COTA, "esperar", lambda: True)
-    monkeypatch.setattr(online, "perguntar", lambda d, cats, buscar: (buscou.append((d["name"], buscar)) or resp[d["name"]], {"model": "g"}))
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)
+    modelos = []
+
+    def falso(d, cats, buscar, modelo):
+        buscou.append((d["name"], buscar)); modelos.append((d["name"], modelo))
+        o = dict(resp[d["name"]])
+        if modelo == "gemini-3.8-flash" and d["name"] == "duv2.com":   # o reforço também fica em dúvida
+            o["confianca"] = 0.6
+        return o, {"model": modelo}
+    monkeypatch.setattr(online, "perguntar", falso)
     while online.fase(["compras", "outros", "desconhecido"]) == "done":
         pass
-    assert ("misterio.com.br", True) in buscou and ("duv1.com", False) in buscou, "só desconhecido usa a busca do Google"
+    assert not any(b for _, b in buscou), "sem nível de busca configurado"
+    assert ("duv1.com", "gemini-3.5-flash-lite") in modelos and ("duv1.com", "gemini-3.8-flash") not in modelos, "certo no principal"
+    assert ("duv2.com", "gemini-3.8-flash") in modelos, "sem certeza no principal: reforço"
+    assert not any(m.startswith("gemini-2") for _, m in modelos), "busca no Google desligada por padrão (sem cota nesta conta)"
     with db.conn() as c:
         listas_ia.aplicar(c)
         em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists")}

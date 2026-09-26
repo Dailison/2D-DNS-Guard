@@ -69,7 +69,8 @@ def sugestoes(c, cat: str, limite: int = 500) -> list[dict]:
 
 # candidatos: recomendação BLOQUEAR, ninguém decidiu, nenhuma empresa ajustou p/ TRABALHO
 CANDIDATOS_SQL = (
-    "SELECT d.id, d.name, d.category, d.classification, d.corp_reason FROM domains d "
+    "SELECT d.id, d.name, d.category, d.classification, d.corp_reason, d.popularity_rank, d.lista_fonte, d.lista_ia, "
+    " d.lista_conf, d.lista_duvida FROM domains d "
     "WHERE d.category = ANY(%(cats)s) AND d.corp_action = 'BLOQUEAR' AND d.kind = 'public' AND NOT d.locked "
     " AND d.classification IN ('NAO_TRABALHO', 'SUSPEITO', 'MALICIOSO') AND NOT dominio_decidido(d.id) "
     " AND NOT EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id "
@@ -87,16 +88,30 @@ def candidatos(c, cats: list[str] | None = None, limite: int = 300) -> list[dict
 
 
 def bloquear_auto(c, limite: int = 500) -> list[dict]:
-    """Coloca os candidatos na lista da categoria e grava a decisão global (sai da fila)."""
+    """Coloca os candidatos na lista da categoria e grava a decisão global (sai da fila). Com as travas
+    de listas_ia.guardado (protegido/trabalho/popular -> Decisões) e, com a IA online ligada, só depois
+    de ela confirmar a mesma lista (senão entra na fila da fase 4 e espera)."""
+    from . import eventos, listas_ia, online
+    online_ok = online.habilitado()
     feitos = []
     for r in candidatos(c, limite=limite):
         por = f"{AUTO_BY} ({r['category']})"
+        motivo = listas_ia.guardado(r, r["category"])
+        if motivo:   # não bloqueia sozinho: Decisões (sem global_reviews: segue candidato, sem repetir evento)
+            if c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
+                         "ON CONFLICT DO NOTHING", (r["name"], f"{por} · {motivo}")).rowcount:
+                eventos.lista("fase5", r["name"], r["category"], f"bloqueio automático barrado · {motivo}", r["id"])
+            continue
+        if online_ok and not ((r["lista_fonte"] or "").startswith("online") and r["lista_ia"] == r["category"]
+                              and (r["lista_conf"] or 0) >= settings().online_confianca_min):
+            if not r["lista_duvida"]:   # a IA online confirma antes (fase 4); até lá, não bloqueia
+                c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
+            continue
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) "
                   "ON CONFLICT DO NOTHING", (r["category"], r["name"], por))
         c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
                   "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
         feitos.append(r)
-        from . import eventos
         eventos.lista("lista_add", r["name"], r["category"], "bloqueio automático (recomendação da IA: bloquear)", r["id"])
     if feitos:
         log.info("bloqueio automático: %d site(s) nas listas por categoria: %s", len(feitos),
@@ -200,12 +215,14 @@ def _empresas(c, nomes: list[str]) -> dict[str, list[dict]]:
 
 
 # fase 5 = a IA online (fase 4) já avaliou depois da última sugestão local e seguiu sem certeza
+# (ou barrado por uma trava de listas_ia.guardado: nenhuma IA tira de lá sozinha)
 FASE5_SQL = ("SELECT count(*) AS n FROM category_lists l JOIN domains d ON d.name = l.domain "
-             "WHERE l.category = 'para_revisar' AND d.online_at IS NOT NULL AND NOT d.lista_duvida")
+             "WHERE l.category = 'para_revisar' AND ((d.online_at IS NOT NULL AND NOT d.lista_duvida) "
+             " OR l.added_by LIKE '%%trava:%%')")
 
 
 def _na_fase5(r: dict) -> bool:
-    return bool(r.get("online_at")) and not r.get("lista_duvida")
+    return (bool(r.get("online_at")) and not r.get("lista_duvida")) or "trava:" in (r.get("added_by") or "")
 
 
 def detalhes(c, cat: str, tid: int | None = None, fase5: bool = False, **filtros) -> dict:

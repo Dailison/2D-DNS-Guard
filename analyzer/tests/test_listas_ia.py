@@ -208,7 +208,8 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
             "playrix.com": {"lista": "jogos", "confianca": 1.0, "classificacao": "NAO_TRABALHO", "reconhecido": True},
             "v-sobra.com": {"lista": "nenhuma", "confianca": 1.0, "classificacao": "TRABALHO", "reconhecido": True},
             "v-talvez.com": {"lista": "compras", "confianca": 0.5, "classificacao": "NAO_TRABALHO"},
-            "cookiefirst.com": {"lista": "publicidade", "confianca": 0.8, "classificacao": "TRABALHO", "reconhecido": True}}
+            "cookiefirst.com": {"lista": "publicidade", "confianca": 0.8, "classificacao": "TRABALHO", "categoria": "publicidade",
+                                "reconhecido": True}}
     with db.conn() as c:
         c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, lista_duvida) "
                   "VALUES ('cookiefirst.com', 'TRABALHO', 'produtividade', now(), 34, true)")
@@ -222,7 +223,8 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
         vistos.append((d["name"], d.get("lista_ia"), modelo))
         if d["name"] == "slatic.net":   # o flash-lite discorda da IA local; o Gemma (maior) reconhece a Lazada
             return ({"lista": "nenhuma", "confianca": 0.9, "classificacao": "TRABALHO", "reconhecido": True} if "lite" in modelo
-                    else {"lista": "compras", "confianca": 1.0, "classificacao": "TRABALHO", "reconhecido": True}), {"model": modelo}
+                    else {"lista": "compras", "confianca": 1.0, "classificacao": "TRABALHO", "categoria": "compras",
+                          "reconhecido": True}), {"model": modelo}
         return dict(resp[d["name"]]), {"model": modelo}
     monkeypatch.setattr(online, "perguntar", falso)
     while online.fase(["outros"]) == "done":
@@ -330,3 +332,73 @@ def test_repergunta_tem_segunda_opiniao(env, monkeypatch):
     with db.conn() as c:
         listas_ia.aplicar(c)
         assert c.execute("SELECT 1 FROM category_lists WHERE category='mensageiros' AND domain='telesco.pe'").fetchone()
+
+
+def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
+    """Plano de confiabilidade, fase 1: protegido/trabalho/popular não entram sozinhos; bloqueio automático
+    espera a IA online; "nenhuma" sem certeza em não trabalho vai p/ Decisões; DoH popular entra."""
+    from dnsanalyzer import config, db, listas, listas_ia
+    cfg = config.settings()
+
+    def novo(c, nome, cls, cat, rank=None, corp=None):
+        return c.execute("INSERT INTO domains (name, classification, category, popularity_rank, corp_action, analyzed_at, "
+                         "total_queries) VALUES (%s, %s, %s, %s, %s, now(), 5) RETURNING id", (nome, cls, cat, rank, corp)).fetchone()["id"]
+
+    def em(c, nome):
+        return {r["category"]: r["added_by"] for r in c.execute("SELECT category, added_by FROM category_lists WHERE domain=%s", (nome,))}
+
+    # 1) protegido do catálogo com resposta online "streaming" 0,95 -> Decisões
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    with db.conn() as c:
+        i = novo(c, "microsoft.com", "NAO_TRABALHO", "streaming")
+        listas_ia.salvar(c, i, "streaming", 0.95, "", "", "online:gemini")
+        listas_ia.aplicar(c)
+        m = em(c, "microsoft.com")
+    assert "streaming" not in m and "trava: infraestrutura protegida" in m.get("para_revisar", ""), m
+    # 2) categoria de trabalho (financas), IA local "compras" 0,95, IA online DESLIGADA -> Decisões
+    monkeypatch.setattr(cfg, "gemini_api_key", "")
+    with db.conn() as c:
+        i = novo(c, "banco-x.com.br", "NAO_TRABALHO", "financas")
+        listas_ia.salvar(c, i, "compras", 0.95, "", "", "local")
+        listas_ia.aplicar(c)
+        m = em(c, "banco-x.com.br")
+    assert "compras" not in m and "trava: categoria de trabalho (financas)" in m.get("para_revisar", ""), m
+    # 3) bloqueio automático com a IA online ligada: fonte local não bloqueia (fila da fase 4); online 0,9 bloqueia
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    with db.conn() as c:
+        a = novo(c, "jogo-local.com", "NAO_TRABALHO", "jogos", corp="BLOQUEAR")
+        b = novo(c, "jogo-online.com", "NAO_TRABALHO", "jogos", corp="BLOQUEAR")
+        listas_ia.salvar(c, a, "jogos", 1.0, "", "", "local")
+        listas_ia.salvar(c, b, "jogos", 0.9, "", "", "online:gemini")
+        c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = ANY(%s)", ([a, b],))   # só o bloqueio automático
+        listas.bloquear_auto(c)
+        duv = c.execute("SELECT lista_duvida FROM domains WHERE id=%s", (a,)).fetchone()["lista_duvida"]
+        ma, mb = em(c, "jogo-local.com"), em(c, "jogo-online.com")
+    assert "jogos" not in ma and duv, ma
+    assert mb.get("jogos", "").startswith("bloqueio automático"), mb
+    # 4) "nenhuma" 0,5 da IA online em não trabalho fora de lista -> Decisões
+    with db.conn() as c:
+        i = novo(c, "talvez-nada.com", "NAO_TRABALHO", "outros")
+        listas_ia.salvar(c, i, "nenhuma", 0.5, "", "", "online:gemini")
+        c.execute("UPDATE domains SET online_at = now() WHERE id = %s", (i,))
+        listas_ia.aplicar(c)
+        m = em(c, "talvez-nada.com")
+    assert "IA online sem certeza" in m.get("para_revisar", ""), m
+    # 5) dns.google (popular, categoria infraestrutura) com resposta online doh_dns 0,9 -> entra em doh_dns
+    with db.conn() as c:
+        i = novo(c, "dns.google", "TRABALHO", "infraestrutura", rank=50)
+        listas_ia.salvar(c, i, "doh_dns", 0.9, "", "", "online:gemini")
+        listas_ia.aplicar(c)
+        m = em(c, "dns.google")
+    assert "doh_dns" in m and "para_revisar" not in m, m
+    # 6) CMP de cookies: a IA local diz "produtividade", a online diz "publicidade" -> sem trava, entra
+    with db.conn() as c:
+        i = novo(c, "cookie-cmp.com", "TRABALHO", "produtividade")
+        listas_ia.salvar(c, i, "publicidade", 0.9, "", "", "online:gemini")
+        c.execute("UPDATE domains SET online_resp = '{\"categoria\": \"publicidade\", \"classificacao\": \"TRABALHO\"}' WHERE id = %s", (i,))
+        listas_ia.aplicar(c)
+        m = em(c, "cookie-cmp.com")
+    assert "publicidade" in m and "para_revisar" not in m, m
+    # travado aparece em Decisões (fase 5) mesmo sem a IA online ter avaliado
+    j = env.get("/listas/para_revisar/detalhes", headers=H, params={"fase5": True, "limit": 1000}).json()
+    assert {"banco-x.com.br", "microsoft.com", "talvez-nada.com"} <= {r["domain"] for r in j["items"]}

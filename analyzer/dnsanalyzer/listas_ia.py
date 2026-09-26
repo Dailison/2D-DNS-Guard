@@ -16,7 +16,7 @@ import time
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from . import db, eventos
+from . import catalog, corporate, db, eventos
 from .config import settings
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
 
@@ -185,6 +185,35 @@ DUVIDA_BY = "IA com dúvida"        # foi para Para revisar com a sugestão
 PARA_REVISAR = "para_revisar"
 
 
+# listas de serviços de uso misto por definição (a empresa escolhe aplicar): a categoria da IA para eles é
+# "de trabalho" e são populares (WhatsApp = comunicação, ChatGPT = produtividade, Dropbox = TI) — as travas
+# de categoria e de popularidade as deixariam vazias. Só a do catálogo (protegidos) vale.
+_USO_MISTO = {"doh_dns", "mensageiros", "ia_chatbots", "nuvem_remoto"}
+
+
+def guardado(r: dict, cat: str | None = None) -> str | None:
+    """Motivo pelo qual o domínio NÃO pode entrar sozinho numa lista (vai p/ Decisões), ou None.
+    Travas: infraestrutura protegida do catálogo; categoria de trabalho (corporate.NEVER_BLOCK) — com
+    resposta da IA online, só quando AS DUAS IAs dão categoria de trabalho (a local erra justamente aí:
+    CMP de cookies = "produtividade"); site de trabalho popular (Tranco ≤ 10.000; classificação da IA
+    online quando é ela quem responde). Listas de uso misto (DoH/DNS, Mensageiros, IA/Chatbots,
+    Nuvem/Acesso remoto) só têm a trava do catálogo (ver _USO_MISTO)."""
+    e = catalog.match(r["name"])
+    if e and e.get("protected"):
+        return "trava: infraestrutura protegida (catálogo)"
+    if cat in _USO_MISTO:
+        return None
+    online = (r.get("lista_fonte") or "").startswith("online")
+    cls = (r.get("cls_online") or r.get("classification")) if online else r.get("classification")
+    trabalho = [x for x in (r.get("category"), r.get("cat_online") if online else None) if x]
+    if trabalho and all(x in corporate.NEVER_BLOCK for x in trabalho):
+        return f"trava: categoria de trabalho ({trabalho[-1]})"
+    rank = r.get("popularity_rank")
+    if rank and rank <= 10000 and cls == "TRABALHO":
+        return f"trava: site de trabalho popular (Tranco {rank})"
+    return None
+
+
 def _fonte(r: dict) -> str:
     f = r.get("lista_fonte") or ""
     conf = f" {r['lista_conf'] * 100:.0f}%" if r.get("lista_conf") is not None else ""
@@ -209,7 +238,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
-        " d.online_resp->>'classificacao' AS cls_online, "
+        " d.popularity_rank, d.corp_action, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
         " EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id AND (td.review_status = 'allowed' "
@@ -222,17 +251,18 @@ def aplicar(c, limite: int = 3000) -> dict:
     from . import online as _online
     online_ok = _online.habilitado()
 
-    def para_decisoes(r, cat):
+    def para_decisoes(r, cat, motivo=None):
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                  (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})"))
+                  (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})" + (f" · {motivo}" if motivo else "")))
         out["revisar"].append((r["name"], cat))
-        eventos.lista("fase5", r["name"], cat, "nenhuma fase teve certeza" + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"])
+        eventos.lista("fase5", r["name"], cat, (motivo or "nenhuma fase teve certeza")
+                      + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"])
 
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
         cat = r["lista_ia"]
         em = dict(x.split("|", 1) for x in (r["em"] or []))                    # {lista: quem pôs}
-        da_ia = {k for k, v in em.items() if v.startswith(AUTO_BY)}              # postas pela IA
+        da_ia = {k for k, v in em.items() if v.startswith((AUTO_BY, "bloqueio automático"))}   # postas pela IA
         moveis = {PARA_REVISAR, OUTROS} | da_ia
         fixas = set(em) - moveis                                                 # pessoa/migração/Sistema
         online = (r["lista_fonte"] or "").startswith("online")
@@ -259,12 +289,19 @@ def aplicar(c, limite: int = 3000) -> dict:
                 out["resolvidos"].append(r["name"])
                 eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"])
             continue
+        if online and not certo and not cat and not em and (cls == "NAO_TRABALHO" or r["corp_action"] == "BLOQUEAR"):
+            para_decisoes(r, None, "IA online sem certeza: talvez não seja de lista")
+            continue
         if not cat:
             continue
         # a lista diz O QUE O SITE É (não se é de trabalho): p/ a IA online só Ameaças segue manual (sem lista
         # de ameaça confirmando); as travas de coerência completas valem p/ a IA local (modelo pequeno)
         coerente = (cat != "ameaca" or cls == "MALICIOSO") if online else _coerente(cat, cls, r["category"])
-        if certo and coerente:
+        motivo = guardado(r, cat) if certo and coerente and cat not in em else None
+        if motivo:   # trava: não entra sozinho, vai p/ Decisões (a menos que já esteja numa lista da IA)
+            if not da_ia and PARA_REVISAR not in em:
+                para_decisoes(r, cat, motivo)
+        elif certo and coerente:
             if cat not in em:
                 por = f"{AUTO_BY} ({cat})"
                 c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",

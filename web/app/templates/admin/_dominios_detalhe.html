@@ -170,6 +170,13 @@
       document.getElementById("ddSub").textContent = acao === "mover"
         ? (DEC ? "Entram nas listas marcadas (decisão: bloquear) e saem de Decisões." : `Saem da lista ${nomeCat} e entram nas listas marcadas (decisão: bloquear).`)
         : "Entram nas listas marcadas (decisão: bloquear) e passam a valer no DNS para as empresas que aplicam cada lista.";
+      const sub = document.getElementById("ddSub"), base = sub.textContent;
+      fetch({{ url_for('admin.dominios_impacto')|tojson }}, {method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify({dominios: sel()})})
+        .then(r => r.json()).then(j => { const x = j.impacto; if (!j.ok || !x) return;
+          sub.textContent = base + (x.computadores ? ` Nos últimos 7 dias: ${x.computadores} computador(es), ${x.consultas} consulta(s), `
+            + `empresas: ${x.empresas.slice(0, 6).join(", ")}${x.empresas.length > 6 ? " …" : ""}.` : " Nenhum acesso nos últimos 7 dias."); })
+        .catch(() => {});
       document.getElementById("dlgDD").showModal();
     }
   }));

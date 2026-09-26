@@ -1224,6 +1224,100 @@ def listas_ia_status():
         return listas_ia.status(c)
 
 
+# ------------------------------------------------------------------ exceções imediatas do console (allowed)
+class NomesInConsole(BaseModel):
+    domains: list[str]
+
+
+class ExcecoesIn(BaseModel):
+    excecoes: dict[str, list[str]]   # {domínio: [grupos]}
+    por: str = ""
+
+
+@app.post("/console/excecoes", dependencies=[Depends(auth)])
+def excecoes_grava(body: ExcecoesIn):
+    with db.conn() as c:
+        for d, grupos in body.excecoes.items():
+            for g in grupos:
+                c.execute("INSERT INTO technitium_allowed_console (domain, grupo, added_by) VALUES (%s, %s, %s) "
+                          "ON CONFLICT DO NOTHING", (d, g, body.por or None))
+    return {"ok": True}
+
+
+@app.get("/console/excecoes", dependencies=[Depends(auth)])
+def excecoes_lista(domains: list[str] = Query(default=[])):
+    """{domínio: [grupos]} das exceções que o console pôs (vazio = todas)."""
+    with db.conn() as c:
+        rows = c.execute("SELECT domain, grupo FROM technitium_allowed_console" + (" WHERE domain = ANY(%s)" if domains else "")
+                         + " ORDER BY domain, grupo", (domains,) if domains else None).fetchall()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        out.setdefault(r["domain"], []).append(r["grupo"])
+    return out
+
+
+@app.post("/console/excecoes/remover", dependencies=[Depends(auth)])
+def excecoes_remove(body: NomesInConsole):
+    with db.conn() as c:
+        n = c.execute("DELETE FROM technitium_allowed_console WHERE domain = ANY(%s)", (body.domains,)).rowcount
+    return {"ok": True, "removidos": n}
+
+
+# ------------------------------------------------------------------ prévia de impacto (política / pôr na lista)
+def _uso_por_dominio(c, tid: int, dias: int) -> list[dict]:
+    return c.execute(
+        "SELECT d.name, sum(q.queries) AS consultas FROM query_agg q JOIN domains d ON d.id = q.domain_id "
+        "WHERE q.bucket >= now() - make_interval(days => %s) AND (%s = 0 OR q.tenant_id = %s) GROUP BY d.name",
+        (dias, tid, tid)).fetchall()
+
+
+@app.get("/policies/impacto", dependencies=[Depends(auth)])
+def politica_impacto(tid: Optional[int] = None, lists: str = "", days: int = Query(7, ge=1, le=31)):
+    """Se a empresa (tid; 0 = todas) passar a aplicar estas listas: por lista, computadores, consultas e os 20
+    domínios mais consultados nos últimos `days` dias que cairiam nela (domínio ou pai na lista)."""
+    if tid is None:
+        raise HTTPException(422, "informe tid (0 = todas as empresas)")
+    cats = [x for x in lists.split(",") if x in listas.CATEGORIAS]
+    out = {}
+    with db.conn() as c:
+        uso = _uso_por_dominio(c, tid, days)
+        for cat in cats:
+            conj = set(listas.dominios(c, cat))
+            nomes = [u["name"] for u in uso if listas._em_lista(u["name"], conj)]
+            if not nomes:
+                out[cat] = {"computadores": 0, "consultas": 0, "top": []}
+                continue
+            r = c.execute("SELECT count(DISTINCT q.client_id) AS pcs, coalesce(sum(q.queries), 0) AS n FROM query_agg q "
+                          "JOIN domains d ON d.id = q.domain_id WHERE q.bucket >= now() - make_interval(days => %s) "
+                          "AND (%s = 0 OR q.tenant_id = %s) AND d.name = ANY(%s)", (days, tid, tid, nomes)).fetchone()
+            top = sorted((u for u in uso if u["name"] in set(nomes)), key=lambda u: -u["consultas"])[:20]
+            out[cat] = {"computadores": r["pcs"], "consultas": int(r["n"]),
+                        "top": [{"domain": u["name"], "consultas": int(u["consultas"])} for u in top]}
+    return out
+
+
+class ImpactoDominiosIn(BaseModel):
+    domains: list[str]
+    days: int = 7
+
+
+@app.post("/domains/impacto", dependencies=[Depends(auth)])
+def dominios_impacto(body: ImpactoDominiosIn):
+    """Antes de pôr domínios numa lista: quantas empresas e computadores os consultaram (com subdomínios)."""
+    doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    if not doms:
+        return {"empresas": [], "computadores": 0, "consultas": 0}
+    with db.conn() as c:
+        r = c.execute(
+            "SELECT count(DISTINCT q.client_id) AS pcs, coalesce(sum(q.queries), 0) AS n, "
+            " array_agg(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL) AS empresas "
+            "FROM query_agg q JOIN domains d ON d.id = q.domain_id JOIN tenants t ON t.id = q.tenant_id "
+            "WHERE q.bucket >= now() - make_interval(days => %s) "
+            " AND EXISTS (SELECT 1 FROM unnest(%s::text[]) x WHERE d.name = x OR d.name LIKE '%%.' || x)",
+            (max(1, min(body.days, 31)), doms)).fetchone()
+    return {"empresas": sorted(r["empresas"] or []), "computadores": r["pcs"], "consultas": int(r["n"])}
+
+
 # ------------------------------------------------------------------ backups do config do Technitium (console)
 class TechBackupIn(BaseModel):
     config: dict

@@ -3,7 +3,8 @@
 Payload JSON genérico com os campos do alerta + `text` (Slack/Teams/Google Chat/n8n)
 e `content` (Discord). Configuração:
   WEBHOOK_URLS          URLs separadas por vírgula (vazio = desligado)
-  WEBHOOK_KINDS         tipos de alerta enviados (padrão: malicious_access,suspicious_access,dga_burst)
+  WEBHOOK_KINDS         tipos de alerta enviados (padrão: malicious_access,suspicious_access,dga_burst,
+                        blocked_work,block_spike)
   PORTAL_URL            base do link no aviso (padrão https://dns-guard.2dtecnologia.com)
   PUSH_API_URL/TOKEN    push no celular pelo mesmo canal do 2D-Monitoramento: API do ERP
                         (POST <url>/push/send, inscritos no app PUSH_APP_NAME)
@@ -35,6 +36,9 @@ def _payload(a: dict) -> dict:
         linhas.append(f"Domínio: {a['domain']}" + (f" (risco {det.get('risk')})" if det.get("risk") else ""))
     if ips:
         linhas.append("Computador(es): " + ", ".join(ips[:10]) + (" …" if len(ips) > 10 else ""))
+    if a["kind"] in ("blocked_work", "block_spike"):
+        linhas.append(f"Bloqueado para {det.get('computadores')} computador(es) na última hora. Se for engano: página do "
+                      "domínio no DNS Guard → tirar da lista (manter liberado vale na hora).")
     linhas.append(f"Ver no DNS Guard: {link}")
     text = "\n".join(linhas)
     return {"event": "dns_alert", "id": a["id"], "severity": a["severity"], "kind": a["kind"],

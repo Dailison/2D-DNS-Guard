@@ -133,3 +133,42 @@ def test_liberar_e_revogar(app, tech):
     assert dnslib.revogar("10.1.2.3", por="op@2d") == "10.1.2.3/32" and "10.1.2.3/32" not in tech.cfg["networkGroupMap"]
     n = len(tech.gravados)
     assert dnslib.revogar("10.1.2.3") is None and len(tech.gravados) == n, "nada a revogar: não grava"
+
+
+def test_excecao_imediata(app, tech, monkeypatch):
+    """Fase 3.3: "manter liberado" vale na hora só nos grupos que a mudança libera; tira só as exceções do console."""
+    from app import analyzer_client as api
+    from app import technitium as dnslib
+    app.config["TECHNITIUM_ENABLED"] = True
+    tech.cfg = base()
+    tech.cfg["groups"] += [{"name": "Empresa: A", "allowed": ["manual.com"]}, {"name": "Empresa: B", "allowed": []}]
+    estado = {"antes": {"x.com": ["Empresa: A", "Empresa: B", "default"]}, "depois": {"x.com": ["Empresa: B"]}}
+    monkeypatch.setattr(dnslib, "grupos_bloqueando", lambda doms: estado["depois"])
+    registrados = {}
+    post_orig = api.post
+
+    def post(path, body=None, **kw):
+        if path == "/console/excecoes":
+            for d, gs in body["excecoes"].items():
+                registrados.setdefault(d, []).extend(gs)
+            return {"ok": True}
+        if path == "/console/excecoes/remover":
+            for d in body["domains"]:
+                registrados.pop(d, None)
+            return {"ok": True}
+        return post_orig(path, body, **kw)
+    monkeypatch.setattr(api, "post", post)
+    monkeypatch.setattr(api, "get", lambda path, **p: {d: gs for d, gs in registrados.items() if d in p.get("domains", [])})
+    grupos = dnslib.liberar_agora(["x.com"], estado["antes"], "op@2d")
+    assert grupos == ["Empresa: A", "default"], "B segue bloqueado por outra lista: sem exceção lá"
+    g = {x["name"]: x for x in tech.cfg["groups"]}
+    assert g["Empresa: A"]["allowed"] == ["manual.com", "x.com"] and "x.com" in g["default"]["allowed"]
+    assert "x.com" not in g["Empresa: B"]["allowed"] and registrados == {"x.com": ["Empresa: A", "default"]}
+    n = len(tech.gravados)
+    dnslib.liberar_agora(["x.com"], estado["antes"], "op@2d")
+    assert g["Empresa: A"]["allowed"].count("x.com") == 1 or tech.cfg["groups"][4]["allowed"].count("x.com") == 1, "sem duplicar"
+    assert "Liberado agora em A, redes sem cadastro" in dnslib.msg_liberado(grupos)
+    dnslib.remover_excecao(["x.com"], "op@2d")
+    g = {x["name"]: x for x in tech.cfg["groups"]}
+    assert g["Empresa: A"]["allowed"] == ["manual.com"] and "x.com" not in g["default"].get("allowed", []), "manual fica"
+    assert registrados == {} and len(tech.gravados) > n

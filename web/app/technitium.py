@@ -584,3 +584,72 @@ def _sincroniza(cfg, empresas, politicas, lib):
             apagados.append(n)
     return {"criados": criados, "atualizados": atualizados, "apagados": apagados, "redes": len(mapa),
             "default": default, "cfg": cfg}
+
+
+# ---- Exceção imediata ("manter liberado" vale na hora; plano de confiabilidade, fase 3.3) ----
+def grupos_bloqueando(dominios) -> dict[str, list[str]]:
+    """{domínio: [grupos em que está bloqueado agora pelas listas]} (um índice só p/ todos)."""
+    if not current_app.config.get("TECHNITIUM_ENABLED"):
+        return {}
+    idx = indice_bloqueio()
+    return {d: bloqueado_em(idx, d) for d in dominios}
+
+
+def rotulo_grupo(g: str) -> str:
+    return g[len(PREFIXO_GRUPO):] if g.startswith(PREFIXO_GRUPO) else ("redes sem cadastro" if g == "default" else g)
+
+
+def liberar_agora(dominios, antes: dict[str, list[str]], por: str = "console") -> list[str]:
+    """Depois de tirar domínios das listas: põe no `allowed` dos grupos em que a mudança os libera (bloqueados
+    `antes`, livres pelas listas agora) — vale na hora, sem esperar o Technitium baixar a lista. Só nesses
+    grupos: se outra lista ainda bloqueia o domínio numa empresa, lá fica bloqueado. Registra no analisador
+    (p/ tirar depois só as exceções do console). Retorna os grupos liberados."""
+    if not antes:
+        return []
+    depois = grupos_bloqueando(dominios)
+    mapa = {d: [g for g in antes.get(d, []) if g not in depois.get(d, [])] for d in dominios}
+    mapa = {d: gs for d, gs in mapa.items() if gs}
+    if not mapa:
+        return []
+    from app import analyzer_client as api
+
+    def muda(cfg):
+        mudou = False
+        for g in cfg.get("groups", []):
+            al = g.setdefault("allowed", [])
+            for d, gs in mapa.items():
+                if g.get("name") in gs and d not in al:
+                    al.append(d)
+                    mudou = True
+        return None, mudou
+    _read_modify_write(muda, por, "manter liberado agora: " + ", ".join(sorted(mapa))[:200])
+    api.post("/console/excecoes", {"excecoes": mapa, "por": por})
+    return sorted({g for gs in mapa.values() for g in gs})
+
+
+def remover_excecao(dominios, por: str = "console") -> list[str]:
+    """Domínio voltou para uma lista: tira do `allowed` SÓ as exceções que o console pôs (as manuais ficam)."""
+    if not current_app.config.get("TECHNITIUM_ENABLED") or not dominios:
+        return []
+    from app import analyzer_client as api
+    nossos = api.get("/console/excecoes", domains=list(dominios)) or {}
+    if not nossos:
+        return []
+
+    def muda(cfg):
+        mudou = False
+        for g in cfg.get("groups", []):
+            al = g.get("allowed") or []
+            for d, gs in nossos.items():
+                if g.get("name") in gs and d in al:
+                    al.remove(d)
+                    mudou = True
+        return None, mudou
+    _read_modify_write(muda, por, "fim da exceção: " + ", ".join(sorted(nossos))[:200])
+    api.post("/console/excecoes/remover", {"domains": sorted(nossos)})
+    return sorted({g for gs in nossos.values() for g in gs})
+
+
+def msg_liberado(grupos: list[str]) -> str:
+    return (f" Liberado agora em {', '.join(rotulo_grupo(g) for g in grupos)}; a lista atualiza em até 1 h." if grupos
+            else " O DNS atualiza em até 1 h.")

@@ -162,6 +162,7 @@ II 10.52.0.0/16"></textarea>
     </div>
     {% endif %}
   </div>
+  <div class="previa" id="pPrev" hidden></div>
   <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = listas de risco. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 1 h; as exceções, na hora.</p>
   <div style="display:flex;gap:.5rem;justify-content:flex-end">
     <button type="button" onclick="document.getElementById('dlgPol').close()">Cancelar</button>
@@ -191,9 +192,15 @@ II 10.52.0.0/16"></textarea>
     esc.textContent = "";
     const o = document.createElement("option"); o.value = ""; o.textContent = "a empresa inteira"; esc.appendChild(o);
     (atual.unidades || []).forEach(u => { const x = document.createElement("option"); x.value = u; x.textContent = "só a unidade " + u + ((atual.pol.unidades || {})[u] ? " (exceção)" : ""); esc.appendChild(x); });
+    document.getElementById("pPrev").hidden = true;
     mostra(); dlg.showModal();
   };
   esc.addEventListener("change", mostra);
+  dlg.querySelectorAll(".pLista").forEach(i => i.addEventListener("change", () => {
+    const u = esc.value, pol = u && (atual.pol.unidades || {})[u] ? atual.pol.unidades[u] : atual.pol;
+    if (i.checked && !(pol.lists || []).includes(i.value))   // lista nova p/ a empresa: o que passaria a bloquear
+      previaImpacto(document.getElementById("pPrev"), atual.tid, i.value, i.closest("label").textContent.replace("⚡", "").replace("sugerida", "").trim());
+  }));
   herdar.addEventListener("change", () => { document.getElementById("pCampos").style.opacity = herdar.checked ? .45 : 1; if (herdar.checked) marca(atual.pol); });
   document.getElementById("pSalvar").addEventListener("click", async (ev) => {
     const b = ev.target; b.disabled = true;
@@ -209,5 +216,6 @@ II 10.52.0.0/16"></textarea>
   });
 })();
 </script>
+{% include "admin/_previa_impacto.html" %}
 {% endblock %}
 

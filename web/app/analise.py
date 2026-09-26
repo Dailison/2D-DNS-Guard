@@ -234,6 +234,8 @@ def decisoes_lote():
                 return _fim(voltar)
             nomes = list(dict.fromkeys(n for _, n in itens))
             api.post("/listas-lote", {"cats": listas, "domains": nomes, "by": _quem()})
+            from app.dns import _fim_excecao
+            _fim_excecao(nomes)
             for t, n in itens:
                 _registrar_decisao(t, n, "blocked")
             if todos:
@@ -251,6 +253,8 @@ def decisoes_lote():
             for cat, its in por_cat.items():
                 nomes = list(dict.fromkeys(n for _, n in its))
                 api.post("/listas-lote", {"cats": [cat], "domains": nomes, "by": _quem()})
+                from app.dns import _fim_excecao
+                _fim_excecao(nomes)
                 for t, n in its:
                     _registrar_decisao(t, n, "blocked")
                 if todos:
@@ -415,11 +419,13 @@ def dominio_liberar(nome):
     dominio_reg = request.form.get("dominio", "")
     try:
         cats = _listas_da_empresa(tid) if request.form.get("escopo") == "empresa" and tid else []
+        from app.dns import _antes, _libera_agora
+        antes = _antes([dominio_reg])
         n = api.post("/listas-remover", {"domains": [dominio_reg], "cats": cats}).get("removidos", 0)
         current_app.logger.info("DNS: %s LIBEROU %s (%d lista(s)%s)", _quem(), dominio_reg, n,
                                 f" dentre {cats}" if cats else "")
         if n:
-            flash(f"{dominio_reg} fora de {n} lista(s) de bloqueio (vale no DNS em até 1 h).", "ok")
+            flash(f"{dominio_reg} fora de {n} lista(s) de bloqueio." + _libera_agora([dominio_reg], antes), "ok")
         else:
             flash(f"{dominio_reg} não está em nenhuma lista de bloqueio"
                   + (" da empresa" if cats else "") + " (pode estar bloqueado por um domínio pai: abra o domínio pai em Domínios bloqueados).",

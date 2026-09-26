@@ -1,0 +1,17 @@
+{# Prévia de impacto (fase 3.1): previa(el, tid, lista) mostra em `el` o que a lista bloquearia na empresa. #}
+<script>
+window.previaImpacto = window.previaImpacto || async function (el, tid, lista, rotulo) {
+  el.hidden = false; el.textContent = "calculando o impacto de " + rotulo + "…";
+  try {
+    const r = await fetch({{ url_for('admin.politica_impacto')|tojson }} + "?tid=" + tid + "&lists=" + encodeURIComponent(lista),
+                          {credentials: "same-origin"});
+    const j = await r.json(), x = (j.impacto || {})[lista];
+    if (!j.ok || !x) { el.textContent = "não consegui calcular o impacto (" + (j.msg || "sem dados") + ")"; return; }
+    el.textContent = x.computadores
+      ? `${rotulo}: nos últimos 7 dias, ${x.computadores} computador(es) e ${x.consultas} consulta(s) cairiam nesta lista. Mais acessados: `
+        + x.top.slice(0, 6).map(t => t.domain + " (" + t.consultas + ")").join(", ") + "."
+      : `${rotulo}: nenhum acesso nos últimos 7 dias cairia nesta lista.`;
+  } catch (e) { el.textContent = "não consegui calcular o impacto"; }
+};
+</script>
+<style>.previa{font-size:.8rem;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:.35rem .55rem;margin:.4rem 0;color:#7c2d12}</style>

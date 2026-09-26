@@ -518,6 +518,7 @@ def listas_lote_dominios():
         if acao == "aprovar":
             if cat not in rot:
                 return _json(False, "lista inválida")
+            antes = _antes(doms)
             r = api.post("/listas-aprovar", {"domains": doms, "de": cat, "by": quem})
             for alvo, ds in (r.get("movidos") or {}).items():
                 for x in ds:
@@ -530,23 +531,30 @@ def listas_lote_dominios():
                 partes.append(f"{len(r['tirados'])} fora de {rot[cat]} (nenhuma lista)")
             if r.get("sem_sugestao"):
                 partes.append(f"{len(r['sem_sugestao'])} sem sugestão ainda (ficaram)")
-            return _json(True, "Sugestões aprovadas: " + "; ".join(partes or ["nada a fazer"]) + ". O DNS atualiza em até 1 h.")
+            movidos = [x for ds in (r.get("movidos") or {}).values() for x in ds]
+            if movidos:
+                _fim_excecao(movidos)
+            fim = _libera_agora(r.get("tirados") or [], antes) if r.get("tirados") else " O DNS atualiza em até 1 h."
+            return _json(True, "Sugestões aprovadas: " + "; ".join(partes or ["nada a fazer"]) + "." + fim)
         if acao in ("mover", "tirar"):
             if cat not in rot:
                 return _json(False, "lista inválida")
             if acao == "mover" and not para:
                 return _json(False, "Marque pelo menos uma lista de destino.")
+            antes = _antes(doms) if acao == "tirar" else {}
             api.post("/listas-mover", {"domains": doms, "de": cat, "para": para if acao == "mover" else [], "by": quem})
             for x in doms:
                 _decisao_global(x, "blocked" if acao == "mover" else "allowed")
             current_app.logger.info("DNS: %s: %s %s de %s -> %s", quem, acao, doms, cat, para)
             if acao == "tirar":
-                return _json(True, f"{len(doms)} domínio(s) fora da lista {rot[cat]} (decisão: manter liberado). O DNS atualiza em até 1 h.")
+                return _json(True, f"{len(doms)} domínio(s) fora da lista {rot[cat]} (decisão: manter liberado)." + _libera_agora(doms, antes))
+            _fim_excecao(doms)
             return _json(True, f"{len(doms)} domínio(s) movidos de {rot[cat]} para {', '.join(rot[c] for c in para)}. O DNS atualiza em até 1 h.")
         if acao == "por":
             if not para:
                 return _json(False, "Marque pelo menos uma lista.")
             api.post("/listas-lote", {"domains": doms, "cats": para, "by": quem})
+            _fim_excecao(doms)
             for x in doms:
                 _decisao_global(x, "blocked")
             current_app.logger.info("DNS: %s pôs %s nas listas %s", quem, doms, para)
@@ -554,6 +562,31 @@ def listas_lote_dominios():
         return _json(False, "ação inválida")
     except Exception as e:  # noqa: BLE001
         return _json(False, f"Falha: {e}")
+
+
+def _antes(doms) -> dict:
+    """Grupos em que os domínios estão bloqueados ANTES de tirá-los das listas (p/ a exceção imediata)."""
+    try:
+        return dnslib.grupos_bloqueando(doms)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning("exceção imediata: não consegui ler os bloqueios: %s", e)
+        return {}
+
+
+def _libera_agora(doms, antes) -> str:
+    """"Manter liberado" vale na hora (allowed nos grupos que a mudança libera). Retorna o fim da mensagem."""
+    try:
+        return dnslib.msg_liberado(dnslib.liberar_agora(doms, antes, admin_atual().email))
+    except Exception as e:  # noqa: BLE001
+        return f" O DNS atualiza em até 1 h (não consegui liberar na hora: {e})."
+
+
+def _fim_excecao(doms) -> None:
+    """O domínio voltou para uma lista: tira as exceções imediatas que o console pôs."""
+    try:
+        dnslib.remover_excecao(doms, admin_atual().email)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning("não consegui tirar a exceção imediata de %s: %s", doms, e)
 
 
 def _tirar_da_lista(cat: str, dominio: str) -> None:
@@ -575,9 +608,10 @@ def _decisao_global(dominio: str, status: str) -> None:
 def listas_categoria_rem():
     cat, dom = request.form.get("cat", ""), request.form.get("dominio", "")
     try:
+        antes = _antes([dom])
         _tirar_da_lista(cat, dom)
         current_app.logger.info("DNS: %s tirou %s da lista %s", admin_atual().email, dom, cat)
-        flash(f"{dom} saiu da lista {cat} (decisão: manter liberado). O Technitium atualiza em até 1 h.", "ok")
+        flash(f"{dom} saiu da lista {cat} (decisão: manter liberado)." + _libera_agora([dom], antes), "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")
     voltar = request.form.get("voltar") or ""
@@ -590,6 +624,7 @@ def listas_categoria_add():
     cat, dom = request.form.get("cat", ""), (request.form.get("dominio") or "").strip().lower().rstrip(".")
     try:
         api.post(f"/listas/{quote(cat, safe='')}", {"domain": dom, "by": admin_atual().email})
+        _fim_excecao([dom])
         _decisao_global(dom, "blocked")
         current_app.logger.info("DNS: %s pôs %s na lista %s", admin_atual().email, dom, cat)
         flash(f"{dom} entrou na lista {cat}. O Technitium atualiza em até 1 h.", "ok")
@@ -602,6 +637,29 @@ def listas_categoria_add():
 def _json(ok: bool, msg: str, **kw):
     from flask import jsonify
     return jsonify(ok=ok, msg=msg, **kw), (200 if ok else 400)
+
+
+# ------------------------------------------------- Prévia de impacto (plano de confiabilidade, fase 3.1)
+@admin_bp.get("/politicas/impacto")
+@login_required
+def politica_impacto():
+    """Se a empresa passar a aplicar estas listas: computadores, consultas e mais acessados (7 dias)."""
+    try:
+        return _json(True, "", impacto=api.get("/policies/impacto", tid=request.args.get("tid", 0, type=int),
+                                                lists=request.args.get("lists", ""), days=7))
+    except AnalyzerError as e:
+        return _json(False, f"Falha: {e}")
+
+
+@admin_bp.post("/dominios/impacto")
+@login_required
+def dominios_impacto():
+    """Antes de pôr domínios numa lista: empresas e computadores que os consultaram (7 dias)."""
+    d = request.get_json(silent=True) or {}
+    try:
+        return _json(True, "", impacto=api.post("/domains/impacto", {"domains": d.get("dominios") or [], "days": 7}))
+    except AnalyzerError as e:
+        return _json(False, f"Falha: {e}")
 
 
 # ------------------------------------------------- Políticas: empresa <-> listas (modais)
@@ -675,17 +733,19 @@ def dominio_listas():
         fora = [c for c in todas if c not in quer]
         if d.get("so_adicionar"):
             fora = []
+        antes = _antes(doms) if fora else {}
         if fora:
             api.post("/listas-remover", {"domains": doms, "cats": fora})
         if quer:
             api.post("/listas-lote", {"domains": doms, "cats": quer, "by": admin_atual().email})
+            _fim_excecao(doms)
         for x in doms:
             _decisao_global(x, "blocked" if quer else "allowed")
         rot = dict(dnslib.CATEGORIAS_LISTA)
         current_app.logger.info("DNS: %s: %s -> listas %s", admin_atual().email, doms, quer)
         alvo = doms[0] if len(doms) == 1 else f"{len(doms)} domínios"
         return _json(True, f"{alvo}: " + (", ".join(rot[c] for c in quer) if quer else "fora de todas as listas (manter liberado)")
-                     + ". O DNS atualiza em até 1 h.")
+                     + "." + (_libera_agora(doms, antes) if antes else " O DNS atualiza em até 1 h."))
     except Exception as e:  # noqa: BLE001
         return _json(False, f"Falha: {e}")
 

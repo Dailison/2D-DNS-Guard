@@ -166,7 +166,7 @@ def load_settings() -> Settings:
         rdap_cache_days=_int("RDAP_CACHE_DAYS", 30),
         rdap_skip_top_rank=_int("RDAP_SKIP_TOP_RANK", 100000),
         webhook_urls=_list("WEBHOOK_URLS"),
-        webhook_kinds=_list("WEBHOOK_KINDS", "malicious_access,suspicious_access,dga_burst"),
+        webhook_kinds=_list("WEBHOOK_KINDS", "malicious_access,suspicious_access,dga_burst,blocked_work,block_spike"),
         push_api_url=os.environ.get("PUSH_API_URL", ""),
         push_api_token=os.environ.get("PUSH_API_TOKEN", ""),
         push_app_name=os.environ.get("PUSH_APP_NAME", "2D-Monitoramento"),

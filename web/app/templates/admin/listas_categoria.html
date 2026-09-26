@@ -72,6 +72,7 @@
     <label class="chk" style="margin:.2rem 0;font-weight:400"><input type="checkbox" class="eTid" value="{{ e.id }}" {{ 'checked' if e.tem }}> <span>{{ e.nome }}{% if e.unidades %} <span class="mut" style="font-size:.78rem">(também na exceção de: {{ e.unidades|join(', ') }})</span>{% endif %}</span></label>
     {% endfor %}
   </div>
+  <div class="previa" id="ePrev" hidden></div>
   <div style="display:flex;gap:.5rem;justify-content:space-between;margin-top:.7rem;flex-wrap:wrap">
     <div style="display:flex;gap:.3rem"><button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid').forEach(c=>c.checked=true)">Marcar todas</button>
       <button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid').forEach(c=>c.checked=false)">Desmarcar todas</button></div>
@@ -80,7 +81,13 @@
   </div>
 </dialog>
 <style>dialog.dlg{border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;background:var(--card);color:var(--txt)} dialog.dlg::backdrop{background:rgba(15,23,42,.45)} .mini{padding:.25rem .5rem;font-size:.8rem}</style>
+{% include "admin/_previa_impacto.html" %}
 <script>
+document.querySelectorAll("#dlgEmp .eTid, #eDefault").forEach(c => c.addEventListener("change", () => {
+  if (c.checked && !c.defaultChecked)   // empresa que ainda não aplica a lista: mostra o que passaria a bloquear
+    previaImpacto(document.getElementById("ePrev"), c.id === "eDefault" ? 0 : c.value, {{ cat|tojson }},
+                  c.closest("label").textContent.trim());
+}));
 document.getElementById("eSalvar").addEventListener("click", async (ev) => {
   const b = ev.target; b.disabled = true;
   const body = {cat: {{ cat|tojson }}, default: document.getElementById("eDefault").checked,

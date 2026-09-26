@@ -6,6 +6,10 @@ Alertas:
 * new_domains_spike — computador acessou muito mais domínios INÉDITOS que os colegas do mesmo cliente
 * volume_spike      — consultas na última hora muito acima da média do próprio computador
 * dga_burst         — muitos nomes aleatórios com NXDOMAIN (assinatura típica de malware com DGA)
+* blocked_work      — site de TRABALHO (classificação, categoria de trabalho ou protegido) bloqueado
+* block_spike       — um domínio bloqueado para muitos computadores da empresa na mesma hora
+  (os dois ignoram bloqueio INTENCIONAL: posto numa lista por pessoa — ou pela migração dos grupos — ou
+  numa lista de uso misto que a empresa escolheu; pegam o que a IA/bloqueio automático pôs, até via CNAME)
 
 Comparações entre computadores são SEMPRE dentro do mesmo tenant.
 Detectores que dependem de histórico só rodam após o período de aquecimento.
@@ -19,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 from psycopg.types.json import Jsonb
 
-from . import db
+from . import catalog, corporate, db
 
 log = logging.getLogger(__name__)
 WARMUP_DAYS = 7
@@ -35,6 +39,22 @@ def _upsert_alert(c, tenant_id, kind, severity, title, dedup, details, client_id
     return bool(r and r["inserted"])
 
 
+_AUTO = ("IA automática", "IA com dúvida", "IA sem certeza", "bloqueio automático")
+_USO_MISTO = {"mensageiros", "ia_chatbots", "nuvem_remoto"}
+
+
+def _intencional(c, nome: str) -> bool:
+    """Bloqueio de propósito: o domínio (ou um pai) está numa lista posta por pessoa/migração, ou numa lista
+    de uso misto (a empresa escolheu aplicá-la)."""
+    p = nome.split(".")
+    cands = [".".join(p[i:]) for i in range(len(p) - 1)]
+    for r in c.execute("SELECT category, coalesce(added_by, '') AS por FROM category_lists "
+                       "WHERE domain = ANY(%s) AND category <> 'para_revisar'", (cands,)):
+        if r["category"] in _USO_MISTO or not r["por"].startswith(_AUTO):
+            return True
+    return False
+
+
 def _robust_threshold(values: list[float], k: float = 5.0, floor: float = 0) -> float:
     if not values:
         return float("inf")
@@ -48,7 +68,8 @@ def run(since: datetime | None = None) -> dict:
     since = since or (now - timedelta(hours=1))
     day = now.strftime("%Y-%m-%d")
     created = {"malicious_access": 0, "suspicious_access": 0, "new_domains_spike": 0,
-               "volume_spike": 0, "dga_burst": 0}
+               "volume_spike": 0, "dga_burst": 0, "blocked_work": 0, "block_spike": 0}
+    hora = since.replace(minute=0, second=0, microsecond=0)
     with db.conn() as c:
         tenants = c.execute("SELECT id, name FROM tenants WHERE active").fetchall()
         for t in tenants:
@@ -95,6 +116,35 @@ def run(since: datetime | None = None) -> dict:
                                  f"dga:{r['client_id']}:{day}", {"ip": r["ip"], "count": r["n"], "examples": r["ex"]},
                                  r["client_id"]):
                     created["dga_burst"] += 1
+
+            # 4) bloqueios suspeitos na última hora (site de trabalho / muitos computadores)
+            bloq = c.execute(
+                "SELECT q.domain_id, v.name, v.classification, v.category, count(DISTINCT q.client_id) AS pcs, "
+                " sum(q.blocked) AS b, (array_agg(DISTINCT host(cl.ip)))[1:50] AS ips FROM query_agg q "
+                "JOIN clients cl ON cl.id = q.client_id "
+                "JOIN v_tenant_domains v ON v.tenant_id = q.tenant_id AND v.domain_id = q.domain_id "
+                "WHERE q.tenant_id = %s AND q.bucket >= %s AND q.blocked > 0 "
+                "GROUP BY q.domain_id, v.name, v.classification, v.category", (tid, hora)).fetchall()
+            if bloq:
+                ativos = c.execute("SELECT count(DISTINCT client_id) AS n FROM query_agg WHERE tenant_id = %s AND bucket >= %s",
+                                   (tid, hora)).fetchone()["n"]
+                for r in bloq:
+                    if _intencional(c, r["name"]):
+                        continue
+                    e = catalog.match(r["name"])
+                    trabalho = (r["classification"] == "TRABALHO" or r["category"] in corporate.NEVER_BLOCK
+                                or bool(e and e.get("protected")))
+                    det = {"domain": r["name"], "computadores": r["pcs"], "bloqueios": int(r["b"]), "ips": r["ips"],
+                           "classificacao": r["classification"], "categoria": r["category"]}
+                    if trabalho and _upsert_alert(c, tid, "blocked_work", "high",
+                                                  f"Site de trabalho bloqueado: {r['name']} ({r['pcs']} computador(es))",
+                                                  f"blkwork:{r['domain_id']}:{day}", det, None, r["domain_id"]):
+                        created["blocked_work"] += 1
+                    if r["pcs"] >= max(5, 0.3 * ativos) and _upsert_alert(
+                            c, tid, "block_spike", "high",
+                            f"Bloqueio em massa: {r['name']} bloqueado para {r['pcs']} de {ativos} computadores",
+                            f"blkspike:{r['domain_id']}:{day}", {**det, "ativos": ativos}, None, r["domain_id"]):
+                        created["block_spike"] += 1
 
             # detectores que exigem histórico
             oldest = c.execute("SELECT min(first_seen) AS m FROM tenant_domains WHERE tenant_id=%s",

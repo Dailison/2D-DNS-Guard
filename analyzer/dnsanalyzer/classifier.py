@@ -136,12 +136,13 @@ def save(c, drow: dict, dossier: dict, rule: RuleResult, fin: Final, pending: bo
            corp_by=CASE WHEN %s::text IS NULL THEN corp_by ELSE %s END,
            reasons=%s, evidence=%s, recommended_action=%s, classified_by=%s, model=%s, analyzed_at=now(),
            needs_analysis=false, llm_pending=%s, evidence_hash=%s, ti_hits=%s, ti_signature=%s,
+           ti_cleared_at=CASE WHEN %s <> '' THEN NULL WHEN ti_signature <> '' THEN now() ELSE ti_cleared_at END,
            popularity_rank=%s, registered_at=COALESCE(%s::date, registered_at), claimed_at=NULL,
            last_error=NULL, llm_attempts=CASE WHEN %s THEN llm_attempts ELSE 0 END
            WHERE id=%s""",
         (fin.classification, fin.risk, fin.work, fin.confidence, fin.topic, fin.category,
          fin.corp_action, fin.corp_action, fin.corp_reason, fin.corp_action, fin.corp_by, Jsonb(reasons), Jsonb(ev),
-         fin.action, fin.classified_by, model, pending, rule.evidence_hash, Jsonb(hits), ti.signature(hits),
+         fin.action, fin.classified_by, model, pending, rule.evidence_hash, Jsonb(hits), ti.signature(hits), ti.signature(hits),
          dossier.get("popularity_rank"), dossier.get("registered_at"), pending, drow["id"]))
     changed = prev is None or (prev["classification"], prev["risk_score"], prev["work_score"]) != \
         (fin.classification, fin.risk, fin.work)
@@ -551,6 +552,8 @@ def run_forever(stop=lambda: False) -> None:
                 last_auto = time.monotonic()
                 with db.conn() as c:   # (um evento por domínio na coluna "Decisão" do IA ao vivo)
                     listas.bloquear_auto(c)
+                with db.conn() as c:
+                    listas.expirar_ameacas(c)
                 with db.conn() as c:
                     listas_ia.aplicar(c)
             if time.monotonic() - last_stale > 3600:

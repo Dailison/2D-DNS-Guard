@@ -16,7 +16,7 @@ import time
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from . import catalog, corporate, db, eventos
+from . import catalog, corporate, db, eventos, listas
 from .config import settings
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
 
@@ -268,6 +268,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     online_ok = _online.habilitado()
 
     def para_decisoes(r, cat, motivo=None):
+        listas.contexto(c, DUVIDA_BY, motivo or "nenhuma fase teve certeza")
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                   (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})" + (f" · {motivo}" if motivo else "")))
         out["revisar"].append((r["name"], cat))
@@ -301,6 +302,7 @@ def aplicar(c, limite: int = 3000) -> dict:
             # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs)
             tirar = [x for x in moveis if x in em and x != OUTROS]
             if tirar:
+                listas.contexto(c, _fonte(r), "IA online: não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
                 out["resolvidos"].append(r["name"])
                 eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"])
@@ -318,6 +320,7 @@ def aplicar(c, limite: int = 3000) -> dict:
             if not da_ia and PARA_REVISAR not in em:
                 para_decisoes(r, cat, motivo)
         elif certo and coerente:
+            listas.contexto(c, f"{AUTO_BY} ({cat})", _fonte(r))
             if cat not in em:
                 por = f"{AUTO_BY} ({cat})"
                 c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",

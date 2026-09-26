@@ -22,7 +22,7 @@
       {% if cat == 'outros_bloqueios' %}lista manual. Os sites daqui passam pelas fases da IA: com certeza, saem para a lista certa; sem certeza, ficam aqui (bloqueados) com a sugestão — aprove abaixo.
       {% elif tipo.get(cat) == 'manual' %}lista manual: a IA não põe sites aqui sozinha (só sugere outra lista quando for o caso).
       {% else %}a IA põe aqui os sites desta lista quando tem certeza (fases 1 a 3 = IA local com WHOIS e busca na web; fase 4 = IA online); se nenhuma fase tiver certeza, vão para <a href="{{ url_for('analise.decisoes') }}">Decisões</a> (fase 5, manual). Dá para adicionar e tirar à mão.{{ ' ⚡ = lista de risco.' if cat in LISTAS_RISCO }}{% endif %}
-      <br>Aplicada em: {% if emp_com %}<b>{{ emp_com|map(attribute='nome')|join(', ') }}</b>{% else %}<b>nenhuma empresa</b>{% endif %}{% if default_tem %} + <b>redes sem cadastro</b>{% endif %}. O DNS baixa as listas de novo a cada 1 h.
+      <br>Aplicada em: {% if emp_com %}<b>{{ emp_com|map(attribute='nome')|join(', ') }}</b>{% else %}<b>nenhuma empresa</b>{% endif %}{% if default_tem %} + <b>redes sem cadastro</b>{% endif %}. O DNS baixa as listas de novo a cada 1 h{% if pulso and pulso.last_at %} (última busca desta lista: {{ pulso.last_at|dt_sp }}, {{ pulso.last_n }} domínios){% elif emp_com or default_tem %} — <b style="color:#b91c1c">o DNS ainda não buscou esta lista</b>{% endif %}.
     </p>
     <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">
       <form method="get" action="{{ url_for('admin.dominios') }}" style="display:flex;gap:.3rem;margin:0" title="abre a página do domínio: todas as listas em que ele está, a análise da IA e o editor de listas">
@@ -34,6 +34,14 @@
   </div>
 </div>
 
+{% if pulso and pulso.recusada_at %}
+<div class="card" style="border-left:4px solid #dc2626">
+  <b>⚠ A publicação desta lista foi recusada</b>: ela encolheu de {{ pulso.last_n }} para {{ pulso.recusada_n }} domínios de uma vez
+  ({{ pulso.recusada_at|dt_sp }}). O DNS segue com a versão anterior. Se a limpeza foi de propósito, aceite:
+  <form method="post" action="{{ url_for('admin.lista_aceitar') }}" style="display:inline;margin-left:.4rem" onsubmit="return confirm('Publicar a lista {{ rot.get(cat, cat) }} com {{ pulso.recusada_n }} domínios?')">
+    <input type="hidden" name="cat" value="{{ cat }}"><button class="danger mini">Aceitar lista menor</button></form>
+</div>
+{% endif %}
 <div class="card">
   <form method="post" action="{{ url_for('admin.listas_categoria_add') }}" class="row" style="align-items:flex-end;margin:0">
     <input type="hidden" name="cat" value="{{ cat }}">
@@ -62,6 +70,19 @@
     {% endfor %}
     </tbody>
   </table>
+</div>
+{% endif %}
+{% if historico %}
+<div class="card">
+  <h2>Últimas mudanças nesta lista <span class="mut" style="font-size:.8rem;font-weight:400">· auditoria permanente</span></h2>
+  <table><thead><tr><th>Quando</th><th>Domínio</th><th></th><th>Quem</th><th>Por quê</th></tr></thead><tbody>
+  {% for h in historico %}
+    <tr><td class="mut" style="white-space:nowrap;font-size:.82rem">{{ h.at|dt_sp }}</td>
+      <td><a href="{{ url_for('analise.dominio', nome=h.domain, t=0) }}">{{ h.domain }}</a></td>
+      <td>{{ '➕ entrou' if h.acao == 'add' else '➖ saiu' }}</td>
+      <td style="font-size:.82rem">{{ h.por or '—' }}</td><td class="mut" style="font-size:.82rem">{{ h.motivo or '' }}</td></tr>
+  {% endfor %}
+  </tbody></table>
 </div>
 {% endif %}
 <dialog id="dlgEmp" class="dlg" style="max-width:560px;width:calc(100vw - 32px)">

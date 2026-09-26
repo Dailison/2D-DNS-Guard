@@ -365,6 +365,8 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
                   (d["id"], cls, conf, servico[:80], Jsonb(razoes), meta.get("model"),
                    ("fontes: " + ", ".join(meta.get("fontes") or []))[:500] or None))
     elif d["classification"] == "DESCONHECIDO" and lista == NENHUMA:
+        from . import listas as _listas
+        _listas.contexto(c, "IA sem certeza", "nem a IA online identificou o site")
         # nem a IA online identificou: fase 5 (Decisões). Com lista sugerida, `aplicar` decide.
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
                   "ON CONFLICT DO NOTHING", (d["name"], "IA sem certeza (desconhecido)"))

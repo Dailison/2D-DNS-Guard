@@ -370,9 +370,14 @@ def dominio(nome):
             d = api.get(f"/tenants/{ctx['tid']}/domains/{quote(nome, safe='')}")
         except AnalyzerError as e:
             flash(f"Domínio {nome}: {e}", "erro")
+    auditoria = []
     if d:
         blq = _bloqueio_ctx(d["domain"]["name"], ctx["tenant"], d["domain"].get("evidence"))
-    return render_template("admin/analise/dominio.html", d=d, nome=nome, blq=blq, scats=_site_cats(),
+        try:
+            auditoria = api.get("/auditoria", domain=d["domain"]["name"], limit=50)
+        except AnalyzerError:
+            pass
+    return render_template("admin/analise/dominio.html", d=d, nome=nome, blq=blq, scats=_site_cats(), auditoria=auditoria,
                            aba="dominios", **ctx)
 
 

@@ -461,7 +461,12 @@ def listas_categoria():
         servicos = api.get("/liberacao")
     except AnalyzerError:
         servicos = []
-    return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd,
+    try:
+        historico = api.get("/auditoria", category=cat, limit=25)
+    except AnalyzerError:
+        historico = []
+    pulso = next((x.get("pulso") for x in resumo.get("categorias", []) if x["categoria"] == cat), None)
+    return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd, historico=historico, pulso=pulso,
                            scats=_site_cats(), pag_url=_pag_url,
                            categorias=dnslib.CATEGORIAS_LISTA, sugestoes=sugestoes, empresas_pol=empresas_pol,
                            default_tem=default_tem, servicos=servicos)
@@ -589,10 +594,23 @@ def _fim_excecao(doms) -> None:
         current_app.logger.warning("não consegui tirar a exceção imediata de %s: %s", doms, e)
 
 
+@admin_bp.post("/listas-categoria/aceitar")
+@login_required
+def lista_aceitar():
+    """A lista encolheu de propósito (limpeza): aceita publicar a versão menor."""
+    cat = request.form.get("cat", "")
+    try:
+        r = api.post(f"/listas/{quote(cat, safe='')}/aceitar?by={quote(admin_atual().email)}")
+        flash(f"Lista aceita com {r.get('dominios')} domínios; o DNS baixa a versão nova em até 1 h.", "ok")
+    except AnalyzerError as e:
+        flash(f"Falha: {e}", "erro")
+    return redirect(url_for("admin.listas_categoria", cat=cat))
+
+
 def _tirar_da_lista(cat: str, dominio: str) -> None:
     """Tira da lista e grava a decisão global 'manter liberado' (senão o bloqueio automático
     colocaria de volta no próximo ciclo)."""
-    api.delete(f"/listas/{quote(cat, safe='')}/{quote(dominio, safe='')}")
+    api.delete(f"/listas/{quote(cat, safe='')}/{quote(dominio, safe='')}", by=admin_atual().email)
     _decisao_global(dominio, "allowed")
 
 

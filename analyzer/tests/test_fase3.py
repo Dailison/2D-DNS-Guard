@@ -131,3 +131,68 @@ def test_texto_do_aviso(api):
     a = {"id": 1, "severity": "high", "kind": "blocked_work", "tenant_name": "Empresa A", "tenant_id": 1, "title": "Site de trabalho bloqueado: erp.com.br (2 computador(es))",
          "domain": "erp.com.br", "details": {"computadores": 2, "ips": ["10.1.0.1"]}, "created_at": AGORA}
     assert "Se for engano" in webhook._payload(a)["text"]
+
+
+# ---------------------------------------------------------------- fase 4
+def test_ameaca_expira_fora_dos_feeds(api):
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        ids = {}
+        for n, sig, dias in (("velha-ameaca.com", "", 8), ("ainda-no-feed.com", "urlhaus", None), ("recente.com", "", 2),
+                             ("pessoa-pos.com", "", 30)):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, ti_signature, ti_cleared_at) VALUES "
+                               "(%s, 'MALICIOSO', %s, now() - make_interval(days => %s)) RETURNING id",
+                               (n, sig, dias or 0)).fetchone()["id"]
+            por = "op@2d" if n == "pessoa-pos.com" else "bloqueio automático (ameaca)"
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('ameaca', %s, %s)", (n, por))
+            c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s)", (ids[n], por))
+        feitos = listas.expirar_ameacas(c, dias=7)
+        restam = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category='ameaca'")}
+        rev = c.execute("SELECT 1 FROM global_reviews WHERE domain_id=%s", (ids["velha-ameaca.com"],)).fetchone()
+        na = c.execute("SELECT needs_analysis FROM domains WHERE id=%s", (ids["velha-ameaca.com"],)).fetchone()["needs_analysis"]
+    assert [r["domain"] for r in feitos] == ["velha-ameaca.com"] and not rev and na
+    assert {"ainda-no-feed.com", "recente.com", "pessoa-pos.com"} <= restam
+
+
+def test_auditoria_por_gatilho(api):
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        listas.contexto(c, "op@2d", "teste de auditoria")
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'audit.exemplo.com', 'op@2d')")
+        c.execute("DELETE FROM category_lists WHERE domain = 'audit.exemplo.com'")
+    with db.conn() as c:   # sem contexto: usa o added_by
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('streaming', 'audit.exemplo.com', 'IA automática (streaming)')")
+    h = api.get("/auditoria", headers=H, params={"domain": "sub.audit.exemplo.com"}).json()
+    assert [(x["category"], x["acao"], x["por"]) for x in h] == [("streaming", "add", "IA automática (streaming)"),
+                                                                 ("jogos", "remove", "op@2d"), ("jogos", "add", "op@2d")]
+    assert h[1]["motivo"] == "teste de auditoria"
+    r = api.post("/listas-mover", headers=H, json={"domains": ["audit.exemplo.com"], "de": "streaming", "para": [], "by": "ana@2d"})
+    assert r.status_code == 200
+    ult = api.get("/auditoria", headers=H, params={"category": "streaming", "limit": 1}).json()[0]
+    assert (ult["acao"], ult["por"]) == ("remove", "ana@2d") and "manter liberado" in ult["motivo"]
+
+
+def test_lista_publicada_nao_esvazia(api):
+    from dnsanalyzer import config, db
+    if "testclient" not in config.settings().lists_allowed_ips:
+        config.settings().lists_allowed_ips.append("testclient")
+    with db.conn() as c:
+        c.execute("INSERT INTO category_lists (category, domain, added_by) SELECT 'pirataria', 'p' || i || '.com', 'op' "
+                  "FROM generate_series(1, 60) i")
+    r = api.get("/listas/pirataria.txt")
+    assert r.status_code == 200 and r.text.count("\n") == 61
+    with db.conn() as c:
+        c.execute("DELETE FROM category_lists WHERE category='pirataria' AND domain IN (SELECT 'p' || i || '.com' FROM generate_series(1, 20) i)")
+    assert api.get("/listas/pirataria.txt").status_code == 503, "encolheu 33%: recusada"
+    h = api.get("/health").json()
+    assert "pirataria" in h["listas_recusadas"] and h["listas"]["pirataria"]["last_n"] == 60
+    assert api.get("/listas/pirataria.txt", params={"force": "1"}).status_code == 200
+    with db.conn() as c:   # 40 -> 100 publicado; depois limpeza de propósito p/ 60: recusa até aceitar
+        c.execute("INSERT INTO category_lists (category, domain, added_by) SELECT 'pirataria', 'q' || i || '.com', 'op' "
+                  "FROM generate_series(1, 60) i")
+    assert api.get("/listas/pirataria.txt").status_code == 200
+    with db.conn() as c:
+        c.execute("DELETE FROM category_lists WHERE category='pirataria' AND domain LIKE 'q%' AND length(domain) <= 7")
+    assert api.get("/listas/pirataria.txt").status_code == 503
+    assert api.post("/listas/pirataria/aceitar", headers=H, params={"by": "op"}).json()["dominios"] == 40
+    assert api.get("/listas/pirataria.txt").status_code == 200 and "pirataria" not in api.get("/health").json()["listas_recusadas"]

@@ -43,5 +43,5 @@ def patch(path: str, json: dict | None = None):
     return _req("PATCH", path, json=json or {})
 
 
-def delete(path: str):
-    return _req("DELETE", path)
+def delete(path: str, **params):
+    return _req("DELETE", path, params=params or None)

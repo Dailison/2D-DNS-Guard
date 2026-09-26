@@ -140,6 +140,19 @@
     </table>
   </div>
 
+  {% if auditoria %}
+  <div class="card">
+    <h2>Histórico nas listas <span class="mut" style="font-size:.8rem;font-weight:400">· o domínio e os domínios pais</span></h2>
+    <table><thead><tr><th>Quando</th><th>Lista</th><th></th><th>Domínio</th><th>Quem</th><th>Por quê</th></tr></thead><tbody>
+    {% for h in auditoria %}
+      <tr><td class="mut" style="white-space:nowrap;font-size:.82rem">{{ h.at|dt_sp }}</td><td>{{ LISTAS_ROT.get(h.category, h.category) }}</td>
+        <td>{{ '➕ entrou' if h.acao == 'add' else '➖ saiu' }}</td><td style="font-size:.82rem">{{ h.domain }}</td>
+        <td style="font-size:.82rem">{{ h.por or '—' }}</td><td class="mut" style="font-size:.82rem">{{ h.motivo or '' }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+  </div>
+  {% endif %}
+
   <div class="card">
     <h2>Histórico da classificação</h2>
     <table>

@@ -10,6 +10,7 @@ Technitium baixa a lista de novo no próximo intervalo de atualização.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from .config import settings
 
@@ -82,6 +83,34 @@ def categorias_auto() -> list[str]:
     return [c for c in settings().auto_block_categories if c in CATEGORIAS_RISCO]
 
 
+def contexto(c, por: str | None, motivo: str | None = None) -> None:
+    """Quem e por quê das próximas gravações em category_lists nesta transação (auditoria: list_audit,
+    gatilho da migração 035)."""
+    c.execute("SELECT set_config('dnsguard.por', %s, true), set_config('dnsguard.motivo', %s, true)",
+              ((por or "")[:120], (motivo or "")[:300]))
+
+
+def expirar_ameacas(c, dias: int = 7) -> list[dict]:
+    """Bloqueio automático em Ameaças (bloqueio automático / IA automática) expira quando o domínio saiu dos
+    feeds de ameaça há mais de `dias` dias: sai da lista, a decisão automática é desfeita e o domínio volta a
+    ser analisado. Entradas postas por pessoa não expiram."""
+    from . import eventos
+    rows = c.execute(
+        "SELECT l.domain, l.added_by, d.id, d.ti_cleared_at FROM category_lists l JOIN domains d ON d.name = l.domain "
+        "WHERE l.category = 'ameaca' AND (l.added_by LIKE 'bloqueio automático%%' OR l.added_by LIKE 'IA automática%%') "
+        " AND coalesce(d.ti_signature, '') = '' AND d.ti_cleared_at < now() - make_interval(days => %s)", (dias,)).fetchall()
+    for r in rows:
+        n = (datetime.now(timezone.utc) - r["ti_cleared_at"]).days
+        contexto(c, "expiração de ameaça", f"saiu dos feeds de ameaça há {n} dias")
+        c.execute("DELETE FROM category_lists WHERE category = 'ameaca' AND domain = %s", (r["domain"],))
+        c.execute("DELETE FROM global_reviews WHERE domain_id = %s AND reviewed_by = %s", (r["id"], r["added_by"]))
+        c.execute("UPDATE domains SET needs_analysis = true, lista_aplicada_at = NULL WHERE id = %s", (r["id"],))
+        eventos.lista("lista_rem", r["domain"], "ameaca", f"saiu dos feeds de ameaça há {n} dias", r["id"])
+    if rows:
+        log.info("ameaças expiradas (fora dos feeds há > %d dias): %s", dias, ", ".join(r["domain"] for r in rows))
+    return rows
+
+
 def candidatos(c, cats: list[str] | None = None, limite: int = 300) -> list[dict]:
     cats = cats if cats is not None else categorias_auto()
     return c.execute(CANDIDATOS_SQL, {"cats": cats, "lim": limite}).fetchall() if cats else []
@@ -97,6 +126,7 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
     for r in candidatos(c, limite=limite):
         por = f"{AUTO_BY} ({r['category']})"
         motivo = listas_ia.guardado(r, r["category"])
+        contexto(c, por, motivo or "recomendação da IA: bloquear")
         if motivo:   # não bloqueia sozinho: Decisões (sem global_reviews: segue candidato, sem repetir evento)
             if c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
                          "ON CONFLICT DO NOTHING", (r["name"], f"{por} · {motivo}")).rowcount:
@@ -127,6 +157,7 @@ DETALHE_SQL = (
     "SELECT d.name AS domain, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
     " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "
     " d.lista_ia, d.lista_conf, d.lista_motivo, d.lista_servico, d.lista_fonte, d.lista_at, d.online_at, d.lista_duvida, "
+    " d.ti_signature, d.ti_cleared_at, "
     " g.status AS g_status, g.reviewed_by AS g_by, g.reviewed_at AS g_at, "
     " t.n_decisoes, t.n_ajustes, t.ult_status, t.ult_por, t.ult_em "
     "FROM domains d LEFT JOIN global_reviews g ON g.domain_id = d.id "

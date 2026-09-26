@@ -10,7 +10,7 @@ from . import db
 
 log = logging.getLogger(__name__)
 # eventos da coluna "Decisão"; detail = "<lista>|<texto>" nos de lista
-DECISAO = ("lista_add", "lista_rem", "fase5", "decisao", "auto_block", "lista_ia")
+DECISAO = ("lista_add", "lista_rem", "fase5", "decisao", "auto_block", "lista_ia", "lista_recusada")
 
 
 def registrar(kind: str, name: str | None = None, domain_id: int | None = None, classification: str | None = None,

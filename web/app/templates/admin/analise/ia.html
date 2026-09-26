@@ -62,7 +62,7 @@
   var lastId = 0, paused = false, cur = null, curBase = 0, first = true;
   var feed = document.getElementById('feed'), feedDec = document.getElementById('feedDec');
   var LROT = {{ LISTAS_ROT|tojson }};
-  var DEC = {lista_add: 1, lista_rem: 1, fase5: 1, decisao: 1, auto_block: 1, lista_ia: 1};
+  var DEC = {lista_add: 1, lista_rem: 1, fase5: 1, decisao: 1, auto_block: 1, lista_ia: 1, lista_recusada: 1};
   function rot(cats){ return (cats || '').split(',').filter(Boolean).map(function(c){ return LROT[c] || c; }).join(', ') || 'nenhuma lista'; }
   function partes(ev){ var d = ev.detail || '', i = d.indexOf('|'); return i < 0 ? ['', d] : [d.slice(0, i), d.slice(i + 1)]; }
 
@@ -127,13 +127,16 @@
     } else if (k === 'lista_add' || k === 'lista_rem' || k === 'fase5' || k === 'decisao') {
       var p = partes(ev);
       ic.textContent = {lista_add: '⛔', lista_rem: '✅', fase5: '🧑‍💻', decisao: '✋'}[k];
-      body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' '));
+      if (ev.name) { body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' ')); }
       if (k === 'lista_add') { body.appendChild(document.createTextNode('entrou em ')); body.appendChild(el('span', 'lst', rot(p[0]))); }
       else if (k === 'lista_rem') { body.appendChild(document.createTextNode('saiu de ')); body.appendChild(el('span', 'lst sai', rot(p[0]))); }
       else if (k === 'fase5') { body.appendChild(document.createTextNode('foi para ')); body.appendChild(el('span', 'lst dec', 'Decisões'));
         if (p[0]) body.appendChild(el('span', 'd', ' · sugestão: ' + rot(p[0]))); }
       else { body.appendChild(el('span', 'lst ' + (/manteve liberado|nenhuma lista|tirou/.test(p[1]) ? 'sai' : ''), 'decisão manual')); }
       if (p[1]) { body.appendChild(el('br')); body.appendChild(el('span', 'd', p[1])); }
+    } else if (k === 'lista_recusada') {
+      var pr = partes(ev); ic.textContent = '🛑';
+      body.appendChild(el('span', 'lst', rot(pr[0]))); body.appendChild(el('span', 'd', ' ' + pr[1]));
     } else if (k === 'lista_ia') {
       ic.textContent = '🗂️'; body.appendChild(el('span', 'd', (ev.detail || '').replace(/^listas pela IA/, 'Listas pela IA')));
     } else if (k === 'llm_extra') {

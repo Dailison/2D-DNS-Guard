@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -22,6 +23,7 @@ from .config import settings
 from .features import analyze_name
 from .llm import OllamaClient
 
+log = logging.getLogger(__name__)
 app = FastAPI(title="2D DNS Analyzer", version=__version__, docs_url=None, redoc_url=None)
 
 
@@ -65,6 +67,17 @@ def health():
                 "count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS ia, count(*) AS dominios FROM domains").fetchone())
     except Exception as e:  # noqa: BLE001
         out["db_error"] = str(e)[:200]
+    try:   # pulso das listas publicadas (o 2D-Monitoramento lê /health)
+        with db.conn() as c:
+            f = {r["category"]: r for r in c.execute("SELECT category, last_at, last_n, recusada_at, recusada_n FROM list_fetches")}
+            aplicadas = sorted({x for r in c.execute("SELECT lists FROM policies") for x in (r["lists"] or [])})
+        out["listas"] = {k: {"last_at": v["last_at"], "last_n": v["last_n"], "recusada_at": v["recusada_at"],
+                             "recusada_n": v["recusada_n"]} for k, v in f.items()}
+        lim = datetime.now(timezone.utc) - timedelta(hours=2)
+        out["listas_atrasadas"] = [k for k in aplicadas if not (f.get(k) or {}).get("last_at") or f[k]["last_at"] < lim]
+        out["listas_recusadas"] = [k for k, v in f.items() if v["recusada_at"]]
+    except Exception as e:  # noqa: BLE001
+        out["listas_error"] = str(e)[:200]
     ok, msg = OllamaClient().available()
     out["llm"] = {"ok": ok, "detail": msg, "model": settings().ollama_model, "enabled": settings().llm_enabled}
     out["webhook"] = {"enabled": bool(settings().webhook_urls), "kinds": settings().webhook_kinds,
@@ -1082,9 +1095,40 @@ def lista_txt(categoria: str, request: Request):
         raise HTTPException(403, "IP sem acesso às listas")
     if categoria not in listas.CATEGORIAS:
         raise HTTPException(404, "categoria sem lista")
+    force = request.query_params.get("force") == "1"
     with db.conn() as c:
         doms = listas.dominios(c, categoria)
+        ult = c.execute("SELECT last_n FROM list_fetches WHERE category = %s", (categoria,)).fetchone()
+        n0 = (ult or {}).get("last_n") or 0
+        recusar = not force and n0 >= 50 and len(doms) < 0.8 * n0
+    if recusar:
+        with db.conn() as c:
+            # lista encolheu demais de uma vez: recusa (o Technitium segue com a última versão baixada) até
+            # alguém aceitar em Domínios bloqueados (POST /listas/{cat}/aceitar) — protege contra esvaziar
+            c.execute("INSERT INTO list_fetches (category, recusada_at, recusada_n) VALUES (%s, now(), %s) "
+                      "ON CONFLICT (category) DO UPDATE SET recusada_at = now(), recusada_n = EXCLUDED.recusada_n",
+                      (categoria, len(doms)))
+            log.error("lista %s encolheu de %d para %d: publicação recusada", categoria, n0, len(doms))
+            from . import eventos
+            eventos.registrar("lista_recusada", None, detail=f"{categoria}|lista encolheu de {n0} para {len(doms)} domínios; "
+                              "publicação recusada até alguém aceitar (o DNS segue com a versão anterior)")
+        raise HTTPException(503, f"lista {categoria} encolheu de {n0} para {len(doms)}; publicação recusada")
+    with db.conn() as c:
+        c.execute("INSERT INTO list_fetches (category, last_at, last_ip, last_n) VALUES (%s, now(), %s, %s) "
+                  "ON CONFLICT (category) DO UPDATE SET last_at = now(), last_ip = EXCLUDED.last_ip, last_n = EXCLUDED.last_n, "
+                  "recusada_at = NULL, recusada_n = NULL", (categoria, request.client.host, len(doms)))
     return f"# 2D DNS Guard - lista {categoria} ({len(doms)} domínios)\n" + "".join(d + "\n" for d in doms)
+
+
+@app.post("/listas/{categoria}/aceitar", dependencies=[Depends(auth)])
+def lista_aceitar(categoria: str, by: str = ""):
+    """Aceita a lista menor (limpeza de propósito): a próxima busca do Technitium já recebe a versão nova."""
+    with db.conn() as c:
+        n = len(listas.dominios(c, categoria))
+        c.execute("UPDATE list_fetches SET last_n = %s, recusada_at = NULL, recusada_n = NULL WHERE category = %s", (n, categoria))
+    from . import eventos
+    eventos.registrar("decisao", None, detail=f"{categoria}|{by or 'manual'}: aceitou publicar a lista {categoria} com {n} domínios")
+    return {"ok": True, "dominios": n}
 
 
 @app.get("/listas", dependencies=[Depends(auth)])
@@ -1093,8 +1137,9 @@ def listas_resumo():
         n = {k: len(listas.dominios(c, k)) for k in listas.CATEGORIAS}
         n24 = c.execute("SELECT count(*) AS n FROM category_lists WHERE added_by LIKE %s "
                         "AND added_at > now() - interval '24 hours'", (listas.AUTO_BY + "%",)).fetchone()["n"]
+        pulso = {r["category"]: r for r in c.execute("SELECT * FROM list_fetches")}
     return {"categorias": [{"categoria": k, "total": n.get(k, 0), "tipo": "manual" if k in listas.CATEGORIAS_MANUAIS
-                            else "ia"} for k in listas.CATEGORIAS],
+                            else "ia", "pulso": pulso.get(k)} for k in listas.CATEGORIAS],
             "auto": listas.categorias_auto(), "auto_24h": n24}
 
 
@@ -1161,6 +1206,8 @@ def listas_mover(body: MoverIn):
     if ruins:
         raise HTTPException(422, f"lista inexistente: {', '.join(ruins)}")
     with db.conn() as c:
+        listas.contexto(c, body.by or "manual", (f"pôs em {', '.join(body.para)}" if body.para else "manter liberado")
+                        + f" (saiu de {body.de})")
         for cat in body.para:
             c.execute("INSERT INTO category_lists (category, domain, added_by) SELECT %s, d, %s FROM unnest(%s::text[]) d "
                       "ON CONFLICT DO NOTHING", (cat, body.by or None, doms))
@@ -1193,6 +1240,7 @@ def listas_aprovar(body: AprovarIn):
     doms = sorted({x for x in map(_dom_ok, body.domains) if x})
     out = {"movidos": {}, "tirados": [], "sem_sugestao": []}
     with db.conn() as c:
+        listas.contexto(c, body.by or "manual", f"aprovou a sugestão da IA (saiu de {body.de})")
         sug = {r["name"]: r for r in c.execute("SELECT name, lista_ia, lista_at, lista_fonte FROM domains WHERE name = ANY(%s)", (doms,))}
         for d in doms:
             r = sug.get(d)
@@ -1421,6 +1469,24 @@ def reanalyze_lote(body: NomesIn):
     return {"ok": True, "enviados": n, "ignorados": len(nomes) - n}
 
 
+@app.get("/auditoria", dependencies=[Depends(auth)])
+def auditoria(domain: Optional[str] = None, category: Optional[str] = None, limit: int = Query(100, le=1000)):
+    """Histórico permanente das listas (list_audit): o que entrou/saiu, quando, quem e por quê. Com domain,
+    inclui os domínios pais (o bloqueio pode vir de um pai)."""
+    cond, par = [], []
+    if domain:
+        p = domain.strip().lower().rstrip(".").split(".")
+        cond.append("domain = ANY(%s)")
+        par.append([".".join(p[i:]) for i in range(len(p) - 1)] or [domain])
+    if category:
+        cond.append("category = %s")
+        par.append(category)
+    with db.conn() as c:
+        return c.execute("SELECT id, at, domain, category, acao, por, motivo FROM list_audit"
+                         + (" WHERE " + " AND ".join(cond) if cond else "") + " ORDER BY id DESC LIMIT %s",
+                         (*par, limit)).fetchall()
+
+
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
 def listas_do_dominio(name: str):
     """Em que listas o domínio está (ele mesmo ou um domínio pai)."""
@@ -1451,6 +1517,7 @@ def lista_add(categoria: str, body: ListaIn):
     if not d or "." not in d:
         raise HTTPException(400, "domínio inválido")
     with db.conn() as c:
+        listas.contexto(c, body.by or "manual", f"pôs em {categoria}")
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                   (categoria, d, body.by or None))
     _decisao(d, categoria, f"pôs em {categoria}", body.by)
@@ -1476,6 +1543,7 @@ def listas_lote(body: ListasLoteIn):
         raise HTTPException(400, f"lista inválida: {', '.join(ruins) or '(nenhuma)'}")
     doms = sorted({x for x in map(_dom_ok, body.domains) if x})
     with db.conn() as c, c.cursor() as cur:
+        listas.contexto(c, body.by or "manual", f"pôs em {', '.join(body.cats)}")
         cur.executemany("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                         [(cat, d, body.by or None) for cat in body.cats for d in doms])
     if len(doms) <= 200:   # (migrações em massa não enchem o feed)
@@ -1489,6 +1557,7 @@ def listas_remover(body: ListasLoteIn):
     """Tira domínios das listas indicadas (cats vazio = de todas)."""
     doms = sorted({x for x in map(_dom_ok, body.domains) if x})
     with db.conn() as c:
+        listas.contexto(c, body.by or "manual", "tirou " + (f"de {', '.join(body.cats)}" if body.cats else "de todas as listas"))
         if body.cats:
             n = c.execute("DELETE FROM category_lists WHERE domain = ANY(%s) AND category = ANY(%s)", (doms, body.cats)).rowcount
         else:
@@ -1500,8 +1569,9 @@ def listas_remover(body: ListasLoteIn):
 
 
 @app.delete("/listas/{categoria}/{domain}", dependencies=[Depends(auth)])
-def lista_rem(categoria: str, domain: str):
+def lista_rem(categoria: str, domain: str, by: str = ""):
     with db.conn() as c:
+        listas.contexto(c, by or "manual", f"tirou de {categoria} (manter liberado)")
         n = c.execute("DELETE FROM category_lists WHERE category=%s AND domain=%s",
                       (categoria, domain.strip().lower().rstrip("."))).rowcount
     if n:

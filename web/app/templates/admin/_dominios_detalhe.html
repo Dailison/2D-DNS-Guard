@@ -71,7 +71,8 @@
       <td><input type="checkbox" class="ddSel" value="{{ i.domain }}"></td>
       <td><a href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}">{{ i.domain }}</a></td>
       <td>{% if c %}<span class="dd-cls" style="background:{{ c[1] }};color:{{ c[2] }}">{{ c[0] }}</span>{% else %}<span class="mut">—</span>{% endif %}
-        {% if i.cat_ia %}<div class="dd-sub">{{ scats.get(i.cat_ia, i.cat_ia) }}{% if i.confidence %} · {{ (i.confidence * 100)|round|int }}%{% endif %}</div>{% endif %}</td>
+        {% if i.cat_ia %}<div class="dd-sub">{{ scats.get(i.cat_ia, i.cat_ia) }}{% if i.confidence %} · {{ (i.confidence * 100)|round|int }}%{% endif %}</div>{% endif %}
+        {% if cat == 'ameaca' %}<div class="dd-sub">{% if i.ti_signature %}🛡 nos feeds: {{ i.ti_signature }}{% elif i.ti_cleared_at %}saiu dos feeds em {{ i.ti_cleared_at|dt_sp('%d/%m/%y') }}{% else %}fora dos feeds{% endif %}</div>{% endif %}</td>
       <td style="font-size:.84rem;max-width:16rem">
         {% if i.lista_at and i.lista_fonte != 'falhou' %}
           <b>{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else 'nenhuma lista' }}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}

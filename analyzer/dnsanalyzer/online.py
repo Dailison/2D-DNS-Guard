@@ -349,6 +349,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     cls = obj.get("classificacao") if obj.get("classificacao") in CLASSES else "DESCONHECIDO"
     if cls == "MALICIOSO":   # regra do sistema: MALICIOSO só com lista de ameaça; palpite da IA = SUSPEITO (fase 5)
         cls = "SUSPEITO"
+        obj = {**obj, "classificacao": cls, "classificacao_original": "MALICIOSO"}   # (a coerência de `aplicar` lê daqui)
     cat = obj.get("categoria") if obj.get("categoria") in categorias else None
     servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:300]
     salvar(c, d["id"], lista, conf, motivo, servico, fonte)

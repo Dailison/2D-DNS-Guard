@@ -440,3 +440,17 @@ def test_doh_pede_segunda_opiniao(env, monkeypatch):
     with db.conn() as c:
         antes = c.execute("SELECT online_resp->'_meta'->'antes' AS a FROM domains WHERE name='doh.exemplo.net'").fetchone()["a"]
     assert antes["lista"] == "doh_dns" and antes["confianca"] == 1.0
+
+
+def test_malicioso_da_ia_online_nao_entra_em_ameacas(env):
+    from dnsanalyzer import db, listas_ia, online
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at) VALUES "
+                      "('fdacebook-teste.info', 'DESCONHECIDO', 'desconhecido', now()) RETURNING id").fetchone()["id"]
+        online.gravar(c, {"id": i, "name": "fdacebook-teste.info", "classification": "DESCONHECIDO"},
+                      {"lista": "ameaca", "confianca": 0.95, "classificacao": "MALICIOSO", "reconhecido": True}, {"model": "g"}, [])
+        listas_ia.aplicar(c)
+        em = {r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain='fdacebook-teste.info'")}
+        cls = c.execute("SELECT classification, online_resp->>'classificacao' AS o FROM domains WHERE id=%s", (i,)).fetchone()
+    assert "ameaca" not in em and "para_revisar" in em, em
+    assert cls["classification"] == "SUSPEITO" and cls["o"] == "SUSPEITO"

@@ -186,3 +186,15 @@ def test_etapa3_fila_so_depois_das_etapas_1_e_2(api):
         assert d and d["name"] == "desconhecido-etapa3.com"
         c.execute("UPDATE domains SET whois_at=now(), claimed_at=NULL WHERE id=%s", (d["id"],))
         assert classifier._claim_etapa3(c) is None          # já consultado: não volta
+
+
+def test_etapa3_em_paralelo_e_br_primeiro(api):
+    from dnsanalyzer import classifier, db
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, total_queries) VALUES "
+                  "('sem-busca-ainda.com', 'com', 'DESCONHECIDO', 'llm', 900), "
+                  "('empresa-exemplo.com.br', 'br', 'DESCONHECIDO', 'llm', 10)")
+    with db.conn() as c:
+        a = classifier._claim_etapa3(c)       # não espera a busca na web (web_search_at NULL)
+        b = classifier._claim_etapa3(c)
+        assert [a["name"], b["name"]] == ["empresa-exemplo.com.br", "sem-busca-ainda.com"]

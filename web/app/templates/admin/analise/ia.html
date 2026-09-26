@@ -20,7 +20,7 @@
   <div class="metric"><div class="n" id="st-ia" style="font-size:1rem;padding-top:.4rem">…</div><div class="l" id="st-model">IA</div></div>
   <div class="metric"><div class="n" id="st-fila">–</div><div class="l">Na fila da IA</div></div>
   <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web quando a fila da IA esvaziar">Etapa 2 · busca na web</div></div>
-  <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado quando as etapas 1 e 2 esvaziarem">Etapa 3 · WHOIS</div></div>
+  <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado — em paralelo com a busca na web, .br primeiro">Etapa 3 · WHOIS</div></div>
   <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
   <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div></div>
   <div class="metric"><div class="n" id="st-eta" style="font-size:1.1rem;padding-top:.3rem">–</div><div class="l">Previsão p/ zerar a fila</div></div>
@@ -102,7 +102,7 @@
     document.getElementById('st-model').textContent = 'IA (' + ((d.llm && d.llm.model) || '?') + ')';
     document.getElementById('st-fila').textContent = d.queue ? d.queue.ia : '–';
     document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca + (d.queue.ia ? ' (aguarda)' : '') : '–';
-    document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois + ((d.queue.ia || d.queue.busca) ? ' (aguarda)' : '') : '–';
+    document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois + (d.queue.ia ? ' (aguarda)' : '') : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';
     document.getElementById('st-media').textContent = d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–';
     document.getElementById('st-eta').textContent = d.eta_seconds ? '~' + (d.eta_seconds > 5400 ? Math.round(d.eta_seconds/3600) + ' h' : Math.round(d.eta_seconds/60) + ' min') : (d.queue && d.queue.ia === 0 ? 'fila vazia' : '–');

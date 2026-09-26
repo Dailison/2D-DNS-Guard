@@ -85,6 +85,7 @@ class Settings:
     web_search_min_interval: int
     web_search_before_llm: bool
     whois_enabled: bool
+    whois_workers: int
 
     reanalyze_days: int
     retention_days: int
@@ -158,6 +159,9 @@ def load_settings() -> Settings:
         # primeiro; o que ela não reconhecer vai p/ Decisões e a etapa 2 busca quando a fila zerar)
         web_search_before_llm=_bool(os.environ.get("WEB_SEARCH_BEFORE_LLM"), False),
         whois_enabled=_bool(os.environ.get("WHOIS_ENABLED"), True),   # etapa 3 (RDAP + CNPJ/BrasilAPI)
+        # em paralelo com a etapa 2; cada serviço tem intervalo mínimo próprio (registro.br 2 s,
+        # rdap.org 1,5 s, BrasilAPI 1 s), então 2 workers já ocupam os três
+        whois_workers=max(_int("WHOIS_WORKERS", 2), 1),
         reanalyze_days=_int("REANALYZE_DAYS", 30),
         retention_days=_int("RETENTION_DAYS", 180),
         classify_batch=_int("CLASSIFY_BATCH", 10),

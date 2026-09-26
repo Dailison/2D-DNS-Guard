@@ -365,27 +365,58 @@ def phase_c(client: OllamaClient, cats: list[dict]) -> str:
 
 
 def _claim_etapa3(c) -> dict | None:
-    """Próximo DESCONHECIDO p/ WHOIS — só com as filas das etapas 1 e 2 vazias."""
+    """Próximo DESCONHECIDO p/ WHOIS: em paralelo com a etapa 2 (busca na web), mas só com a fila
+    da IA (etapa 1) vazia. .br primeiro (titular com CNPJ no registro.br identifica a empresa)."""
     if c.execute(ETAPA1_PENDENTE + " LIMIT 1").fetchone():
-        return None
-    if settings().web_search_url and c.execute(
-            "SELECT 1 FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by = 'llm' "
-            "AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public' "
-            "AND NOT dominio_decidido(id) LIMIT 1").fetchone():
         return None
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')
                AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
-               AND (web_search_at IS NOT NULL OR %s = '')
                AND NOT dominio_decidido(id)
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
-             ORDER BY total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
-           RETURNING *""", (settings().web_search_url,)).fetchone()
+             ORDER BY (name LIKE '%.br') DESC, total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
+           RETURNING *""").fetchone()
+
+
+class _Reforco:
+    """Escolhe o cliente da IA: o reforço com GPU quando responde (checado a cada 60 s); senão a VM."""
+
+    def __init__(self, vm: OllamaClient):
+        self.vm, self.ok = vm, {}
+        self.extras = [OllamaClient(u) for u in settings().ollama_extra_urls]
+
+    def cliente(self) -> OllamaClient:
+        for x in self.extras:
+            t, ok = self.ok.get(x.url, (0.0, False))
+            if time.monotonic() - t > 60:
+                ok = x.available()[0]
+                self.ok[x.url] = (time.monotonic(), ok)
+            if ok:
+                return x
+        return self.vm
+
+
+def _whois_worker(stop, cats: list[dict], reforco: "_Reforco", wid: int) -> None:
+    """Etapa 3 em paralelo com a etapa 2: WHOIS/RDAP (+ CNPJ) + IA, no reforço com GPU se no ar."""
+    backoff = 0
+    while not stop():
+        try:
+            st = phase_d(reforco.cliente(), cats)
+            if st == "idle":
+                time.sleep(30)
+            elif st == "unavailable":
+                backoff = min(backoff + 30, 300)
+                time.sleep(backoff)
+            else:
+                backoff = 0
+        except Exception:  # noqa: BLE001
+            log.exception("erro no worker %d do WHOIS", wid)
+            time.sleep(30)
 
 
 def phase_d(client: OllamaClient, cats: list[dict]) -> str:
-    """Etapa 3: WHOIS/RDAP (+ CNPJ) + IA para UM desconhecido. Só com as etapas 1 e 2 vazias."""
+    """Etapa 3: WHOIS/RDAP (+ CNPJ) + IA para UM desconhecido (com a fila da IA vazia)."""
     if not settings().whois_enabled:
         return "idle"
     with db.conn() as c:
@@ -450,7 +481,7 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
-    db.set_max_size(6 + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls))
+    db.set_max_size(6 + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:
@@ -469,22 +500,15 @@ def run_forever(stop=lambda: False) -> None:
                  cfg.llm_extra_workers)
     last_stale = 0.0
     backoff = 0
-    extras = [OllamaClient(u) for u in cfg.ollama_extra_urls]
-    extra_ok: dict[str, tuple[float, bool]] = {}
-
-    def cliente_etapa2() -> OllamaClient:
-        """Etapa 2 (busca na web + IA) no reforço com GPU quando ele está no ar; senão na VM."""
-        for x in extras:
-            t, ok = extra_ok.get(x.url, (0.0, False))
-            if time.monotonic() - t > 60:
-                ok = x.available()[0]
-                extra_ok[x.url] = (time.monotonic(), ok)
-            if ok:
-                return x
-        return client
-
+    reforco = _Reforco(client)
+    cliente_etapa2 = reforco.cliente   # etapa 2 (busca na web + IA) no reforço com GPU se no ar
     with db.conn() as c:
         cats = categories(c)
+    if cfg.llm_enabled and cfg.whois_enabled:
+        for i in range(cfg.whois_workers):
+            threading.Thread(target=_whois_worker, args=(stop, cats, reforco, i), daemon=True,
+                             name=f"whois-{i}").start()
+        log.info("etapa 3 (WHOIS) em paralelo: %d worker(s)", cfg.whois_workers)
     while not stop():
         try:
             n = phase_a()
@@ -499,10 +523,8 @@ def run_forever(stop=lambda: False) -> None:
                 time.sleep(30)
                 continue
             status = phase_b(client, cats)
-            if status == "idle":            # etapa 1 vazia: etapa 2 (busca na web)
+            if status == "idle":            # etapa 1 vazia: etapa 2 (busca na web); a 3 tem workers próprios
                 status = phase_c(cliente_etapa2(), cats)
-            if status == "idle":            # etapas 1 e 2 vazias: etapa 3 (WHOIS)
-                status = phase_d(cliente_etapa2(), cats)
             if status == "idle":
                 time.sleep(20)
             elif status == "unavailable":

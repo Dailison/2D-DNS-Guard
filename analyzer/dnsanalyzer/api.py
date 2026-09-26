@@ -1577,6 +1577,73 @@ def _tira_da_whitelist(c, doms: list[str]) -> None:
     c.execute("DELETE FROM whitelist_domains WHERE domain = ANY(%s)", (doms,))
 
 
+_FONTE = {"llm": "Fase 1 · IA local", "web": "Fase 3 · busca na web + IA local", "online": "Fase 4 · IA online",
+          "catalog": "Catálogo", "rules": "Regras", "internal": "Interno", "manual": "Manual"}
+
+
+@app.get("/domains/{name}/historico", dependencies=[Depends(auth)])
+def dominio_historico(name: str):
+    """Tudo o que aconteceu com o domínio até o estado atual, em ordem: classificações de cada fase, resposta
+    da IA online, entradas/saídas das listas e da whitelist, decisões de pessoas e eventos recentes."""
+    reg = name.strip().lower().rstrip(".")
+    p = reg.split(".")
+    cands = [".".join(p[i:]) for i in range(len(p) - 1)] or [reg]
+    with db.conn() as c:
+        d = c.execute("SELECT id, name, classification, category, topic, confidence, corp_action, corp_reason, classified_by, "
+                      "first_seen, analyzed_at, whois_at, web_search_at, online_at, revisado_at, lista_ia, lista_conf, lista_fonte, "
+                      "lista_motivo, online_resp, ti_signature, total_queries FROM domains WHERE name = %s", (reg,)).fetchone()
+        if not d:
+            raise HTTPException(404, "domínio nunca observado")
+        tl = []
+        for h in c.execute("SELECT created_at, source, classification, topic, confidence, model, note FROM classification_history "
+                           "WHERE domain_id = %s ORDER BY created_at", (d["id"],)):
+            tl.append({"at": h["created_at"], "tipo": "classificacao", "titulo": _FONTE.get(h["source"], h["source"] or "?"),
+                       "texto": " · ".join(x for x in (h["classification"], h["topic"],
+                                                       f"{h['confidence'] * 100:.0f}%" if h["confidence"] else "", h["model"] or "") if x),
+                       "nota": h["note"]})
+        for a in c.execute("SELECT at, domain, category, acao, por, motivo FROM list_audit WHERE domain = ANY(%s) ORDER BY at", (cands,)):
+            lista = a["category"]
+            tl.append({"at": a["at"], "tipo": "lista", "titulo": ("entrou em " if a["acao"] == "add" else "saiu de ") + lista,
+                       "texto": " · ".join(x for x in (a["por"], a["motivo"]) if x) + (f" (domínio pai {a['domain']})" if a["domain"] != reg else ""),
+                       "lista": lista, "acao": a["acao"]})
+        g = c.execute("SELECT status, reviewed_by, reviewed_at FROM global_reviews WHERE domain_id = %s", (d["id"],)).fetchone()
+        if g:
+            tl.append({"at": g["reviewed_at"], "tipo": "decisao", "titulo": "decisão global: " + {"blocked": "bloquear", "allowed": "manter liberado"}[g["status"]],
+                       "texto": g["reviewed_by"] or ""})
+        for t in c.execute("SELECT t.name, td.review_status, td.reviewed_by, td.reviewed_at, td.override_classification, td.override_by, "
+                           "td.override_at FROM tenant_domains td JOIN tenants t ON t.id = td.tenant_id WHERE td.domain_id = %s "
+                           "AND (td.review_status IS NOT NULL OR td.override_classification IS NOT NULL)", (d["id"],)):
+            if t["review_status"]:
+                tl.append({"at": t["reviewed_at"], "tipo": "decisao", "titulo": f"decisão de {t['name']}: " +
+                           {"blocked": "bloquear", "allowed": "manter liberado"}[t["review_status"]], "texto": t["reviewed_by"] or ""})
+            if t["override_classification"]:
+                tl.append({"at": t["override_at"], "tipo": "decisao", "titulo": f"{t['name']} ajustou para {t['override_classification']}",
+                           "texto": t["override_by"] or ""})
+        for e in c.execute("SELECT created_at, kind, detail FROM ai_events WHERE name = %s AND kind NOT IN ('llm_done', 'rules_final') "
+                           "ORDER BY id", (reg,)):
+            tl.append({"at": e["created_at"], "tipo": "evento", "titulo": e["kind"], "texto": (e["detail"] or "").split("|", 1)[-1]})
+        listas_atuais = [r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain = ANY(%s)", (cands,))]
+        wl = [r["category"] for r in c.execute("SELECT category FROM whitelist_domains WHERE domain = ANY(%s)", (cands,))]
+    o = d["online_resp"] or {}
+    if d["online_at"] and o:
+        antes = (o.get("_meta") or {}).get("antes") or {}
+        tl.append({"at": d["online_at"], "tipo": "classificacao", "titulo": "Fase 4 · IA online",
+                   "texto": " · ".join(x for x in (o.get("classificacao"), f"lista {o.get('lista')}", f"{float(o.get('confianca') or 0) * 100:.0f}%",
+                                                   o.get("servico"), (o.get("_meta") or {}).get("model")) if x),
+                   "nota": (o.get("motivo") or "") + (f" · 1ª opinião ({antes.get('modelo')}): {antes.get('lista')} "
+                                                       f"{float(antes.get('confianca') or 0) * 100:.0f}%" if antes else "")})
+    tl.sort(key=lambda x: x["at"] or datetime.min.replace(tzinfo=timezone.utc))
+    estado = ("bloqueado (" + ", ".join(listas_atuais) + ")" if [x for x in listas_atuais if x != "para_revisar"]
+              else "em Decisões (fase 5)" if "para_revisar" in listas_atuais
+              else "whitelist (" + ", ".join(wl) + ")" if wl else "aprovado (fora de listas)" if d["revisado_at"] else "em análise")
+    return {"domain": reg, "estado": estado, "classificacao": d["classification"], "categoria": d["category"], "servico": d["topic"],
+            "recomendacao": d["corp_action"], "motivo": d["corp_reason"], "fonte": _FONTE.get(d["classified_by"], d["classified_by"]),
+            "listas": listas_atuais, "whitelist": wl, "feeds": d["ti_signature"] or None, "consultas": d["total_queries"],
+            "fases": {"visto": d["first_seen"], "fase1": d["analyzed_at"], "fase2_whois": d["whois_at"], "fase3_busca": d["web_search_at"],
+                      "fase4_online": d["online_at"], "revisado": d["revisado_at"]},
+            "linha_do_tempo": tl}
+
+
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
 def listas_do_dominio(name: str):
     """Em que listas o domínio está (ele mesmo ou um domínio pai)."""

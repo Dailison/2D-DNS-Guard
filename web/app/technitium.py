@@ -256,6 +256,7 @@ CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividad
                         ("comunicacao", "Comunicação corporativa"), ("financas", "Bancos e finanças"), ("governo", "Governo"),
                         ("infraestrutura", "Infraestrutura e sistemas"), ("seguranca", "Segurança"),
                         ("desenvolvimento", "TI e desenvolvimento"), ("educacao", "Educação"), ("saude", "Saúde"),
+                        ("utilidades", "Utilidades (conversores, PDF, tradutores)"),
                         ("outros_trabalho", "Outros de trabalho")]
 _WL_RE = re.compile(r"/whitelist/([a-z_]+)\.txt$")
 CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas"}   # ⚡ (só destaque visual)

@@ -30,7 +30,8 @@ LISTAS_IA = {
     "doh_dns": "resolvedor DNS público e DNS sobre HTTPS/TLS (dns.google, cloudflare-dns, quad9, nextdns, adguard-dns, opendns)",
     "adware": "adware e software indesejado (PUP): sequestradores de navegador, extensões e 'utilitários' que empurram "
               "propaganda (leitor de PDF, calendário, clima, conversor grátis), falso antivírus/otimizador, mineração de "
-              "cripto no navegador (sem ser golpe confirmado — golpe/malware é ameaca)",
+              "cripto no navegador (sem ser golpe confirmado — golpe/malware é ameaca). Ferramenta online legítima e conhecida "
+              "(Convertio, iLovePDF, Smallpdf, Google Tradutor, calculadoras) NÃO é adware: é nenhuma",
     "adulto": "pornografia, conteúdo sexual, encontros adultos, acompanhantes",
     "apostas": "bets, cassino online, apostas esportivas, loterias e jogos de azar online",
     "jogos": "jogos online, lojas e launchers de games, servidores e fóruns de jogos, cheats",
@@ -42,7 +43,8 @@ LISTAS_IA = {
     "publicidade": "redes de anúncio, rastreamento, analytics, pixels, atribuição de apps",
     "compras": "lojas online, marketplaces, varejo, atacado, supermercado, delivery, cupons (conta como trabalho: compras da empresa)",
     "noticias": "portais de notícias, revistas, fofoca e entretenimento",
-    "pirataria": "torrents, downloads piratas, cracks, IPTV pirata, filmes e séries piratas, conversores de vídeo",
+    "pirataria": "torrents, downloads piratas, cracks, IPTV pirata, filmes e séries piratas, sites que baixam vídeo/música "
+                 "de YouTube e streamings (conversor de ARQUIVOS/PDF legítimo não é pirataria: é nenhuma)",
     "ia_chatbots": "assistentes de IA, chatbots e geradores de texto ou imagem (ChatGPT, Claude, Gemini, Copilot, Perplexity)",
     "nuvem_remoto": "SÓ armazenamento/compartilhamento de ARQUIVOS pessoal (Dropbox, Google Drive, Mega, WeTransfer) e "
                     "acesso remoto a computadores (AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop). Nuvem PARA SISTEMAS "

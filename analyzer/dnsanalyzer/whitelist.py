@@ -33,6 +33,7 @@ CATEGORIAS = {
     "desenvolvimento": "TI e desenvolvimento",
     "educacao": "Educação",
     "saude": "Saúde",
+    "utilidades": "Utilidades (conversores, PDF, tradutores)",
     "outros_trabalho": "Outros de trabalho",
 }
 AUTO_BY = "IA whitelist"

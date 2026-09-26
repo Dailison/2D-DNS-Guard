@@ -267,3 +267,26 @@ def test_whitelist_api(api):
     # pôr numa lista de bloqueio tira da whitelist
     api.post("/listas-lote", headers=H, json={"cats": ["jogos"], "domains": ["erp-manual.com.br"], "by": "op"})
     assert "erp-manual.com.br" not in api.get("/whitelist-dominios", headers=H).json()
+
+
+def test_historico_do_dominio(api):
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, classification, category, topic, classified_by, analyzed_at, online_at, revisado_at, "
+                      "online_resp) VALUES ('hist.com.br', 'TRABALHO', 'produtividade', 'ERP', 'online', now(), now(), now(), %s) RETURNING id",
+                      (Jsonb({"classificacao": "TRABALHO", "lista": "nenhuma", "confianca": 0.95, "servico": "ERP", "motivo": "sistema",
+                              "_meta": {"model": "gemma", "antes": {"modelo": "lite", "lista": "nenhuma", "confianca": 0.9}}}),)).fetchone()["id"]
+        c.execute("INSERT INTO classification_history (domain_id, classification, topic, source) VALUES (%s, 'DESCONHECIDO', 'x', 'llm')", (i,))
+        listas.contexto(c, "op@2d", "teste")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by) VALUES ('produtividade', 'hist.com.br', 'op@2d')")
+        c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'allowed', 'ana@2d')", (i,))
+    h = api.get("/domains/hist.com.br/historico", headers=H).json()
+    assert h["estado"] == "whitelist (produtividade)" and h["whitelist"] == ["produtividade"]
+    titulos = [x["titulo"] for x in h["linha_do_tempo"]]
+    assert "Fase 1 · IA local" in titulos and "Fase 4 · IA online" in titulos and "entrou em wl:produtividade" in titulos
+    assert "decisão global: manter liberado" in titulos
+    f4 = next(x for x in h["linha_do_tempo"] if x["titulo"] == "Fase 4 · IA online")
+    assert "1ª opinião (lite)" in f4["nota"]
+    assert api.get("/domains/nunca-visto.com/historico", headers=H).status_code == 404

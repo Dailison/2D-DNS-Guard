@@ -227,7 +227,8 @@ def test_bloqueio_automatico_e_listas(api):
     assert "jogo-y.com\n" in txt and "cassino" not in txt and txt.startswith("#")
     assert api.get("/listas/xxx.txt").status_code == 404
     r = api.get("/listas", headers=H).json()
-    assert {x["categoria"]: x["total"] for x in r["categorias"]}["apostas"] == 1 and r["auto_24h"] == 2
+    assert {x["categoria"]: x["total"] for x in r["categorias"]}["apostas"] >= 1 and r["auto_24h"] == 2
+    assert "cassino-x.com" in api.get("/listas-dominios", params={"cats": ["apostas"]}, headers=H).json()["apostas"]
     assert api.post("/listas/adulto", json={"domain": "Site-Adulto.com.", "by": "op"}, headers=H).status_code == 200
     assert [x["category"] for x in api.get("/listas-dominio/www.site-adulto.com", headers=H).json()] == ["adulto"]
     assert api.delete("/listas/adulto/site-adulto.com", headers=H).json()["removidos"] == 1
@@ -256,7 +257,8 @@ def test_listas_curadas_so_manual_com_sugestoes(api):
     assert "rede-social-1.com\n" in api.get("/listas/redes_sociais.txt").text
     assert api.get("/listas/redes_sociais/sugestoes", headers=H).json() == []
     j = api.get("/listas-dominios", params={"cats": ["redes_sociais", "jogos", "xx"]}, headers=H).json()
-    assert set(j) == {"redes_sociais", "jogos"} and j["redes_sociais"] == ["rede-social-1.com"]
+    assert set(j) == {"redes_sociais", "jogos"} and "rede-social-1.com" in j["redes_sociais"]
+    assert "rede-liberada.com" not in j["redes_sociais"]
     m = api.get("/listas-dominio/cdn.rede-social-1.com", headers=H).json()
     assert [(x["category"], x["domain"]) for x in m] == [("redes_sociais", "rede-social-1.com")]
     r = {x["categoria"]: x for x in api.get("/listas", headers=H).json()["categorias"]}
@@ -307,3 +309,25 @@ def test_listas_de_liberacao(api):
     assert api.delete(f"/liberacao/{slug}", headers=H).json()["removidas"] == 1
     p = {x["scope"]: x for x in api.get("/policies", headers=H).json()}["tenant:8"]
     assert p["services"] == ["instagram"]                       # apagar a lista tira da política
+
+
+def test_servicos_dentro_das_listas(api):
+    from dnsanalyzer.config import settings
+    ls = {x["slug"]: x for x in api.get("/liberacao", headers=H).json()}
+    assert ls["instagram"]["category"] == "redes_sociais" and ls["roblox"]["category"] == "jogos"
+    assert ls["whatsapp"]["category"] == "mensageiros"
+    if "testclient" not in settings().lists_allowed_ips:
+        settings().lists_allowed_ips.append("testclient")
+    txt = api.get("/listas/redes_sociais.txt").text
+    assert "cdninstagram.com\n" in txt and "snapchat.com\n" in txt              # serviços entram na lista da categoria
+    assert "roblox.com\n" in api.get("/servico/roblox.txt").text
+    r = api.post("/liberacao", json={"name": "Kick", "category": "streaming"}, headers=H); assert r.status_code == 200
+    assert api.post("/liberacao", json={"name": "X", "category": "nada"}, headers=H).status_code == 400
+    assert api.put("/liberacao/kick", json={"name": "Kick.com", "category": None}, headers=H).status_code == 200
+    assert {x["slug"]: x for x in api.get("/liberacao", headers=H).json()}["kick"]["category"] is None
+    assert api.put("/policies/tenant:9", json={"lists": ["streaming"], "services": ["youtube"], "services_blocked": ["tiktok", "youtube"]},
+                   headers=H).status_code == 200
+    p = {x["scope"]: x for x in api.get("/policies", headers=H).json()}["tenant:9"]
+    assert p["services"] == ["youtube"] and p["services_blocked"] == ["tiktok"]        # liberar vence bloquear
+    api.delete("/liberacao/tiktok", headers=H)
+    assert {x["scope"]: x for x in api.get("/policies", headers=H).json()}["tenant:9"]["services_blocked"] == []

@@ -1181,6 +1181,7 @@ def lista_rem(categoria: str, domain: str):
 
 
 # ------------------------------------------------------------------ listas de LIBERAÇÃO (whitelist)
+@app.get("/servico/{slug}.txt", response_class=PlainTextResponse)
 @app.get("/liberacao/{slug}.txt", response_class=PlainTextResponse)
 def liberacao_txt(slug: str, request: Request):
     """Lista de liberação p/ o Technitium (allowListUrls). Sem token; só LISTS_ALLOWED_IPS."""
@@ -1197,13 +1198,14 @@ def liberacao_txt(slug: str, request: Request):
 @app.get("/liberacao", dependencies=[Depends(auth)])
 def liberacao_listas():
     with db.conn() as c:
-        return c.execute("SELECT l.slug, l.name, l.description, l.created_by, l.created_at, "
+        return c.execute("SELECT l.slug, l.name, l.category, l.description, l.created_by, l.created_at, "
                          " (SELECT count(*) FROM allow_list_domains d WHERE d.list_slug = l.slug) AS total "
                          "FROM allow_lists l ORDER BY lower(l.name)").fetchall()
 
 
 class AllowListIn(BaseModel):
     name: str
+    category: Optional[str] = None     # serviço de uma lista de bloqueio; vazio = liberação avulsa
     description: str = ""
     by: str = ""
 
@@ -1218,9 +1220,12 @@ def liberacao_criar(body: AllowListIn):
     slug = re.sub(r"[^a-z0-9]+", "-", unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode().lower()).strip("-")[:40]
     if not slug:
         raise HTTPException(400, "nome inválido")
+    cat = body.category or None
+    if cat and cat not in listas.CATEGORIAS:
+        raise HTTPException(400, "categoria inválida")
     with db.conn() as c:
-        r = c.execute("INSERT INTO allow_lists (slug, name, description, created_by) VALUES (%s, %s, %s, %s) "
-                      "ON CONFLICT (slug) DO NOTHING RETURNING slug", (slug, nome, body.description or None, body.by or None)).fetchone()
+        r = c.execute("INSERT INTO allow_lists (slug, name, category, description, created_by) VALUES (%s, %s, %s, %s, %s) "
+                      "ON CONFLICT (slug) DO NOTHING RETURNING slug", (slug, nome, cat, body.description or None, body.by or None)).fetchone()
     if not r:
         raise HTTPException(409, f"já existe uma lista '{slug}'")
     return {"ok": True, "slug": slug}
@@ -1230,10 +1235,24 @@ def liberacao_criar(body: AllowListIn):
 def liberacao_apagar(slug: str):
     """Apaga a lista e tira ela das políticas que a usavam."""
     with db.conn() as c:
-        c.execute("UPDATE policies SET services = array_remove(services, %s), updated_at = now() WHERE %s = ANY(services)",
-                  (slug, slug))
+        c.execute("UPDATE policies SET services = array_remove(services, %s), "
+                  "services_blocked = array_remove(services_blocked, %s), updated_at = now() "
+                  "WHERE %s = ANY(services) OR %s = ANY(services_blocked)", (slug, slug, slug, slug))
         n = c.execute("DELETE FROM allow_lists WHERE slug=%s", (slug,)).rowcount
     return {"ok": True, "removidas": n}
+
+
+@app.put("/liberacao/{slug}", dependencies=[Depends(auth)])
+def liberacao_editar(slug: str, body: AllowListIn):
+    """Renomeia / muda a categoria do serviço (vazio = liberação avulsa)."""
+    cat = body.category or None
+    if cat and cat not in listas.CATEGORIAS:
+        raise HTTPException(400, "categoria inválida")
+    with db.conn() as c:
+        n = c.execute("UPDATE allow_lists SET name=%s, category=%s WHERE slug=%s", (body.name.strip() or slug, cat, slug)).rowcount
+    if not n:
+        raise HTTPException(404, "serviço inexistente")
+    return {"ok": True}
 
 
 @app.get("/liberacao/{slug}", dependencies=[Depends(auth)])
@@ -1284,12 +1303,13 @@ def _scope_ok(scope: str) -> bool:
 @app.get("/policies", dependencies=[Depends(auth)])
 def policies_list():
     with db.conn() as c:
-        return c.execute("SELECT scope, lists, services, updated_by, updated_at FROM policies ORDER BY scope").fetchall()
+        return c.execute("SELECT scope, lists, services, services_blocked, updated_by, updated_at FROM policies ORDER BY scope").fetchall()
 
 
 class PolicyIn(BaseModel):
     lists: list[str] = []
-    services: list[str] = []
+    services: list[str] = []            # serviços / listas de liberação LIBERADOS
+    services_blocked: list[str] = []    # serviços BLOQUEADOS (sem bloquear a categoria inteira)
     by: str = ""
 
 
@@ -1303,13 +1323,15 @@ def policy_set(scope: str, body: PolicyIn):
         raise HTTPException(400, f"lista desconhecida: {', '.join(ruins)}")
     with db.conn() as c:
         existem = {r["slug"] for r in c.execute("SELECT slug FROM allow_lists").fetchall()}
-        ruins = [x for x in body.services if x not in existem]
+        ruins = [x for x in body.services + body.services_blocked if x not in existem]
         if ruins:
-            raise HTTPException(400, f"lista de liberação desconhecida: {', '.join(ruins)}")
-        c.execute("INSERT INTO policies (scope, lists, services, updated_by) VALUES (%s, %s, %s, %s) "
+            raise HTTPException(400, f"serviço/lista de liberação desconhecido: {', '.join(ruins)}")
+        lib = sorted(set(body.services))
+        blq = sorted(set(body.services_blocked) - set(lib))   # liberar vence bloquear
+        c.execute("INSERT INTO policies (scope, lists, services, services_blocked, updated_by) VALUES (%s, %s, %s, %s, %s) "
                   "ON CONFLICT (scope) DO UPDATE SET lists=EXCLUDED.lists, services=EXCLUDED.services, "
-                  "updated_by=EXCLUDED.updated_by, updated_at=now()",
-                  (scope, sorted(set(body.lists)), sorted(set(body.services)), body.by or None))
+                  "services_blocked=EXCLUDED.services_blocked, updated_by=EXCLUDED.updated_by, updated_at=now()",
+                  (scope, sorted(set(body.lists)), lib, blq, body.by or None))
     return {"ok": True}
 
 

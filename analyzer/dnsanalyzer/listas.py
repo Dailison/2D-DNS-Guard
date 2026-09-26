@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 CATEGORIAS_RISCO = ("jogos", "apostas", "adulto", "vpn_proxy", "ameaca")   # bloqueio automático
 # listas CURADAS à mão (pedido do usuário 2026-09-26): a IA só SUGERE a categoria; uma pessoa
 # confirma e o site entra na lista. Só as de risco (acima) a IA põe sozinha.
-CATEGORIAS_CURADAS = ("redes_sociais", "streaming", "publicidade", "compras", "noticias")
+CATEGORIAS_CURADAS = ("redes_sociais", "mensageiros", "streaming", "publicidade", "compras", "noticias")
 CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado — ver CATEGORIAS_CURADAS)
 # só manual: o que foi bloqueado à mão e não cabe numa categoria (migração dos grupos antigos)
 CATEGORIAS_MANUAIS = ("outros_bloqueios",)
@@ -39,6 +39,11 @@ def itens(c, cat: str) -> list[dict]:
     """Conteúdo da lista: entradas gravadas (bloqueio automático / manual) + as da classificação
     (listas dinâmicas). Sem repetir domínio; a entrada gravada prevalece."""
     rows = c.execute("SELECT domain, added_by, added_at FROM category_lists WHERE category=%s", (cat,)).fetchall()
+    # domínios dos serviços da categoria (Instagram em Redes sociais...) também fazem parte da lista
+    vistos = {r["domain"] for r in rows}
+    rows += [r for r in c.execute(
+        "SELECT d.domain, 'serviço ' || l.name AS added_by, d.added_at FROM allow_list_domains d "
+        "JOIN allow_lists l ON l.slug = d.list_slug WHERE l.category = %s", (cat,)).fetchall() if r["domain"] not in vistos]
     if cat in CATEGORIAS_DINAMICAS:
         vistos = {r["domain"] for r in rows}
         rows += [r for r in c.execute(DINAMICA_SQL, {"cat": cat}).fetchall() if r["domain"] not in vistos]

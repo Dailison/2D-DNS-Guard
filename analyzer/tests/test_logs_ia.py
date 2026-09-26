@@ -233,7 +233,7 @@ def test_bloqueio_automatico_e_listas(api):
     assert api.delete("/listas/adulto/site-adulto.com", headers=H).json()["removidos"] == 1
 
 
-def test_listas_dinamicas_pela_classificacao(api):
+def test_listas_curadas_so_manual_com_sugestoes(api):
     from dnsanalyzer import db
     from dnsanalyzer.config import settings
     with db.conn() as c:
@@ -241,21 +241,38 @@ def test_listas_dinamicas_pela_classificacao(api):
         ids = {}
         for nome, cls in (("rede-social-1.com", "NAO_TRABALHO"), ("rede-liberada.com", "NAO_TRABALHO"),
                           ("rede-ajustada.com", "NAO_TRABALHO"), ("rede-trabalho.com", "TRABALHO")):
-            ids[nome] = c.execute("INSERT INTO domains (name, tld, category, classification, classified_by) "
-                                  "VALUES (%s, 'com', 'redes_sociais', %s, 'catalog') RETURNING id", (nome, cls)).fetchone()["id"]
+            ids[nome] = c.execute("INSERT INTO domains (name, tld, category, classification, classified_by, total_queries) "
+                                  "VALUES (%s, 'com', 'redes_sociais', %s, 'catalog', 5) RETURNING id", (nome, cls)).fetchone()["id"]
         c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'allowed', 'op')",
                   (ids["rede-liberada.com"],))
         c.execute("INSERT INTO tenant_domains (tenant_id, domain_id, first_seen, last_seen, override_classification) "
                   "VALUES (%s, %s, now(), now(), 'TRABALHO')", (t, ids["rede-ajustada.com"]))
     if "testclient" not in settings().lists_allowed_ips:
         settings().lists_allowed_ips.append("testclient")
-    txt = api.get("/listas/redes_sociais.txt").text
-    assert "rede-social-1.com\n" in txt
-    assert "rede-liberada.com" not in txt and "rede-ajustada.com" not in txt and "rede-trabalho.com" not in txt
-    api.post("/listas/redes_sociais", json={"domain": "manual-social.com", "by": "op"}, headers=H)
+    assert "rede-social-1.com" not in api.get("/listas/redes_sociais.txt").text      # IA só sugere
+    sug = [x["domain"] for x in api.get("/listas/redes_sociais/sugestoes", headers=H).json()]
+    assert sug == ["rede-social-1.com"]                                              # liberado/ajustado/trabalho fora
+    api.post("/listas/redes_sociais", json={"domain": "rede-social-1.com", "by": "op"}, headers=H)
+    assert "rede-social-1.com\n" in api.get("/listas/redes_sociais.txt").text
+    assert api.get("/listas/redes_sociais/sugestoes", headers=H).json() == []
     j = api.get("/listas-dominios", params={"cats": ["redes_sociais", "jogos", "xx"]}, headers=H).json()
-    assert set(j) == {"redes_sociais", "jogos"} and {"rede-social-1.com", "manual-social.com"} <= set(j["redes_sociais"])
+    assert set(j) == {"redes_sociais", "jogos"} and j["redes_sociais"] == ["rede-social-1.com"]
     m = api.get("/listas-dominio/cdn.rede-social-1.com", headers=H).json()
-    assert [(x["category"], x["domain"], x["added_by"]) for x in m] == [("redes_sociais", "rede-social-1.com", "catálogo")]
+    assert [(x["category"], x["domain"]) for x in m] == [("redes_sociais", "rede-social-1.com")]
     r = {x["categoria"]: x for x in api.get("/listas", headers=H).json()["categorias"]}
-    assert r["redes_sociais"]["dinamica"] and r["redes_sociais"]["total"] == 2 and not r["jogos"]["dinamica"]
+    assert r["redes_sociais"]["tipo"] == "curada" and r["jogos"]["tipo"] == "auto" and r["outros_bloqueios"]["tipo"] == "manual"
+
+
+def test_politicas(api):
+    pol = {p["scope"]: p for p in api.get("/policies", headers=H).json()}
+    assert pol["default"]["lists"] == ["ameaca", "vpn_proxy", "adulto", "apostas", "jogos"]
+    assert api.put("/policies/tenant:7", json={"lists": ["jogos", "redes_sociais", "jogos"], "services": ["instagram"], "by": "op"},
+                   headers=H).status_code == 200
+    assert api.put("/policies/unit:7:Matriz", json={"lists": ["outros_bloqueios"]}, headers=H).status_code == 200
+    assert api.put("/policies/tenant:7", json={"lists": ["xx"]}, headers=H).status_code == 400
+    assert api.put("/policies/hack", json={"lists": []}, headers=H).status_code == 400
+    pol = {p["scope"]: p for p in api.get("/policies", headers=H).json()}
+    assert pol["tenant:7"]["lists"] == ["jogos", "redes_sociais"] and pol["tenant:7"]["services"] == ["instagram"]
+    assert api.delete("/policies/unit:7:Matriz", headers=H).status_code == 200
+    assert api.delete("/policies/default", headers=H).status_code == 400
+    assert "unit:7:Matriz" not in {p["scope"] for p in api.get("/policies", headers=H).json()}

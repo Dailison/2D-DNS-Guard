@@ -15,14 +15,17 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 CATEGORIAS_RISCO = ("jogos", "apostas", "adulto", "vpn_proxy", "ameaca")   # bloqueio automático
-# listas montadas na hora pela classificação (NAO_TRABALHO na categoria), sem decisão por site:
-# a política (grupo) decide se assina, e libera serviços como exceção (Instagram, Facebook...)
-CATEGORIAS_DINAMICAS = ("redes_sociais", "streaming", "publicidade", "compras", "noticias")
-CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_DINAMICAS
+# listas CURADAS à mão (pedido do usuário 2026-09-26): a IA só SUGERE a categoria; uma pessoa
+# confirma e o site entra na lista. Só as de risco (acima) a IA põe sozinha.
+CATEGORIAS_CURADAS = ("redes_sociais", "streaming", "publicidade", "compras", "noticias")
+CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado — ver CATEGORIAS_CURADAS)
+# só manual: o que foi bloqueado à mão e não cabe numa categoria (migração dos grupos antigos)
+CATEGORIAS_MANUAIS = ("outros_bloqueios",)
+CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_CURADAS + CATEGORIAS_MANUAIS
 AUTO_BY = "bloqueio automático"
 
-# entra na lista dinâmica: classificado NAO_TRABALHO na categoria, sem decisão "manter liberado"
-# (global ou de alguma empresa) e sem ajuste de alguma empresa p/ TRABALHO
+# SUGESTÕES p/ as listas curadas: classificado NAO_TRABALHO na categoria, sem decisão "manter
+# liberado" (global ou de alguma empresa) e sem ajuste de alguma empresa p/ TRABALHO
 DINAMICA_SQL = (
     "SELECT d.name AS domain, CASE WHEN d.classified_by = 'catalog' THEN 'catálogo' ELSE 'classificação da IA' END "
     " AS added_by, d.analyzed_at AS added_at FROM domains d "
@@ -44,6 +47,17 @@ def itens(c, cat: str) -> list[dict]:
 
 def dominios(c, cat: str) -> list[str]:
     return sorted({r["domain"] for r in itens(c, cat)})
+
+
+def sugestoes(c, cat: str, limite: int = 500) -> list[dict]:
+    """O que a IA sugere p/ a lista curada e ainda não está nela (revisão manual)."""
+    if cat not in CATEGORIAS_CURADAS:
+        return []
+    return c.execute(
+        "SELECT x.domain, x.added_at AS analyzed_at, d.total_queries, d.corp_reason FROM (" + DINAMICA_SQL + ") x "
+        "JOIN domains d ON d.name = x.domain WHERE NOT EXISTS (SELECT 1 FROM category_lists l "
+        "WHERE l.category = %(cat)s AND l.domain = x.domain) ORDER BY d.total_queries DESC LIMIT %(lim)s",
+        {"cat": cat, "lim": limite}).fetchall()
 
 # candidatos: recomendação BLOQUEAR, ninguém decidiu, nenhuma empresa ajustou p/ TRABALHO
 CANDIDATOS_SQL = (

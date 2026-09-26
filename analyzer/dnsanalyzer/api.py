@@ -1072,8 +1072,8 @@ def listas_resumo():
         n = {k: len(listas.dominios(c, k)) for k in listas.CATEGORIAS}
         n24 = c.execute("SELECT count(*) AS n FROM category_lists WHERE added_by LIKE %s "
                         "AND added_at > now() - interval '24 hours'", (listas.AUTO_BY + "%",)).fetchone()["n"]
-    return {"categorias": [{"categoria": k, "total": n.get(k, 0), "dinamica": k in listas.CATEGORIAS_DINAMICAS}
-                           for k in listas.CATEGORIAS],
+    return {"categorias": [{"categoria": k, "total": n.get(k, 0), "tipo": "auto" if k in listas.CATEGORIAS_RISCO
+                            else "curada" if k in listas.CATEGORIAS_CURADAS else "manual"} for k in listas.CATEGORIAS],
             "auto": listas.categorias_auto(), "auto_24h": n24}
 
 
@@ -1092,6 +1092,13 @@ def lista_itens(categoria: str, q: Optional[str] = None, limit: int = Query(500,
         rows = [r for r in listas.itens(c, categoria) if not q or q.lower() in r["domain"]]
     rows.sort(key=lambda r: r["added_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     return rows[:limit]
+
+
+@app.get("/listas/{categoria}/sugestoes", dependencies=[Depends(auth)])
+def lista_sugestoes(categoria: str, limit: int = Query(500, le=5000)):
+    """Sugestões da IA p/ uma lista curada (redes sociais, streaming...): revisão manual."""
+    with db.conn() as c:
+        return listas.sugestoes(c, categoria, limit)
 
 
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
@@ -1135,6 +1142,50 @@ def lista_rem(categoria: str, domain: str):
         n = c.execute("DELETE FROM category_lists WHERE category=%s AND domain=%s",
                       (categoria, domain.strip().lower().rstrip("."))).rowcount
     return {"ok": True, "removidos": n}
+
+
+# ------------------------------------------------------------------ políticas (empresa -> listas)
+def _scope_ok(scope: str) -> bool:
+    import re
+    return scope == "default" or bool(re.fullmatch(r"tenant:\d+|unit:\d+:.{1,120}", scope))
+
+
+@app.get("/policies", dependencies=[Depends(auth)])
+def policies_list():
+    with db.conn() as c:
+        return c.execute("SELECT scope, lists, services, updated_by, updated_at FROM policies ORDER BY scope").fetchall()
+
+
+class PolicyIn(BaseModel):
+    lists: list[str] = []
+    services: list[str] = []
+    by: str = ""
+
+
+@app.put("/policies/{scope}", dependencies=[Depends(auth)])
+def policy_set(scope: str, body: PolicyIn):
+    """Grava a política do escopo (empresa, unidade ou default). Lista desconhecida = 400."""
+    if not _scope_ok(scope):
+        raise HTTPException(400, "escopo inválido")
+    ruins = [x for x in body.lists if x not in listas.CATEGORIAS]
+    if ruins:
+        raise HTTPException(400, f"lista desconhecida: {', '.join(ruins)}")
+    with db.conn() as c:
+        c.execute("INSERT INTO policies (scope, lists, services, updated_by) VALUES (%s, %s, %s, %s) "
+                  "ON CONFLICT (scope) DO UPDATE SET lists=EXCLUDED.lists, services=EXCLUDED.services, "
+                  "updated_by=EXCLUDED.updated_by, updated_at=now()",
+                  (scope, sorted(set(body.lists)), sorted(set(body.services)), body.by or None))
+    return {"ok": True}
+
+
+@app.delete("/policies/{scope}", dependencies=[Depends(auth)])
+def policy_delete(scope: str):
+    """Tira a exceção de uma unidade (volta a valer a da empresa). O default não se apaga."""
+    if scope == "default" or not _scope_ok(scope):
+        raise HTTPException(400, "escopo inválido")
+    with db.conn() as c:
+        c.execute("DELETE FROM policies WHERE scope=%s", (scope,))
+    return {"ok": True}
 
 
 @app.get("/auto-block/candidates", dependencies=[Depends(auth)])

@@ -83,6 +83,7 @@ class Settings:
     web_search_url: str
     web_search_results: int
     web_search_min_interval: int
+    web_search_before_llm: bool
 
     reanalyze_days: int
     retention_days: int
@@ -152,6 +153,9 @@ def load_settings() -> Settings:
         web_search_results=_int("WEB_SEARCH_RESULTS", 6),
         # buscadores gratuitos bloqueiam rajadas (~10-15 buscas seguidas): intervalo mínimo (s)
         web_search_min_interval=_int("WEB_SEARCH_MIN_INTERVAL", 20),
+        # busca ANTES da IA na etapa 1 (desligada a pedido do usuário em 2026-09-26: a IA analisa
+        # primeiro; o que ela não reconhecer vai p/ Decisões e a etapa 2 busca quando a fila zerar)
+        web_search_before_llm=_bool(os.environ.get("WEB_SEARCH_BEFORE_LLM"), False),
         reanalyze_days=_int("REANALYZE_DAYS", 30),
         retention_days=_int("RETENTION_DAYS", 180),
         classify_batch=_int("CLASSIFY_BATCH", 10),

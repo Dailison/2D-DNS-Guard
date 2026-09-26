@@ -237,7 +237,7 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
                 c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
                 event("search_done", name, did, drow["classification"], detail="etapa 2: nenhum resultado na web")
                 return "done"
-        elif _buscar_antes(dossier):
+        elif cfg.web_search_before_llm and _buscar_antes(dossier):
             # fora do top 1M e sem Wikidata/certificado: a IA sozinha "não reconhece" em ~98%
             # dos casos. Busca ANTES e chama a IA uma vez só (ou nenhuma, se não há nada na web).
             try:

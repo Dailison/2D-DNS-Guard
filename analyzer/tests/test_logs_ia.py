@@ -231,3 +231,31 @@ def test_bloqueio_automatico_e_listas(api):
     assert api.post("/listas/adulto", json={"domain": "Site-Adulto.com.", "by": "op"}, headers=H).status_code == 200
     assert [x["category"] for x in api.get("/listas-dominio/www.site-adulto.com", headers=H).json()] == ["adulto"]
     assert api.delete("/listas/adulto/site-adulto.com", headers=H).json()["removidos"] == 1
+
+
+def test_listas_dinamicas_pela_classificacao(api):
+    from dnsanalyzer import db
+    from dnsanalyzer.config import settings
+    with db.conn() as c:
+        t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
+        ids = {}
+        for nome, cls in (("rede-social-1.com", "NAO_TRABALHO"), ("rede-liberada.com", "NAO_TRABALHO"),
+                          ("rede-ajustada.com", "NAO_TRABALHO"), ("rede-trabalho.com", "TRABALHO")):
+            ids[nome] = c.execute("INSERT INTO domains (name, tld, category, classification, classified_by) "
+                                  "VALUES (%s, 'com', 'redes_sociais', %s, 'catalog') RETURNING id", (nome, cls)).fetchone()["id"]
+        c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'allowed', 'op')",
+                  (ids["rede-liberada.com"],))
+        c.execute("INSERT INTO tenant_domains (tenant_id, domain_id, first_seen, last_seen, override_classification) "
+                  "VALUES (%s, %s, now(), now(), 'TRABALHO')", (t, ids["rede-ajustada.com"]))
+    if "testclient" not in settings().lists_allowed_ips:
+        settings().lists_allowed_ips.append("testclient")
+    txt = api.get("/listas/redes_sociais.txt").text
+    assert "rede-social-1.com\n" in txt
+    assert "rede-liberada.com" not in txt and "rede-ajustada.com" not in txt and "rede-trabalho.com" not in txt
+    api.post("/listas/redes_sociais", json={"domain": "manual-social.com", "by": "op"}, headers=H)
+    j = api.get("/listas-dominios", params={"cats": ["redes_sociais", "jogos", "xx"]}, headers=H).json()
+    assert set(j) == {"redes_sociais", "jogos"} and {"rede-social-1.com", "manual-social.com"} <= set(j["redes_sociais"])
+    m = api.get("/listas-dominio/cdn.rede-social-1.com", headers=H).json()
+    assert [(x["category"], x["domain"], x["added_by"]) for x in m] == [("redes_sociais", "rede-social-1.com", "catálogo")]
+    r = {x["categoria"]: x for x in api.get("/listas", headers=H).json()["categorias"]}
+    assert r["redes_sociais"]["dinamica"] and r["redes_sociais"]["total"] == 2 and not r["jogos"]["dinamica"]

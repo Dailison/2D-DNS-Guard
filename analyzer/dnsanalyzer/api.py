@@ -1062,19 +1062,26 @@ def lista_txt(categoria: str, request: Request):
     if categoria not in listas.CATEGORIAS:
         raise HTTPException(404, "categoria sem lista")
     with db.conn() as c:
-        rows = c.execute("SELECT domain FROM category_lists WHERE category=%s ORDER BY domain", (categoria,)).fetchall()
-    return f"# 2D DNS Guard - lista {categoria} ({len(rows)} domínios)\n" + "".join(r["domain"] + "\n" for r in rows)
+        doms = listas.dominios(c, categoria)
+    return f"# 2D DNS Guard - lista {categoria} ({len(doms)} domínios)\n" + "".join(d + "\n" for d in doms)
 
 
 @app.get("/listas", dependencies=[Depends(auth)])
 def listas_resumo():
     with db.conn() as c:
-        n = {r["category"]: r["n"] for r in c.execute(
-            "SELECT category, count(*) AS n FROM category_lists GROUP BY 1").fetchall()}
+        n = {k: len(listas.dominios(c, k)) for k in listas.CATEGORIAS}
         n24 = c.execute("SELECT count(*) AS n FROM category_lists WHERE added_by LIKE %s "
                         "AND added_at > now() - interval '24 hours'", (listas.AUTO_BY + "%",)).fetchone()["n"]
-    return {"categorias": [{"categoria": k, "total": n.get(k, 0)} for k in listas.CATEGORIAS],
+    return {"categorias": [{"categoria": k, "total": n.get(k, 0), "dinamica": k in listas.CATEGORIAS_DINAMICAS}
+                           for k in listas.CATEGORIAS],
             "auto": listas.categorias_auto(), "auto_24h": n24}
+
+
+@app.get("/listas-dominios", dependencies=[Depends(auth)])
+def listas_dominios(cats: list[str] = Query(default=[])):
+    """{categoria: [domínios]} de várias listas numa chamada (índice de bloqueio do console)."""
+    with db.conn() as c:
+        return {k: listas.dominios(c, k) for k in cats if k in listas.CATEGORIAS}
 
 
 @app.get("/listas/{categoria}", dependencies=[Depends(auth)])
@@ -1082,9 +1089,9 @@ def lista_itens(categoria: str, q: Optional[str] = None, limit: int = Query(500,
     if categoria not in listas.CATEGORIAS:
         raise HTTPException(404, "categoria sem lista")
     with db.conn() as c:
-        return c.execute("SELECT domain, added_by, added_at FROM category_lists WHERE category=%s "
-                         "AND (%s::text IS NULL OR domain LIKE %s) ORDER BY added_at DESC LIMIT %s",
-                         (categoria, q, f"%{(q or '').lower()}%", limit)).fetchall()
+        rows = [r for r in listas.itens(c, categoria) if not q or q.lower() in r["domain"]]
+    rows.sort(key=lambda r: r["added_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return rows[:limit]
 
 
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
@@ -1094,8 +1101,14 @@ def listas_do_dominio(name: str):
     parts = n.split(".")
     cands = [".".join(parts[i:]) for i in range(len(parts) - 1)]
     with db.conn() as c:
-        return c.execute("SELECT category, domain, added_by, added_at FROM category_lists WHERE domain = ANY(%s)",
+        rows = c.execute("SELECT category, domain, added_by, added_at FROM category_lists WHERE domain = ANY(%s)",
                          (cands,)).fetchall()
+        vistos = {(r["category"], r["domain"]) for r in rows}
+        for cat in listas.CATEGORIAS_DINAMICAS:
+            rows += [{"category": cat, **r} for r in c.execute(
+                listas.DINAMICA_SQL + " AND d.name = ANY(%(cands)s)", {"cat": cat, "cands": cands}).fetchall()
+                     if (cat, r["domain"]) not in vistos]
+        return rows
 
 
 class ListaIn(BaseModel):

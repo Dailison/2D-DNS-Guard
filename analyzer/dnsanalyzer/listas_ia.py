@@ -46,7 +46,8 @@ LISTAS_IA = {
 NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
 # o site precisa ser coerente com a classificação principal p/ entrar sozinho (senão: Para revisar)
-_EXIGE_NAO_TRABALHO = {"vpn_proxy", "adulto", "apostas", "jogos", "redes_sociais", "streaming", "publicidade", "pirataria"}
+_EXIGE_NAO_TRABALHO = {"vpn_proxy", "adulto", "apostas", "jogos", "redes_sociais", "streaming", "publicidade", "pirataria",
+                       "compras", "noticias"}   # site TRABALHO nessas = contradição -> Para revisar
 
 SYSTEM = """Você organiza sites em LISTAS de filtro de DNS para empresas brasileiras.
 A lista diz O QUE O SITE É — não se ele é de trabalho (cada empresa escolhe depois quais listas bloqueia).

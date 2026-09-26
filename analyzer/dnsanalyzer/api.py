@@ -12,11 +12,12 @@ import ipaddress
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
-from . import __version__, db
+from . import __version__, db, listas
 from .config import settings
 from .features import analyze_name
 from .llm import OllamaClient
@@ -1049,6 +1050,85 @@ def charts(start: datetime, end: datetime, tid: int = 0, cls: list[str] = Query(
     return {"granularidade": gran, "serie": serie, "por_classificacao": limpa(por_cls),
             "por_categoria": limpa(por_cat), "por_empresa": limpa(por_emp), "top_dominios": top_dom,
             "totais": tot, "coletado_ate": cursor}
+
+
+# ------------------------------------------------------------------ listas por categoria + bloqueio automático
+@app.get("/listas/{categoria}.txt", response_class=PlainTextResponse)
+def lista_txt(categoria: str, request: Request):
+    """Lista publicada p/ o Technitium assinar (blockListUrls): 1 domínio por linha. Sem token
+    (o Technitium não manda cabeçalho); só os IPs de LISTS_ALLOWED_IPS."""
+    if request.client is None or request.client.host not in settings().lists_allowed_ips:
+        raise HTTPException(403, "IP sem acesso às listas")
+    if categoria not in listas.CATEGORIAS:
+        raise HTTPException(404, "categoria sem lista")
+    with db.conn() as c:
+        rows = c.execute("SELECT domain FROM category_lists WHERE category=%s ORDER BY domain", (categoria,)).fetchall()
+    return f"# 2D DNS Guard - lista {categoria} ({len(rows)} domínios)\n" + "".join(r["domain"] + "\n" for r in rows)
+
+
+@app.get("/listas", dependencies=[Depends(auth)])
+def listas_resumo():
+    with db.conn() as c:
+        n = {r["category"]: r["n"] for r in c.execute(
+            "SELECT category, count(*) AS n FROM category_lists GROUP BY 1").fetchall()}
+        n24 = c.execute("SELECT count(*) AS n FROM category_lists WHERE added_by LIKE %s "
+                        "AND added_at > now() - interval '24 hours'", (listas.AUTO_BY + "%",)).fetchone()["n"]
+    return {"categorias": [{"categoria": k, "total": n.get(k, 0)} for k in listas.CATEGORIAS],
+            "auto": listas.categorias_auto(), "auto_24h": n24}
+
+
+@app.get("/listas/{categoria}", dependencies=[Depends(auth)])
+def lista_itens(categoria: str, q: Optional[str] = None, limit: int = Query(500, le=20000)):
+    if categoria not in listas.CATEGORIAS:
+        raise HTTPException(404, "categoria sem lista")
+    with db.conn() as c:
+        return c.execute("SELECT domain, added_by, added_at FROM category_lists WHERE category=%s "
+                         "AND (%s::text IS NULL OR domain LIKE %s) ORDER BY added_at DESC LIMIT %s",
+                         (categoria, q, f"%{(q or '').lower()}%", limit)).fetchall()
+
+
+@app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
+def listas_do_dominio(name: str):
+    """Em que listas o domínio está (ele mesmo ou um domínio pai)."""
+    n = name.strip().lower().rstrip(".")
+    parts = n.split(".")
+    cands = [".".join(parts[i:]) for i in range(len(parts) - 1)]
+    with db.conn() as c:
+        return c.execute("SELECT category, domain, added_by, added_at FROM category_lists WHERE domain = ANY(%s)",
+                         (cands,)).fetchall()
+
+
+class ListaIn(BaseModel):
+    domain: str
+    by: str = ""
+
+
+@app.post("/listas/{categoria}", dependencies=[Depends(auth)])
+def lista_add(categoria: str, body: ListaIn):
+    if categoria not in listas.CATEGORIAS:
+        raise HTTPException(404, "categoria sem lista")
+    d = body.domain.strip().lower().rstrip(".")
+    if not d or "." not in d:
+        raise HTTPException(400, "domínio inválido")
+    with db.conn() as c:
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                  (categoria, d, body.by or None))
+    return {"ok": True}
+
+
+@app.delete("/listas/{categoria}/{domain}", dependencies=[Depends(auth)])
+def lista_rem(categoria: str, domain: str):
+    with db.conn() as c:
+        n = c.execute("DELETE FROM category_lists WHERE category=%s AND domain=%s",
+                      (categoria, domain.strip().lower().rstrip("."))).rowcount
+    return {"ok": True, "removidos": n}
+
+
+@app.get("/auto-block/candidates", dependencies=[Depends(auth)])
+def auto_block_candidates(limit: int = Query(300, le=2000)):
+    """O que o bloqueio automático vai colocar nas listas no próximo ciclo."""
+    with db.conn() as c:
+        return listas.candidatos(c, limite=limit)
 
 
 # ------------------------------------------------------------------ configuração dos grupos (console)

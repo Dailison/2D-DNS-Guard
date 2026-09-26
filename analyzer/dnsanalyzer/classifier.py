@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, db, enrich, ti, webintel, whois
+from . import catalog, db, enrich, listas, ti, webintel, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -499,6 +499,7 @@ def run_forever(stop=lambda: False) -> None:
         log.info("reforço da IA: %s (%d análises simultâneas cada)", ", ".join(cfg.ollama_extra_urls),
                  cfg.llm_extra_workers)
     last_stale = 0.0
+    last_auto = 0.0
     backoff = 0
     reforco = _Reforco(client)
     cliente_etapa2 = reforco.cliente   # etapa 2 (busca na web + IA) no reforço com GPU se no ar
@@ -514,6 +515,13 @@ def run_forever(stop=lambda: False) -> None:
             n = phase_a()
             if n:
                 log.info("fase A (regras): %d domínio(s)", n)
+            if time.monotonic() - last_auto > 300:   # bloqueio automático -> listas por categoria
+                last_auto = time.monotonic()
+                with db.conn() as c:
+                    feitos = listas.bloquear_auto(c)
+                if feitos:
+                    event("auto_block", detail=f"{len(feitos)} site(s) nas listas de bloqueio: " + ", ".join(
+                        f"{r['name']} ({r['category']})" for r in feitos[:12]) + (" …" if len(feitos) > 12 else ""))
             if time.monotonic() - last_stale > 3600:
                 m = reanalyze_stale(cfg.reanalyze_days)
                 if m:

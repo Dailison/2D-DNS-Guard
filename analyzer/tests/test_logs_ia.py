@@ -198,3 +198,36 @@ def test_etapa3_em_paralelo_e_br_primeiro(api):
         a = classifier._claim_etapa3(c)       # não espera a busca na web (web_search_at NULL)
         b = classifier._claim_etapa3(c)
         assert [a["name"], b["name"]] == ["empresa-exemplo.com.br", "sem-busca-ainda.com"]
+
+
+def test_bloqueio_automatico_e_listas(api):
+    from dnsanalyzer import db, listas
+    from dnsanalyzer.config import settings
+    with db.conn() as c:
+        ids = {}
+        for nome, cat, corp, cls in (("cassino-x.com", "apostas", "BLOQUEAR", "NAO_TRABALHO"),
+                                     ("jogo-y.com", "jogos", "BLOQUEAR", "NAO_TRABALHO"),
+                                     ("jogo-liberado.com", "jogos", "BLOQUEAR", "NAO_TRABALHO"),
+                                     ("jogo-revisar.com", "jogos", "REVISAR", "NAO_TRABALHO"),
+                                     ("noticia-z.com", "noticias", "BLOQUEAR", "NAO_TRABALHO")):
+            ids[nome] = c.execute("INSERT INTO domains (name, tld, category, corp_action, classification, classified_by) "
+                                  "VALUES (%s, 'com', %s, %s, %s, 'llm') RETURNING id", (nome, cat, corp, cls)).fetchone()["id"]
+        c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'allowed', 'op')",
+                  (ids["jogo-liberado.com"],))
+    with db.conn() as c:
+        feitos = {r["name"] for r in listas.bloquear_auto(c)}
+    assert feitos == {"cassino-x.com", "jogo-y.com"}      # decidido, REVISAR e outra categoria ficam de fora
+    with db.conn() as c:
+        assert listas.bloquear_auto(c) == []                # já decidido (bloqueio automático) não repete
+        g = c.execute("SELECT reviewed_by FROM global_reviews WHERE domain_id=%s", (ids["jogo-y.com"],)).fetchone()
+        assert g["reviewed_by"] == "bloqueio automático (jogos)"
+    assert api.get("/listas/jogos.txt").status_code == 403  # IP fora de LISTS_ALLOWED_IPS
+    settings().lists_allowed_ips.append("testclient")
+    txt = api.get("/listas/jogos.txt").text
+    assert "jogo-y.com\n" in txt and "cassino" not in txt and txt.startswith("#")
+    assert api.get("/listas/xxx.txt").status_code == 404
+    r = api.get("/listas", headers=H).json()
+    assert {x["categoria"]: x["total"] for x in r["categorias"]}["apostas"] == 1 and r["auto_24h"] == 2
+    assert api.post("/listas/adulto", json={"domain": "Site-Adulto.com.", "by": "op"}, headers=H).status_code == 200
+    assert [x["category"] for x in api.get("/listas-dominio/www.site-adulto.com", headers=H).json()] == ["adulto"]
+    assert api.delete("/listas/adulto/site-adulto.com", headers=H).json()["removidos"] == 1

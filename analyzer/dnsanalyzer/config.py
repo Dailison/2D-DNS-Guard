@@ -86,6 +86,8 @@ class Settings:
     web_search_before_llm: bool
     whois_enabled: bool
     whois_workers: int
+    auto_block_categories: list[str]
+    lists_allowed_ips: list[str]
 
     reanalyze_days: int
     retention_days: int
@@ -162,6 +164,11 @@ def load_settings() -> Settings:
         # em paralelo com a etapa 2; cada serviço tem intervalo mínimo próprio (registro.br 2 s,
         # rdap.org 1,5 s, BrasilAPI 1 s), então 2 workers já ocupam os três
         whois_workers=max(_int("WHOIS_WORKERS", 2), 1),
+        # bloqueio automático (pedido do usuário 2026-09-26): categorias de baixo risco de impacto,
+        # recomendação BLOQUEAR, sem decisão -> lista da categoria (vazio = desligado)
+        auto_block_categories=_list("AUTO_BLOCK_CATEGORIES", "jogos,apostas,adulto,vpn_proxy,ameaca"),
+        # quem pode baixar /listas/<categoria>.txt sem token (o Technitium)
+        lists_allowed_ips=_list("LISTS_ALLOWED_IPS", "10.100.10.15,127.0.0.1"),
         reanalyze_days=_int("REANALYZE_DAYS", 30),
         retention_days=_int("RETENTION_DAYS", 180),
         classify_batch=_int("CLASSIFY_BATCH", 10),

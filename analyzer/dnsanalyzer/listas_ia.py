@@ -230,8 +230,8 @@ def aplicar(c, limite: int = 3000) -> dict:
         da_ia = {k for k, v in em.items() if v.startswith(AUTO_BY)}              # postas pela IA
         moveis = {PARA_REVISAR, OUTROS} | da_ia
         fixas = set(em) - moveis                                                 # pessoa/migração/Sistema
-        certo = (r["lista_conf"] or 0) >= cfg.lista_confianca_min
         online = (r["lista_fonte"] or "").startswith("online")
+        certo = (r["lista_conf"] or 0) >= (cfg.online_confianca_min if online else cfg.lista_confianca_min)
         cls = r["cls_online"] if online and r["cls_online"] else r["classification"]
         humano_contra = bool(cat) and cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
 
@@ -256,7 +256,10 @@ def aplicar(c, limite: int = 3000) -> dict:
             continue
         if not cat:
             continue
-        if certo and _coerente(cat, cls, r["category"]):
+        # a lista diz O QUE O SITE É (não se é de trabalho): p/ a IA online só Ameaças segue manual (sem lista
+        # de ameaça confirmando); as travas de coerência completas valem p/ a IA local (modelo pequeno)
+        coerente = (cat != "ameaca" or cls == "MALICIOSO") if online else _coerente(cat, cls, r["category"])
+        if certo and coerente:
             if cat not in em:
                 por = f"{AUTO_BY} ({cat})"
                 c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",

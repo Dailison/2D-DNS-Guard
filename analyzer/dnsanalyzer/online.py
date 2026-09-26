@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import db
+from . import db, webintel
 from .config import settings
 from .listas_ia import LISTAS_IA, NENHUMA, _contexto, salvar
 
@@ -45,8 +45,13 @@ Para o domínio, diga:
   NAO_TRABALHO (lazer: redes sociais, streaming, jogos, apostas, adulto, pirataria, publicidade), SUSPEITO, MALICIOSO
   (só com indício forte de golpe/malware) ou DESCONHECIDO;
 - "categoria": uma das categorias de site abaixo;
-- "lista": a lista de filtro a que o site pertence (O QUE ELE É, não se é de trabalho; domínios técnicos de um serviço vão
-  para a lista do serviço) ou "nenhuma";
+- "lista": a lista de filtro a que o site pertence — O QUE ELE É, não se é de trabalho (uma loja é "compras" mesmo que
+  empresas comprem nela; um CMP de cookies é "publicidade" mesmo sendo compliance). DOMÍNIOS TÉCNICOS (CDN, arquivos
+  estáticos, imagens, API, app) DE UM SERVIÇO vão para a lista DO SERVIÇO: primeiro descubra de quem é o domínio
+  (ex.: slatic.net = arquivos da Lazada = compras; alicdn.com = Alibaba/AliExpress = compras; mlstatic.com = Mercado Livre =
+  compras; fbcdn.net = Facebook = redes_sociais; ytimg.com = YouTube = streaming; akamaihd.net de um jogo = jogos).
+  "nenhuma" só para ferramentas de trabalho, bancos, governo, fornecedores e infraestrutura GENÉRICA (Cloudflare, Akamai,
+  AWS, Azure, Google Cloud, certificados, atualizações de sistema);
 - "confianca": 1.0 só se tem certeza; 0.7 provável; 0.4 ou menos se está chutando;
 - "motivo": uma frase.
 
@@ -143,7 +148,7 @@ _FASE = {"llm": "fase 1 (IA local)", "web": "fase 3 (busca na web + IA local)", 
          "catalog": "catálogo", "rules": "regras", "internal": "interno", "manual": "manual"}
 
 
-def contexto_completo(d: dict, limite: int = 7000) -> str:
+def contexto_completo(d: dict, limite: int = 8000) -> str:
     """Tudo o que as fases 1-3 juntaram do domínio (p/ a IA online decidir melhor): resultado atual da IA
     local, razões, TODAS as evidências (WHOIS, busca na web, página, catálogo, popularidade…) e o histórico."""
     with db.conn() as c:
@@ -166,6 +171,10 @@ def contexto_completo(d: dict, limite: int = 7000) -> str:
     if ev:
         L.append("Evidências coletadas (fases 1 a 3):")
         L += [f"- {_KIND.get(e['kind'], e['kind'])}: {e['text'][:900]}" for e in ev]
+    busca = d.get("_busca") or []
+    if busca and not any(e.get("kind") == "websearch" for e in ev):
+        L.append("Busca na web feita agora (texto de terceiros, pista — não prova):")
+        L += [f"- {x.get('title') or ''} — {x.get('snippet') or ''} ({x.get('host') or ''})" for x in busca[:6]]
     if hist:
         L.append("Histórico de classificações (mais recente primeiro):")
         L += [f"- {h['created_at']:%d/%m %H:%M} {_FASE.get(h['source'], h['source'] or '?')}: {h['classification'] or '—'}"
@@ -257,7 +266,7 @@ def _certo(obj: dict) -> bool:
         conf = float(obj.get("confianca") or 0)
     except (TypeError, ValueError):
         return False
-    return conf >= settings().lista_confianca_min and (obj.get("lista") in LISTAS_IA or bool(obj.get("reconhecido")))
+    return conf >= settings().online_confianca_min and (obj.get("lista") in LISTAS_IA or bool(obj.get("reconhecido")))
 
 
 def _buscas_no_mes(c) -> int:
@@ -282,8 +291,9 @@ def _consultar(nivel, d, categorias, buscar) -> tuple[dict, dict] | None:
 
 def fase(categorias: list[str]) -> str:
     """Uma consulta à IA online, por níveis (cada modelo com a sua cota do plano grátis):
-    1 volume (flash-lite 3.5 -> 3.1 -> Gemma 4 31B); 2 reforço sem certeza (3.8 flash); 3 busca no Google
-    para desconhecido que seguiu desconhecido (2.5 flash / flash-lite: únicos com busca no plano grátis).
+    1 volume (flash-lite 3.5 -> 3.1); 2 segunda opinião, quando o volume não tem certeza ou discorda da IA
+    local (Gemma 4 31B -> 3.8 flash; vale a resposta do modelo maior); 3 busca no Google (desligada nesta
+    conta). Sem busca das fases anteriores, faz uma busca na web (SearXNG) antes, p/ dar contexto.
     'idle' = nada na fila; 'unavailable' = sem chave/cota/fora."""
     if not habilitado():
         return "idle"
@@ -294,12 +304,23 @@ def fase(categorias: list[str]) -> str:
                        and _buscas_no_mes(c) < cfg.gemini_grounding_month)
     if not d:
         return "idle"
+    if cfg.web_search_url:   # sem busca das fases anteriores: busca agora (SearXNG; cache) p/ dar contexto
+        try:
+            with db.conn() as c:
+                d["_busca"] = webintel.search(c, d["name"], fetch=True, wait=True)
+        except Exception as e:  # noqa: BLE001 — sem busca a IA online segue com o que tem
+            log.info("busca da fase 4 indisponível p/ %s: %s", d["name"], e)
     vol, reforco, busca = niveis()
     obj = meta = None
     for nivel, buscar in ((vol, False), (reforco, False), (busca if pode_buscar else [], True)):
-        if obj is not None and _certo(obj):
+        # próximo nível (modelo maior) se não há resposta, se ela não tem certeza ou se DISCORDA da IA local
+        if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")):
+            break
+        if obj is not None and meta.get("nivel_reforco") and nivel is not busca:
             break
         r = _consultar(nivel, d, categorias, buscar)
+        if r and nivel is reforco:
+            r[1]["nivel_reforco"] = True
         if r:
             if obj is not None:
                 r[1]["antes"] = {"modelo": meta.get("model"), "lista": obj.get("lista"), "confianca": obj.get("confianca")}
@@ -326,7 +347,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     salvar(c, d["id"], lista, conf, motivo, servico, fonte)
     c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, online_resp = %s "
               "WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
-    reconhecido = bool(obj.get("reconhecido")) and cls != "DESCONHECIDO" and conf >= settings().lista_confianca_min
+    reconhecido = bool(obj.get("reconhecido")) and cls != "DESCONHECIDO" and conf >= settings().online_confianca_min
     if d["classification"] == "DESCONHECIDO" and reconhecido:
         razoes = [{"evidence_id": "E0", "text": f"IA online ({meta.get('model')}): {servico} — {motivo}"[:400], "by": "online"}]
         c.execute("UPDATE domains SET classification = %s, category = COALESCE(%s, category), topic = %s, confidence = %s, "

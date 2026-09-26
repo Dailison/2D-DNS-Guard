@@ -99,6 +99,7 @@ class Settings:
     auto_block_categories: list[str]
     lista_ia_enabled: bool
     lista_confianca_min: float
+    online_confianca_min: float
     online_enabled: bool
     online_workers: int
     gemini_api_key: str
@@ -189,14 +190,17 @@ def load_settings() -> Settings:
         auto_block_categories=_list("AUTO_BLOCK_CATEGORIES", "jogos,apostas,adulto,vpn_proxy,ameaca"),
         lista_ia_enabled=_bool(os.environ.get("LISTA_IA_ENABLED"), True),   # etapa "lista" (qual lista de bloqueio)
         lista_confianca_min=float(os.environ.get("LISTA_CONFIANCA_MIN") or 0.9),
+        # a IA online responde 0,9 quando sabe e 0,8 p/ "provável" (bem calibrada p/ lista); a local exige 0,9
+        online_confianca_min=float(os.environ.get("ONLINE_CONFIANCA_MIN") or 0.8),
         online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 4 (só com GEMINI_API_KEY)
         online_workers=max(_int("ONLINE_WORKERS", 6), 1),   # consultas simultâneas (Gemma é lento; a cota é por modelo)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
         # plano grátis desta conta (AI Studio, 2026-09-26) — "modelo:rpm:rpd", na ordem de uso:
         # volume: 3.5/3.1 Flash-Lite 15/min 500/dia, Gemma 4 31B 30/min 14.400/dia (lento: ~40-75 s);
         # reforço: 3.8 Flash 5/min 20/dia
-        gemini_modelos=_modelos("GEMINI_MODELS", "gemini-3.5-flash-lite:14:480,gemini-3.1-flash-lite:14:480,gemma-4-31b-it:28:14000"),
-        gemini_reforco=_modelos("GEMINI_ESCALATE_MODELS", "gemini-3.8-flash:5:18"),
+        gemini_modelos=_modelos("GEMINI_MODELS", "gemini-3.5-flash-lite:14:480,gemini-3.1-flash-lite:14:480"),
+        # segunda opinião (sem certeza/discorda da IA local; também quando o volume esgota a cota do dia)
+        gemini_reforco=_modelos("GEMINI_ESCALATE_MODELS", "gemma-4-31b-it:28:14000,gemini-3.8-flash:5:18"),
         # busca no Google (grounding): indisponível nesta conta (2.5 fechado p/ contas novas; 3.x = 0/dia) —
         # a IA online avalia o que a fase 3 (busca na web) já achou. Ex.: GEMINI_SEARCH_MODELS=gemini-2.5-flash:5:18
         gemini_busca=_modelos("GEMINI_SEARCH_MODELS", ""),

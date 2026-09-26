@@ -270,7 +270,9 @@ def grupo_da_rede(cidr, ngm):
 CATEGORIAS_LISTA = [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("adulto", "Conteúdo adulto"),
                     ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"), ("mensageiros", "Mensageiros"),
                     ("streaming", "Vídeo e streaming"), ("publicidade", "Publicidade e rastreamento"),
-                    ("compras", "Compras"), ("noticias", "Notícias"), ("outros_bloqueios", "Outros bloqueios")]
+                    ("compras", "Compras"), ("noticias", "Notícias"), ("infra_bloqueio", "Infraestrutura (DoH, DNS, CDN)"),
+                    ("outros_bloqueios", "Outros bloqueios"),
+                    ("para_revisar", "Para revisar")]
 CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "adulto", "apostas", "jogos"}   # bloqueio automático
 
 # Serviços que uma política pode LIBERAR como exceção (vai p/ o "allowed" do grupo, que vence

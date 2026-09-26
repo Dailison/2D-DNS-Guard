@@ -1136,6 +1136,42 @@ def lista_add(categoria: str, body: ListaIn):
     return {"ok": True}
 
 
+class ListasLoteIn(BaseModel):
+    cats: list[str] = []
+    domains: list[str]
+    by: str = ""
+
+
+def _dom_ok(d: str) -> str:
+    d = (d or "").strip().lower().rstrip(".")
+    return d if d and "." in d and " " not in d else ""
+
+
+@app.post("/listas-lote", dependencies=[Depends(auth)])
+def listas_lote(body: ListasLoteIn):
+    """Põe vários domínios em várias listas de uma vez (Decisões, Domínios, migração)."""
+    ruins = [c for c in body.cats if c not in listas.CATEGORIAS]
+    if ruins or not body.cats:
+        raise HTTPException(400, f"lista inválida: {', '.join(ruins) or '(nenhuma)'}")
+    doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    with db.conn() as c, c.cursor() as cur:
+        cur.executemany("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                        [(cat, d, body.by or None) for cat in body.cats for d in doms])
+    return {"ok": True, "dominios": len(doms)}
+
+
+@app.post("/listas-remover", dependencies=[Depends(auth)])
+def listas_remover(body: ListasLoteIn):
+    """Tira domínios das listas indicadas (cats vazio = de todas)."""
+    doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    with db.conn() as c:
+        if body.cats:
+            n = c.execute("DELETE FROM category_lists WHERE domain = ANY(%s) AND category = ANY(%s)", (doms, body.cats)).rowcount
+        else:
+            n = c.execute("DELETE FROM category_lists WHERE domain = ANY(%s)", (doms,)).rowcount
+    return {"ok": True, "removidos": n}
+
+
 @app.delete("/listas/{categoria}/{domain}", dependencies=[Depends(auth)])
 def lista_rem(categoria: str, domain: str):
     with db.conn() as c:

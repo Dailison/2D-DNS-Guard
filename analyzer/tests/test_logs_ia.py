@@ -276,3 +276,12 @@ def test_politicas(api):
     assert api.delete("/policies/unit:7:Matriz", headers=H).status_code == 200
     assert api.delete("/policies/default", headers=H).status_code == 400
     assert "unit:7:Matriz" not in {p["scope"] for p in api.get("/policies", headers=H).json()}
+
+
+def test_listas_em_lote(api):
+    r = api.post("/listas-lote", json={"cats": ["streaming", "outros_bloqueios"], "domains": ["A.com.", "b.com", "lixo", ""], "by": "op"}, headers=H)
+    assert r.status_code == 200 and r.json()["dominios"] == 2
+    assert api.post("/listas-lote", json={"cats": ["xx"], "domains": ["a.com"]}, headers=H).status_code == 400
+    assert [x["category"] for x in api.get("/listas-dominio/a.com", headers=H).json()] in (["streaming", "outros_bloqueios"], ["outros_bloqueios", "streaming"])
+    assert api.post("/listas-remover", json={"cats": ["streaming"], "domains": ["a.com"]}, headers=H).json()["removidos"] == 1
+    assert api.post("/listas-remover", json={"domains": ["a.com", "b.com"]}, headers=H).json()["removidos"] == 3

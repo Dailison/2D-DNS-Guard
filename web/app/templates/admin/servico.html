@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Listas de liberação' if modo == 'liberacao' else 'Serviço' }}{% endblock %}
+{% block title %}{{ 'Domínios liberados' if modo == 'liberacao' else 'Serviço' }}{% endblock %}
 {% block content %}
 {% set rot = dict(categorias) %}
 <style>
@@ -7,7 +7,7 @@
   .mini{padding:.25rem .5rem;font-size:.8rem}
 </style>
 {% if modo == 'liberacao' %}
-<h1>Listas de liberação <span class="mut" style="font-size:.8rem">· whitelist: vence qualquer lista de bloqueio nas empresas que a aplicam</span></h1>
+<h1>Domínios liberados <span class="mut" style="font-size:.8rem">· whitelist: vence qualquer lista de bloqueio nas empresas que a aplicam</span></h1>
 {% set avulsas = todas %}
 <div class="card">
   <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
@@ -23,7 +23,7 @@
   <p class="mut" style="font-size:.82rem;margin:.6rem 0 0">Serviços prontos (YouTube, Instagram, Mercado Livre…) e listas criadas por vocês. Cada empresa escolhe o que libera em <a href="{{ url_for('analise.empresas') }}">Empresas</a> (botão Listas…) ou aqui no botão Empresas que liberam.</p>
 </div>
 {% else %}
-<h1>Lista de liberação {% if servico %}<b>{{ servico.name }}</b>{% endif %} <span class="mut" style="font-size:.8rem">· <a href="{{ url_for('admin.listas_liberacao') }}">todas as listas de liberação</a></span></h1>
+<h1>Lista de liberação {% if servico %}<b>{{ servico.name }}</b>{% endif %} <span class="mut" style="font-size:.8rem">· <a href="{{ url_for('admin.listas_liberacao') }}">Domínios liberados</a></span></h1>
 {% endif %}
 
 {% if trabalho %}

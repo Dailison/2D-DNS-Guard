@@ -484,7 +484,7 @@ def dominio_liberar(nome):
             flash(f"{dominio_reg} fora de {n} lista(s) de bloqueio (vale no DNS em até 1 h).", "ok")
         else:
             flash(f"{dominio_reg} não está em nenhuma lista de bloqueio"
-                  + (" da empresa" if cats else "") + " (pode estar bloqueado por um domínio pai; veja em Domínios).",
+                  + (" da empresa" if cats else "") + " (pode estar bloqueado por um domínio pai: abra o domínio pai em Domínios bloqueados).",
                   "erro")
         _registrar_decisao(tid, dominio_reg, "allowed")
     except Exception as e:  # noqa: BLE001

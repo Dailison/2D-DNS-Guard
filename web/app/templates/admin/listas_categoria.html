@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Listas de bloqueio{% endblock %}
+{% block title %}Domínios bloqueados{% endblock %}
 {% block content %}
-<h1>Listas de bloqueio <span class="mut" style="font-size:.8rem">· domínios por categoria · cada empresa aplica as listas que quiser</span></h1>
+<h1>Domínios bloqueados <span class="mut" style="font-size:.8rem">· listas por categoria · cada empresa aplica as listas que quiser</span></h1>
 {% set rot = dict(categorias) %}
 {% set tot = {} %}{% set tipo = {} %}{% for x in resumo.categorias %}{% set _ = tot.update({x.categoria: x.total}) %}{% set _ = tipo.update({x.categoria: x.tipo}) %}{% endfor %}
 <div class="card">
@@ -25,7 +25,13 @@
       {% else %}a IA põe aqui os sites desta lista quando tem certeza (fase 1/2 = IA local; fase 3 = IA online); se nenhuma fase tiver certeza, vão para <a href="{{ url_for('admin.listas_categoria', cat='para_revisar') }}">Para revisar</a> (fase 4, manual). Dá para adicionar e tirar à mão.{{ ' ⚡ = lista de risco.' if cat in LISTAS_RISCO }}{% endif %}
       <br>Aplicada em: {% if emp_com %}<b>{{ emp_com|map(attribute='nome')|join(', ') }}</b>{% else %}<b>nenhuma empresa</b>{% endif %}{% if default_tem %} + <b>redes sem cadastro</b>{% endif %}. O DNS baixa as listas de novo a cada 1 h.
     </p>
-    <button type="button" class="primary" onclick="document.getElementById('dlgEmp').showModal()">Empresas…</button>
+    <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">
+      <form method="get" action="{{ url_for('admin.dominios') }}" style="display:flex;gap:.3rem;margin:0" title="abre a página do domínio: todas as listas em que ele está, a análise da IA e o editor de listas">
+        <input type="text" name="q" placeholder="abrir domínio (ex.: tiktok.com)" style="width:15rem" required>
+        <button class="btn">Abrir</button>
+      </form>
+      <button type="button" class="primary" onclick="document.getElementById('dlgEmp').showModal()">Empresas…</button>
+    </div>
   </div>
 </div>
 

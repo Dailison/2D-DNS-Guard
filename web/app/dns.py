@@ -1,4 +1,4 @@
-"""Telas de DNS do console: Listas de bloqueio (por categoria) e de liberação, Domínios (em quais listas
+"""Telas de DNS do console: Domínios bloqueados (listas por categoria) e liberados (listas de liberação), (em quais listas
 cada domínio está), políticas por empresa (sincronizadas no Technitium), Liberados (IPs isentos), Logs DNS e Gráficos."""
 
 from urllib.parse import quote
@@ -129,21 +129,12 @@ def _sem_technitium():
 @admin_bp.get("/dominios")
 @login_required
 def dominios():
-    """Domínios: em quais listas de bloqueio cada domínio está (busca em todas + editor)."""
-    q = (request.args.get("q") or request.args.get("qg") or "").strip().lower()
-    achados, cap = {}, False
-    if q and current_app.config.get("ANALYZER_ENABLED"):
-        for c, _ in dnslib.CATEGORIAS_LISTA:
-            try:
-                for r in api.get(f"/listas/{quote(c, safe='')}", q=q, limit=500):
-                    achados.setdefault(r["domain"], []).append(c)
-            except AnalyzerError as e:
-                flash(f"Falha ao buscar na lista {c}: {e}", "erro")
-                break
-        cap = len(achados) > 500
-    linhas = sorted(achados.items())[:500]
-    return render_template("admin/dominios.html", q=q, linhas=linhas, cap=cap, categorias=dnslib.CATEGORIAS_LISTA,
-                           cats_risco=sorted(dnslib.CATEGORIAS_RISCO))
+    """Página antiga (removida a pedido do usuário): com ?q=<domínio> abre a página do domínio; senão,
+    Domínios bloqueados."""
+    q = (request.args.get("q") or request.args.get("qg") or "").strip().lower().rstrip(".")
+    if q and "." in q and " " not in q:
+        return redirect(url_for("analise.dominio", nome=q, t=0))
+    return redirect(url_for("admin.listas_categoria"))
 
 
 @admin_bp.post("/bloqueios/rem-todos")
@@ -165,7 +156,7 @@ def bloqueios_rem_todos():
         flash(f"Falha ao remover de todas as listas: {e}", "erro")
     if next_local(voltar):  # veio da tela de logs: volta pra ela
         return redirect(voltar)
-    return redirect(url_for("admin.dominios", qg=qg))
+    return redirect(url_for("analise.dominio", nome=qg, t=0) if qg else url_for("admin.listas_categoria"))
 
 
 LOGS_LIMITE = 1000

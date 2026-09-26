@@ -88,9 +88,8 @@
       <a href="{{ url_for('analise.decisoes') }}" class="{{ 'on' if request.endpoint == 'analise.decisoes' }}">Decisões</a>{% endif %}
       {% if config.TECHNITIUM_ENABLED %}
       <a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">Empresas</a>
-      <a href="{{ url_for('admin.listas_categoria') }}" class="{{ 'on' if request.endpoint in ('admin.listas_categoria', 'admin.servico') }}">Listas de bloqueio</a>
-      <a href="{{ url_for('admin.listas_liberacao') }}" class="{{ 'on' if request.endpoint == 'admin.listas_liberacao' }}">Listas de liberação</a>
-      <a href="{{ url_for('admin.dominios') }}" class="{{ 'on' if request.endpoint == 'admin.dominios' }}">Domínios</a>
+      <a href="{{ url_for('admin.listas_categoria') }}" class="{{ 'on' if request.endpoint == 'admin.listas_categoria' }}">Domínios bloqueados</a>
+      <a href="{{ url_for('admin.listas_liberacao') }}" class="{{ 'on' if request.endpoint in ('admin.listas_liberacao', 'admin.servico') }}">Domínios liberados</a>
       <a href="{{ url_for('admin.liberados') }}" class="{{ 'on' if request.endpoint == 'admin.liberados' }}">Liberados</a>
       <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs</a>{% endif %}
       {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('admin.graficos') }}" class="{{ 'on' if request.endpoint == 'admin.graficos' }}">Gráficos</a>{% endif %}

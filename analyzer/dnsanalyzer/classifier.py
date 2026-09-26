@@ -237,10 +237,20 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
             c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
             event("search_error", name, did, detail=f"busca indisponível: {e.__class__.__name__}")
             return "unavailable"
-        except whois.WhoisIndisponivel as e:   # RDAP/Receita fora ou limitando: depois
-            c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
-            event("whois_error", name, did, detail=f"WHOIS indisponível: {e}")
-            return "unavailable"
+        except whois.WhoisIndisponivel as e:   # RDAP/Receita fora ou limitando
+            if "registro.br" in str(e) or "brasilapi" in str(e):   # limite/queda do serviço (vale p/ todos): depois
+                c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
+                event("whois_error", name, did, detail=f"WHOIS indisponível: {e}")
+                return "unavailable"
+            tries = (drow.get("whois_tries") or 0) + 1
+            if tries >= 3:   # falha sempre p/ este domínio (ex.: RDAP do TLD fora): desiste e segue p/ a fase 3
+                c.execute("UPDATE domains SET claimed_at=NULL, whois_tries=%s, whois_at=now() WHERE id=%s", (tries, did))
+                event("whois_error", name, did, detail=f"WHOIS indisponível pela {tries}ª vez ({e}); segue sem WHOIS")
+                return "done"
+            # tenta de novo em ~10 min (claimed_at "vence" em 30 min) e pega outro domínio agora
+            c.execute("UPDATE domains SET claimed_at=now() - interval '20 minutes', whois_tries=%s WHERE id=%s", (tries, did))
+            event("whois_error", name, did, detail=f"WHOIS indisponível: {e}; tentativa {tries} de 3")
+            return "deferred"
         if etapa3:
             c.execute("UPDATE domains SET whois_at=now() WHERE id=%s", (did,))
             if not whois.evidencia(dossier.get("whois")):

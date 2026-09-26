@@ -269,3 +269,25 @@ def test_decisoes_so_fase5_e_contexto_completo(env):
     assert "fase 3 (busca na web + IA local)" in t and "2 (WHOIS)" in t and "3 (busca na web)" in t
     assert "WHOIS/RDAP (fase 2): WHOIS/RDAP: titular PESSOA JURÍDICA 'Ctx Ltda'" in t and "distribuidora de parafusos" in t
     assert "Histórico de classificações" in t and "fase 1 (IA local): DESCONHECIDO" in t and "nome" not in t.split("Evidências")[1][:40]
+
+
+def test_whois_que_falha_sempre_nao_trava(env, monkeypatch):
+    from dnsanalyzer import classifier, db, whois
+
+    def cai(*a, **k):
+        raise whois.WhoisIndisponivel("rdap.org: ConnectError")
+    monkeypatch.setattr(classifier, "build_dossier", cai)
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, classification, classified_by, analyzed_at) VALUES "
+                      "('miguhara.co.kr', 'DESCONHECIDO', 'llm', now()) RETURNING id").fetchone()["id"]
+    res = []
+    for _ in range(3):
+        with db.conn() as c:
+            d = c.execute("SELECT * FROM domains WHERE id = %s", (i,)).fetchone()
+        res.append(classifier._refine(None, [], d, etapa3=True))
+        with db.conn() as c:
+            r = c.execute("SELECT whois_tries, whois_at, claimed_at > now() - interval '30 minutes' AS adiado "
+                          "FROM domains WHERE id = %s", (i,)).fetchone()
+        if len(res) < 3:
+            assert r["adiado"] and r["whois_at"] is None, "adiado ~10 min (o worker pega outro)"
+    assert res == ["deferred", "deferred", "done"] and r["whois_tries"] == 3 and r["whois_at"] is not None, "3ª falha: segue sem WHOIS"

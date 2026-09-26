@@ -8,7 +8,7 @@
       <select name="grupo" onchange="this.form.submit()">
         {% for g in grupos %}<option value="{{ g }}" {{ 'selected' if grupo==g }}>{{ g }}</option>{% endfor %}
       </select></div>
-    <div class="mut" style="font-size:.85rem">Selecione o grupo para ver e editar os domínios que ele bloqueia. Quem usa cada grupo fica em <a href="{{ url_for('admin.grupos', grupo=grupo) }}">Grupos</a>.</div>
+    <div class="mut" style="font-size:.85rem">Selecione o grupo para ver e editar os domínios que ele bloqueia. Quem usa cada grupo fica em <a href="{{ url_for('admin.grupos', grupo=grupo) }}">Grupos</a>. Jogos, apostas, adulto, VPN/proxy e ameaças ficam nas <a href="{{ url_for('admin.listas_categoria') }}"><b>listas por categoria</b></a> (bloqueio automático).</div>
   </form>
 </div>
 

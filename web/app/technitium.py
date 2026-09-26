@@ -265,12 +265,76 @@ def grupo_da_rede(cidr, ngm):
     return best[1] if best else None
 
 
+# ------------------------------------------------ listas por categoria (assinadas pelos grupos)
+# O analisador publica /listas/<categoria>.txt; cada grupo assina as que quiser (blockListUrls).
+CATEGORIAS_LISTA = [("jogos", "Jogos"), ("apostas", "Apostas"), ("adulto", "Conteúdo adulto"),
+                    ("vpn_proxy", "VPN / Proxy"), ("ameaca", "Ameaças")]
+_LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")
+
+
+def url_lista(cat):
+    return (current_app.config.get("ANALYZER_URL") or "").rstrip("/") + f"/listas/{cat}.txt"
+
+
+def listas_assinadas(g):
+    """Categorias que o grupo assina (pelas URLs de listas do DNS Guard em blockListUrls)."""
+    return sorted({m.group(1) for u in (g.get("blockListUrls") or []) if (m := _LISTA_RE.search(str(u)))})
+
+
+def assinantes(cfg=None):
+    """{categoria: [grupos com bloqueio ligado que assinam]}."""
+    cfg = cfg if cfg is not None else _get_config()
+    out = {c: [] for c, _ in CATEGORIAS_LISTA}
+    for g in cfg.get("groups", []):
+        if g.get("name") and g.get("enableBlocking", True):
+            for c in listas_assinadas(g):
+                out.setdefault(c, []).append(g["name"])
+    return out
+
+
+def assinar_listas(grupo, cats):
+    """Deixa o grupo assinando exatamente `cats` (mantém outras URLs que não são do DNS Guard)."""
+    cfg = _get_config()
+    g = _grupo_obj(cfg, grupo)
+    if g is None:
+        raise ValueError(f"grupo {grupo} não existe")
+    validas = {c for c, _ in CATEGORIAS_LISTA}
+    outras = [u for u in (g.get("blockListUrls") or []) if not _LISTA_RE.search(str(u))]
+    g["blockListUrls"] = outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(cats) & validas]
+    _set_config(cfg)
+    return listas_assinadas(g)
+
+
+def dominios_das_listas(cats):
+    """{categoria: set(domínios)} (do analisador; cache por requisição). Falha = vazio."""
+    from flask import g as fg
+    from app import analyzer_client as api
+    cache = fg.setdefault("_listas_cat", {})
+    out = {}
+    for c in cats:
+        if c not in cache:
+            try:
+                cache[c] = {r["domain"] for r in api.get(f"/listas/{c}", limit=20000)}
+            except Exception:  # noqa: BLE001
+                cache[c] = set()
+        out[c] = cache[c]
+    return out
+
+
 def indice_bloqueio(cfg=None):
     """Índice p/ checar muitos domínios de uma vez (listas): {grupo: set(entradas)} dos
-    grupos com bloqueio ligado + networkGroupMap. Montado uma vez por página."""
+    grupos com bloqueio ligado + networkGroupMap. Montado uma vez por página. Inclui os
+    domínios das listas por categoria que o grupo assina."""
     cfg = cfg if cfg is not None else _get_config()
-    grupos = {g["name"]: {x.lower() for x in g.get("blocked", [])}
-              for g in cfg.get("groups", []) if g.get("name") and g.get("enableBlocking", True)}
+    ativos = [g for g in cfg.get("groups", []) if g.get("name") and g.get("enableBlocking", True)]
+    cats = sorted({c for g in ativos for c in listas_assinadas(g)})
+    doms = dominios_das_listas(cats) if cats else {}
+    grupos = {}
+    for g in ativos:
+        s = {x.lower() for x in g.get("blocked", [])}
+        for c in listas_assinadas(g):
+            s |= doms.get(c, set())
+        grupos[g["name"]] = s
     return {"grupos": grupos, "ngm": ngm_de(cfg), "ativos": sorted(grupos)}
 
 

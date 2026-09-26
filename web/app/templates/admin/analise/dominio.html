@@ -11,7 +11,7 @@
   <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:center">
     <h2 style="margin:0;font-size:1.3rem">{{ dm.name }}</h2>
     {{ m.badge(cls) }} {{ m.cat(dm.category) }}
-    {% if blq %}{% if blq.estado %}<span class="stt blk">🔒 Bloqueado</span>{% else %}<span class="stt ok">🔓 Liberado</span>{% endif %}{% endif %}
+    {% if blq %}{% if blq.estado or (blq.listas and blq.listas|selectattr('grupos')|list) %}<span class="stt blk">🔒 Bloqueado</span>{% else %}<span class="stt ok">🔓 Liberado</span>{% endif %}{% endif %}
     {% if tv.review_status %}<span class="tag">{{ {'blocked':'decidido: bloquear','allowed':'decidido: manter liberado'}.get(tv.review_status) }} · {{ tv.reviewed_by or '' }}</span>{% endif %}
     {% if d.global_review %}{% set gr = d.global_review %}
     <span class="tag" title="decidido na visão Todos os clientes em {{ gr.reviewed_at|dt_sp }}: vale para empresas sem decisão própria, inclusive as que acessarem depois">🌐 {{ {'blocked':'decisão global: bloquear','allowed':'decisão global: manter liberado'}.get(gr.status) }} · {{ gr.reviewed_by or '' }}
@@ -170,9 +170,19 @@
               {% for e, tipo in ents[:4] %}<code>{{ e }}</code>{{ {'exata':'','pai':' (domínio pai: bloqueia tudo abaixo)','sub':' (subdomínio)'}[tipo] }}{{ ', ' if not loop.last }}{% endfor %}{% if ents|length > 4 %} +{{ ents|length - 4 }}{% endif %}</li>
           {% endfor %}
         </ul>
-      {% else %}
+      {% elif not blq.listas %}
         <p style="margin:.3rem 0">🔓 <b>Não está bloqueado</b> em nenhum grupo de bloqueio.</p>
       {% endif %}
+      {% for l in blq.listas %}
+        <div style="margin:.3rem 0;font-size:.9rem">⛔ Na <a href="{{ url_for('admin.listas_categoria', cat=l.cat) }}"><b>lista {{ l.rot }}</b></a>
+          (<code>{{ l.entrada }}</code>{% if l.por %}, {{ l.por }}{% endif %}) — assinada por:
+          {% if l.grupos %}<b>{{ l.grupos|join(', ') }}</b>{% else %}<b>nenhum grupo</b> (não bloqueia){% endif %}
+          <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline;margin-left:.3rem" onsubmit="return confirm('Tirar {{ l.entrada }} da lista {{ l.rot }}? Fica registrado como “manter liberado”; vale para todos os grupos que assinam a lista (em até 1 h).')">
+            <input type="hidden" name="cat" value="{{ l.cat }}"><input type="hidden" name="dominio" value="{{ l.entrada }}">
+            <input type="hidden" name="voltar" value="{{ request.full_path }}">
+            <button style="padding:.1rem .5rem;font-size:.78rem;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer">🔓 tirar da lista</button>
+          </form></div>
+      {% endfor %}
       <p class="mut" style="font-size:.82rem;margin:.2rem 0 .6rem">Grupos de <b>{{ tenant.name if tenant else 'esta empresa' }}</b>:
         {% for g, redes in ge.items() %}<b>{{ g }}</b> ({{ redes|join(', ') }}){{ shared(g) }}{{ '; ' if not loop.last }}{% else %}nenhum (redes sem grupo no Technitium){% endfor %}</p>
 

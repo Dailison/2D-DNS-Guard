@@ -88,6 +88,8 @@
     } else if (k === 'llm_error') {
       ic.textContent = '❌'; body.appendChild(document.createTextNode('Falha ao analisar '));
       body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ' — ' + (ev.detail || '')));
+    } else if (k === 'auto_block') {
+      ic.textContent = '⛔'; body.appendChild(el('span', 'd', 'Bloqueio automático — ' + (ev.detail || '')));
     } else if (k === 'llm_extra') {
       ic.textContent = '🚀'; body.appendChild(el('span', 'd', 'Reforço da IA: ' + (ev.detail || '')));
     } else if (k === 'llm_unavailable') {

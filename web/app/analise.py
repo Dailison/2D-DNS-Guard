@@ -414,8 +414,15 @@ def _bloqueio_ctx(nome_reg: str, tenant: dict | None, evidencias: list) -> dict 
         ngm = dnslib.ngm_de(cfg)
         estado = dnslib.estado_bloqueio(nome_reg, cfg)
         g_emp = _grupos_empresa(tenant, ngm)
+        rot, ass, listas = dict(dnslib.CATEGORIAS_LISTA), dnslib.assinantes(cfg), []
+        try:
+            listas = [{"cat": r["category"], "rot": rot.get(r["category"], r["category"]), "entrada": r["domain"],
+                       "por": r.get("added_by"), "grupos": ass.get(r["category"], [])}
+                      for r in api.get(f"/listas-dominio/{quote(nome_reg, safe='')}")]
+        except AnalyzerError:
+            pass
         return {
-            "nome": nome_reg, "estado": estado, "grupos_empresa": g_emp,
+            "nome": nome_reg, "estado": estado, "grupos_empresa": g_emp, "listas": listas,
             "compartilham": _compartilham(g_emp.keys(), ngm, (tenant or {}).get("name")),
             "todos": dnslib.grupos_ativos(cfg),
             "especificos": sorted(grupos_especificos()),

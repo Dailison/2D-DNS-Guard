@@ -86,6 +86,21 @@
   </form>
 </div>
 {% endif %}
+<div class="card">
+  <h2>Listas por categoria assinadas por <b>{{ grupo }}</b></h2>
+  <form method="post" action="{{ url_for('admin.grupo_listas') }}">
+    <input type="hidden" name="grupo" value="{{ grupo }}">
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;margin:.2rem 0 .6rem">
+      {% for c, rot in categorias_lista %}
+      <label class="chk" style="margin:0"><input type="checkbox" name="cats" value="{{ c }}" {{ 'checked' if c in assinadas }}> <span>{{ rot }}</span></label>
+      {% endfor %}
+    </div>
+    <button class="primary">Salvar listas</button>
+    <a href="{{ url_for('admin.listas_categoria') }}" style="margin-left:.8rem;font-size:.88rem">ver o conteúdo das listas →</a>
+  </form>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">O <b>bloqueio automático</b> põe nessas listas os sites de jogos, apostas, conteúdo adulto, VPN/proxy e ameaças com recomendação Bloquear; o grupo que assina a lista bloqueia todos eles, sem precisar do site na lista do próprio grupo. O Technitium baixa as listas de novo a cada 1 h.
+  {% if not grupo_bloqueia %}<br><b>Atenção:</b> este grupo está com o bloqueio desligado ({{ 'isenção' if grupo == config.TECHNITIUM_LIBERADOS_GROUP else 'sem bloqueio' }}) — as listas assinadas não valem para ele.{% endif %}</p>
+</div>
 {% if not protegido %}
 <div class="card">
   <h2>Gerenciar grupo <b>{{ grupo }}</b></h2>

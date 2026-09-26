@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Listas por categoria{% endblock %}
+{% block content %}
+<h1>Listas por categoria <span class="mut" style="font-size:.8rem">· bloqueio automático + listas assinadas pelos grupos (Technitium)</span></h1>
+{% set rot = dict(categorias) %}
+{% set tot = {} %}{% for x in resumo.categorias %}{% set _ = tot.update({x.categoria: x.total}) %}{% endfor %}
+<div class="card">
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+    {% for c, r in categorias %}
+    <a href="{{ url_for('admin.listas_categoria', cat=c) }}" style="text-decoration:none;padding:.45rem .8rem;border:1px solid {{ 'var(--b)' if c == cat else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if c == cat }}">{{ r }} <span class="mut">({{ tot.get(c, 0) }})</span></a>
+    {% endfor %}
+  </div>
+  <p class="mut" style="font-size:.85rem;margin:.7rem 0 0">
+    <b>Bloqueio automático:</b> {% if resumo.auto %}ligado para {% for c in resumo.auto %}{{ rot.get(c, c) }}{{ ', ' if not loop.last }}{% endfor %} — {{ resumo.auto_24h }} site(s) nas últimas 24 h{% else %}desligado{% endif %}.
+    Entram sozinhos os sites dessas categorias com recomendação <b>Bloquear</b> que ninguém decidiu e que nenhuma empresa ajustou para Trabalho.<br>
+    <b>{{ rot.get(cat, cat) }}</b> é assinada por: {% if assinantes.get(cat) %}<b>{{ assinantes[cat]|join(', ') }}</b>{% else %}<b>nenhum grupo</b> (não bloqueia ninguém){% endif %} — mude em <a href="{{ url_for('admin.grupos') }}">Grupos</a>. O Technitium baixa as listas de novo a cada 1 h.
+  </p>
+</div>
+
+<div class="card">
+  <div class="row" style="align-items:flex-end;gap:1rem">
+    <form method="get" class="row" style="align-items:flex-end;flex:1;margin:0">
+      <input type="hidden" name="cat" value="{{ cat }}">
+      <div style="flex:1"><label>Buscar na lista {{ rot.get(cat, cat) }}</label><input type="text" name="q" value="{{ q }}" placeholder="parte do domínio"></div>
+      <div style="flex:0"><button class="primary">Buscar</button></div>
+    </form>
+    <form method="post" action="{{ url_for('admin.listas_categoria_add') }}" class="row" style="align-items:flex-end;flex:1;margin:0">
+      <input type="hidden" name="cat" value="{{ cat }}">
+      <div style="flex:1"><label>Adicionar à lista {{ rot.get(cat, cat) }}</label><input type="text" name="dominio" placeholder="ex.: site-de-apostas.com" required></div>
+      <div style="flex:0"><button class="danger">Adicionar</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>{{ itens|length }} domínio(s){% if q %} com “{{ q }}”{% endif %}{% if itens|length >= 2000 %} <span class="mut" style="font-size:.8rem">· mostrando os 2000 mais recentes</span>{% endif %}</h2>
+  <table>
+    <thead><tr><th>Domínio</th><th>Entrou por</th><th>Quando</th><th></th></tr></thead>
+    <tbody>
+    {% for i in itens %}
+      <tr>
+        <td><a href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}">{{ i.domain }}</a></td>
+        <td class="mut" style="font-size:.85rem">{{ i.added_by or '—' }}</td>
+        <td class="mut" style="white-space:nowrap;font-size:.85rem">{{ (i.added_at or '')[:16]|replace('T', ' ') }}</td>
+        <td style="white-space:nowrap">
+          <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline" onsubmit="return confirm('Tirar {{ i.domain }} da lista {{ rot.get(cat, cat) }}? Fica registrado como “manter liberado” (o bloqueio automático não põe de volta).')">
+            <input type="hidden" name="cat" value="{{ cat }}"><input type="hidden" name="dominio" value="{{ i.domain }}">
+            <button class="danger" style="padding:.15rem .5rem;font-size:.78rem">✕ tirar da lista</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="mut">Lista vazia{% if q %} para essa busca{% endif %}.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

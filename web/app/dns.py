@@ -164,7 +164,10 @@ def grupos():
     cadastro = sorted(({"id": e["id"], "name": e["name"],
                         "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
                        for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
+    gobj = next((x for x in cfg.get("groups", []) if x.get("name") == grupo), {})
     return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes,
+                           categorias_lista=dnslib.CATEGORIAS_LISTA, assinadas=dnslib.listas_assinadas(gobj),
+                           grupo_bloqueia=gobj.get("enableBlocking", True),
                            redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro,
                            faixas=faixas, ips=ips, desc_ip=desc_ip, especificos=emp.grupos_especificos(),
                            sem_grupo=_sem_grupo(emp.lista(), ngm))
@@ -726,3 +729,83 @@ def graficos():
         resposta=resposta, respostas=RESPOSTAS_GRAF, lista_empresas=emp.lista(),
         coletado_ate=dnslib.utc_para_local(dados["coletado_ate"]) if dados and dados.get("coletado_ate") else None,
         **_ctx_cls(cls_f, categoria))
+
+
+# ------------------------------------------------- Listas por categoria (analisador) assinadas pelos grupos
+@admin_bp.post("/grupos/listas")
+@login_required
+def grupo_listas():
+    """Quais listas por categoria o grupo assina (Technitium baixa de hora em hora)."""
+    grupo = (request.form.get("grupo") or "").strip()
+    try:
+        ass = dnslib.assinar_listas(grupo, request.form.getlist("cats"))
+        rot = dict(dnslib.CATEGORIAS_LISTA)
+        current_app.logger.info("DNS: %s: grupo %s assina listas %s", admin_atual().email, grupo, ass)
+        flash(f"{grupo}: assina " + (", ".join(rot[c] for c in ass) if ass else "nenhuma lista por categoria") + ".", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"Falha ao salvar as listas do grupo: {e}", "erro")
+    return redirect(url_for("admin.grupos", grupo=grupo))
+
+
+@admin_bp.get("/listas-categoria")
+@login_required
+def listas_categoria():
+    """Listas de bloqueio por categoria: o que está em cada uma e quem assina."""
+    if not current_app.config.get("ANALYZER_ENABLED"):
+        return render_template("admin/nao_configurado.html", oque="Analisador (ANALYZER_URL/ANALYZER_TOKEN)")
+    cat = (request.args.get("cat") or "apostas").strip()
+    q = (request.args.get("q") or "").strip().lower()
+    resumo, itens, ass = {"categorias": [], "auto": [], "auto_24h": 0}, [], {}
+    try:
+        resumo = api.get("/listas")
+        itens = api.get(f"/listas/{quote(cat, safe='')}", q=q or None, limit=2000)
+    except AnalyzerError as e:
+        flash(f"Falha ao carregar as listas: {e}", "erro")
+    try:
+        ass = dnslib.assinantes() if current_app.config.get("TECHNITIUM_ENABLED") else {}
+    except Exception as e:  # noqa: BLE001
+        flash(f"Não foi possível consultar o Technitium: {e}", "erro")
+    return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, itens=itens,
+                           assinantes=ass, categorias=dnslib.CATEGORIAS_LISTA)
+
+
+def _tirar_da_lista(cat: str, dominio: str) -> None:
+    """Tira da lista e grava a decisão global 'manter liberado' (senão o bloqueio automático
+    colocaria de volta no próximo ciclo)."""
+    api.delete(f"/listas/{quote(cat, safe='')}/{quote(dominio, safe='')}")
+    _decisao_global(dominio, "allowed")
+
+
+def _decisao_global(dominio: str, status: str) -> None:
+    try:
+        api.post(f"/domains/{quote(dominio, safe='')}/review", {"status": status, "by": admin_atual().email})
+    except AnalyzerError:
+        pass   # domínio nunca visto nos logs: não há decisão a gravar
+
+
+@admin_bp.post("/listas-categoria/rem")
+@login_required
+def listas_categoria_rem():
+    cat, dom = request.form.get("cat", ""), request.form.get("dominio", "")
+    try:
+        _tirar_da_lista(cat, dom)
+        current_app.logger.info("DNS: %s tirou %s da lista %s", admin_atual().email, dom, cat)
+        flash(f"{dom} saiu da lista {cat} (decisão: manter liberado). O Technitium atualiza em até 1 h.", "ok")
+    except AnalyzerError as e:
+        flash(f"Falha: {e}", "erro")
+    voltar = request.form.get("voltar") or ""
+    return redirect(voltar if next_local(voltar) else url_for("admin.listas_categoria", cat=cat))
+
+
+@admin_bp.post("/listas-categoria/add")
+@login_required
+def listas_categoria_add():
+    cat, dom = request.form.get("cat", ""), (request.form.get("dominio") or "").strip().lower().rstrip(".")
+    try:
+        api.post(f"/listas/{quote(cat, safe='')}", {"domain": dom, "by": admin_atual().email})
+        _decisao_global(dom, "blocked")
+        current_app.logger.info("DNS: %s pôs %s na lista %s", admin_atual().email, dom, cat)
+        flash(f"{dom} entrou na lista {cat}. O Technitium atualiza em até 1 h.", "ok")
+    except AnalyzerError as e:
+        flash(f"Falha: {e}", "erro")
+    return redirect(url_for("admin.listas_categoria", cat=cat))

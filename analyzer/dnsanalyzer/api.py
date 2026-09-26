@@ -1180,6 +1180,101 @@ def lista_rem(categoria: str, domain: str):
     return {"ok": True, "removidos": n}
 
 
+# ------------------------------------------------------------------ listas de LIBERAÇÃO (whitelist)
+@app.get("/liberacao/{slug}.txt", response_class=PlainTextResponse)
+def liberacao_txt(slug: str, request: Request):
+    """Lista de liberação p/ o Technitium (allowListUrls). Sem token; só LISTS_ALLOWED_IPS."""
+    if request.client is None or request.client.host not in settings().lists_allowed_ips:
+        raise HTTPException(403, "IP sem acesso às listas")
+    with db.conn() as c:
+        if not c.execute("SELECT 1 FROM allow_lists WHERE slug=%s", (slug,)).fetchone():
+            raise HTTPException(404, "lista de liberação inexistente")
+        doms = [r["domain"] for r in c.execute(
+            "SELECT domain FROM allow_list_domains WHERE list_slug=%s ORDER BY domain", (slug,)).fetchall()]
+    return f"# 2D DNS Guard - liberação {slug} ({len(doms)} domínios)\n" + "".join(d + "\n" for d in doms)
+
+
+@app.get("/liberacao", dependencies=[Depends(auth)])
+def liberacao_listas():
+    with db.conn() as c:
+        return c.execute("SELECT l.slug, l.name, l.description, l.created_by, l.created_at, "
+                         " (SELECT count(*) FROM allow_list_domains d WHERE d.list_slug = l.slug) AS total "
+                         "FROM allow_lists l ORDER BY lower(l.name)").fetchall()
+
+
+class AllowListIn(BaseModel):
+    name: str
+    description: str = ""
+    by: str = ""
+
+
+@app.post("/liberacao", dependencies=[Depends(auth)])
+def liberacao_criar(body: AllowListIn):
+    import re
+    import unicodedata
+    nome = body.name.strip()
+    if not nome:
+        raise HTTPException(400, "nome obrigatório")
+    slug = re.sub(r"[^a-z0-9]+", "-", unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode().lower()).strip("-")[:40]
+    if not slug:
+        raise HTTPException(400, "nome inválido")
+    with db.conn() as c:
+        r = c.execute("INSERT INTO allow_lists (slug, name, description, created_by) VALUES (%s, %s, %s, %s) "
+                      "ON CONFLICT (slug) DO NOTHING RETURNING slug", (slug, nome, body.description or None, body.by or None)).fetchone()
+    if not r:
+        raise HTTPException(409, f"já existe uma lista '{slug}'")
+    return {"ok": True, "slug": slug}
+
+
+@app.delete("/liberacao/{slug}", dependencies=[Depends(auth)])
+def liberacao_apagar(slug: str):
+    """Apaga a lista e tira ela das políticas que a usavam."""
+    with db.conn() as c:
+        c.execute("UPDATE policies SET services = array_remove(services, %s), updated_at = now() WHERE %s = ANY(services)",
+                  (slug, slug))
+        n = c.execute("DELETE FROM allow_lists WHERE slug=%s", (slug,)).rowcount
+    return {"ok": True, "removidas": n}
+
+
+@app.get("/liberacao/{slug}", dependencies=[Depends(auth)])
+def liberacao_itens(slug: str, q: Optional[str] = None, limit: int = Query(2000, le=20000)):
+    with db.conn() as c:
+        return c.execute("SELECT domain, added_by, added_at FROM allow_list_domains WHERE list_slug=%s "
+                         "AND (%s::text IS NULL OR domain LIKE %s) ORDER BY domain LIMIT %s",
+                         (slug, q, f"%{(q or '').lower()}%", limit)).fetchall()
+
+
+@app.post("/liberacao/{slug}/dominios", dependencies=[Depends(auth)])
+def liberacao_add(slug: str, body: ListasLoteIn):
+    doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    with db.conn() as c:
+        if not c.execute("SELECT 1 FROM allow_lists WHERE slug=%s", (slug,)).fetchone():
+            raise HTTPException(404, "lista de liberação inexistente")
+        with c.cursor() as cur:
+            cur.executemany("INSERT INTO allow_list_domains (list_slug, domain, added_by) VALUES (%s, %s, %s) "
+                            "ON CONFLICT DO NOTHING", [(slug, d, body.by or None) for d in doms])
+    return {"ok": True, "dominios": len(doms)}
+
+
+@app.delete("/liberacao/{slug}/dominios/{domain}", dependencies=[Depends(auth)])
+def liberacao_rem(slug: str, domain: str):
+    with db.conn() as c:
+        n = c.execute("DELETE FROM allow_list_domains WHERE list_slug=%s AND domain=%s",
+                      (slug, domain.strip().lower().rstrip("."))).rowcount
+    return {"ok": True, "removidos": n}
+
+
+@app.get("/liberacao-dominio/{name}", dependencies=[Depends(auth)])
+def liberacao_do_dominio(name: str):
+    """Em que listas de liberação o domínio está (ele mesmo ou um domínio pai)."""
+    n = name.strip().lower().rstrip(".")
+    parts = n.split(".")
+    cands = [".".join(parts[i:]) for i in range(len(parts) - 1)]
+    with db.conn() as c:
+        return c.execute("SELECT d.list_slug AS slug, l.name, d.domain FROM allow_list_domains d "
+                         "JOIN allow_lists l ON l.slug = d.list_slug WHERE d.domain = ANY(%s)", (cands,)).fetchall()
+
+
 # ------------------------------------------------------------------ políticas (empresa -> listas)
 def _scope_ok(scope: str) -> bool:
     import re
@@ -1207,6 +1302,10 @@ def policy_set(scope: str, body: PolicyIn):
     if ruins:
         raise HTTPException(400, f"lista desconhecida: {', '.join(ruins)}")
     with db.conn() as c:
+        existem = {r["slug"] for r in c.execute("SELECT slug FROM allow_lists").fetchall()}
+        ruins = [x for x in body.services if x not in existem]
+        if ruins:
+            raise HTTPException(400, f"lista de liberação desconhecida: {', '.join(ruins)}")
         c.execute("INSERT INTO policies (scope, lists, services, updated_by) VALUES (%s, %s, %s, %s) "
                   "ON CONFLICT (scope) DO UPDATE SET lists=EXCLUDED.lists, services=EXCLUDED.services, "
                   "updated_by=EXCLUDED.updated_by, updated_at=now()",

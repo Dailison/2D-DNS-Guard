@@ -285,3 +285,25 @@ def test_listas_em_lote(api):
     assert [x["category"] for x in api.get("/listas-dominio/a.com", headers=H).json()] in (["streaming", "outros_bloqueios"], ["outros_bloqueios", "streaming"])
     assert api.post("/listas-remover", json={"cats": ["streaming"], "domains": ["a.com"]}, headers=H).json()["removidos"] == 1
     assert api.post("/listas-remover", json={"domains": ["a.com", "b.com"]}, headers=H).json()["removidos"] == 3
+
+
+def test_listas_de_liberacao(api):
+    from dnsanalyzer.config import settings
+    ls = {x["slug"]: x for x in api.get("/liberacao", headers=H).json()}
+    assert ls["instagram"]["total"] >= 4 and ls["facebook"]["name"] == "Facebook"      # pacotes viraram listas
+    r = api.post("/liberacao", json={"name": "Sistemas do Cliente Ágil", "by": "op"}, headers=H)
+    assert r.status_code == 200 and r.json()["slug"] == "sistemas-do-cliente-agil"
+    assert api.post("/liberacao", json={"name": "Sistemas do cliente agil"}, headers=H).status_code == 409
+    slug = "sistemas-do-cliente-agil"
+    api.post(f"/liberacao/{slug}/dominios", json={"domains": ["ERP.Cliente.com.br.", "lixo"], "by": "op"}, headers=H)
+    if "testclient" not in settings().lists_allowed_ips:
+        settings().lists_allowed_ips.append("testclient")
+    assert "erp.cliente.com.br\n" in api.get(f"/liberacao/{slug}.txt").text
+    assert api.get("/liberacao/nao-existe.txt").status_code == 404
+    assert [x["slug"] for x in api.get("/liberacao-dominio/api.erp.cliente.com.br", headers=H).json()] == [slug]
+    assert api.put("/policies/tenant:8", json={"lists": ["jogos"], "services": [slug, "instagram"]}, headers=H).status_code == 200
+    assert api.put("/policies/tenant:8", json={"lists": [], "services": ["nao-existe"]}, headers=H).status_code == 400
+    assert api.delete(f"/liberacao/{slug}/dominios/erp.cliente.com.br", headers=H).json()["removidos"] == 1
+    assert api.delete(f"/liberacao/{slug}", headers=H).json()["removidas"] == 1
+    p = {x["scope"]: x for x in api.get("/policies", headers=H).json()}["tenant:8"]
+    assert p["services"] == ["instagram"]                       # apagar a lista tira da política

@@ -22,6 +22,7 @@ import socket
 import ssl
 import threading
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -51,7 +52,7 @@ def wikidata(domain: str) -> dict | None:
          'OPTIONAL { ?item rdfs:label ?label FILTER(lang(?label) IN ("pt","en")) } '
          'OPTIONAL { ?item schema:description ?desc FILTER(lang(?desc) IN ("pt","en")) } } LIMIT 10')
     r = httpx.get("https://query.wikidata.org/sparql", params={"format": "json", "query": q},
-                  headers={"User-Agent": UA}, timeout=15)
+                  headers={"User-Agent": UA}, timeout=10)
     r.raise_for_status()
     rows = r.json().get("results", {}).get("bindings", [])
     if not rows:
@@ -73,7 +74,7 @@ def certificate(domain: str) -> dict | None:
     for host in (domain, "www." + domain):
         try:
             ctx = ssl.create_default_context()
-            with socket.create_connection((host, 443), timeout=6) as s, ctx.wrap_socket(s, server_hostname=host) as ss:
+            with socket.create_connection((host, 443), timeout=4) as s, ctx.wrap_socket(s, server_hostname=host) as ss:
                 c = ss.getpeercert()
         except ssl.SSLCertVerificationError:
             return {"verified": False}
@@ -102,7 +103,7 @@ def homepage(domain: str) -> dict | None:
 def _homepage_host(domain: str) -> dict | None:
     for verify in (True, False):
         try:
-            with httpx.Client(timeout=8, follow_redirects=True, verify=verify, max_redirects=5,
+            with httpx.Client(timeout=httpx.Timeout(5, connect=4), follow_redirects=True, verify=verify, max_redirects=5,
                               headers={"User-Agent": UA, "Accept": "text/html"}) as cl:
                 with cl.stream("GET", f"https://{domain}/") as r:
                     if "html" not in r.headers.get("content-type", ""):
@@ -136,6 +137,10 @@ def _homepage_host(domain: str) -> dict | None:
             "site_name": _clean(meta("og:site_name", "application-name"), 60)}
 
 
+class BuscaOcupada(Exception):
+    """Outra busca acabou de sair (intervalo mínimo): tentar este domínio mais tarde."""
+
+
 class BuscaIndisponivel(Exception):
     """Buscadores bloquearam/suspenderam (captcha, excesso de pedidos): tentar depois.
     NÃO é "sem resultado" — senão o domínio ficaria marcado como sem presença na web."""
@@ -145,7 +150,7 @@ _ultima_busca = 0.0
 _busca_lock = threading.Lock()
 
 
-def search(c, domain: str, fetch: bool) -> list[dict] | None:
+def search(c, domain: str, fetch: bool, wait: bool = True) -> list[dict] | None:
     """Etapa 2: resultados de busca na web (SearXNG local) sobre o domínio. Texto de
     TERCEIROS (pista, não prova). Cache permanente em lookup_cache kind='search'."""
     cfg = settings()
@@ -154,11 +159,19 @@ def search(c, domain: str, fetch: bool) -> list[dict] | None:
         return row["value"].get("results") if row else None
     import time
     global _ultima_busca
-    with _busca_lock:   # vários workers da IA: o intervalo mínimo vale entre todos
+    # vários workers da IA: o intervalo mínimo vale entre todos. wait=False: sem vaga agora,
+    # BuscaOcupada (o worker adia o domínio e segue com outro em vez de ficar parado na fila)
+    if not _busca_lock.acquire(blocking=wait):
+        raise BuscaOcupada(domain)
+    try:
         espera = cfg.web_search_min_interval - (time.monotonic() - _ultima_busca)
         if espera > 0:
+            if not wait:
+                raise BuscaOcupada(domain)
             time.sleep(espera)
         _ultima_busca = time.monotonic()
+    finally:
+        _busca_lock.release()
     r = httpx.get(cfg.web_search_url.rstrip("/") + "/search", timeout=40,
                   params={"q": f'"{domain}"', "format": "json", "language": "pt-BR", "safesearch": 0})
     r.raise_for_status()
@@ -192,15 +205,17 @@ def lookup(c, domain: str, fetch: bool, allow_site: bool) -> dict | None:
     if not (fetch and cfg.web_intel_enabled):
         return row["value"] if row else None
     out: dict = {"fetched": datetime.now(timezone.utc).isoformat()}
-    for key, fn, ok in (("wikidata", wikidata, True), ("cert", certificate, True),
-                        ("site", homepage, allow_site and cfg.web_fetch_site)):
-        if not ok:
-            continue
-        try:
-            out[key] = fn(domain)
-        except Exception as e:  # noqa: BLE001 — fonte externa fora do ar não pode travar a análise
-            log.debug("webintel %s %s: %s", key, domain, e)
-            out[key] = None
+    fontes = [(k, fn) for k, fn, ok in (("wikidata", wikidata, True), ("cert", certificate, True),
+                                        ("site", homepage, allow_site and cfg.web_fetch_site)) if ok]
+    # as três ao mesmo tempo: o domínio espera a mais lenta, não a soma (site fora do ar = timeouts)
+    with ThreadPoolExecutor(max_workers=len(fontes)) as ex:
+        futs = {k: ex.submit(fn, domain) for k, fn in fontes}
+        for key, f in futs.items():
+            try:
+                out[key] = f.result()
+            except Exception as e:  # noqa: BLE001 — fonte externa fora do ar não pode travar a análise
+                log.debug("webintel %s %s: %s", key, domain, e)
+                out[key] = None
     c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('web', %s, true, %s) "
               "ON CONFLICT (kind, key) DO UPDATE SET value=EXCLUDED.value, ok=true, fetched_at=now()",
               (domain, Jsonb(out)))

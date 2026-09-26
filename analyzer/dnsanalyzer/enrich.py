@@ -89,7 +89,7 @@ def rdap_registered(c, domain: str) -> date | None:
     _last_rdap_call = time.monotonic()
     reg, ok = None, False
     try:
-        r = httpx.get(f"https://rdap.org/domain/{domain}", timeout=12, follow_redirects=True,
+        r = httpx.get(f"https://rdap.org/domain/{domain}", timeout=8, follow_redirects=True,
                       headers={"Accept": "application/rdap+json"})
         if r.status_code == 200:
             reg, ok = _rdap_date(r.json()), True

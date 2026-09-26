@@ -207,7 +207,7 @@ def _claim_llm(c) -> dict | None:
 
 
 def phase_b(client: OllamaClient, cats: list[dict]) -> str:
-    """Refina UM domínio com a IA. Retorna 'done' | 'idle' | 'unavailable' | 'error'."""
+    """Refina UM domínio com a IA. Retorna 'done' | 'deferred' | 'idle' | 'unavailable' | 'error'."""
     with db.conn() as c:
         drow = _claim_llm(c)
     if not drow:
@@ -215,16 +215,15 @@ def phase_b(client: OllamaClient, cats: list[dict]) -> str:
     return _refine(client, cats, drow)
 
 
-def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = False) -> str:
+def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = False,
+            esperar_busca: bool = False) -> str:
     """Regras + fontes externas + IA para um domínio já reservado (claimed).
-    etapa2 = domínio que a IA deixou DESCONHECIDO: busca na web antes de reclassificar."""
+    etapa2 = domínio que a IA deixou DESCONHECIDO: busca na web antes de reclassificar.
+    esperar_busca = espera a vez da busca na web (1 domínio pedido na mão) em vez de adiar."""
     cfg = settings()
     name, did = drow["name"], drow["id"]
     if etapa2:
         event("search_start", name, did, detail=f"etapa 2 · busca na web · {drow['total_queries']} consultas")
-    else:
-        event("llm_start", name, did, detail=f"{drow['total_queries']} consultas · pelas regras: "
-                                             f"{CLASS_LABEL.get(drow['classification'], '—')}")
     with db.conn() as c:
         try:
             dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=etapa2)
@@ -242,8 +241,14 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
             # fora do top 1M e sem Wikidata/certificado: a IA sozinha "não reconhece" em ~98%
             # dos casos. Busca ANTES e chama a IA uma vez só (ou nenhuma, se não há nada na web).
             try:
-                dossier["search"] = webintel.search(c, name, fetch=True)
+                dossier["search"] = webintel.search(c, name, fetch=True, wait=esperar_busca)
                 c.execute("UPDATE domains SET web_search_at=now() WHERE id=%s", (did,))
+            except webintel.BuscaOcupada:
+                # 1 busca a cada WEB_SEARCH_MIN_INTERVAL p/ todos: em vez de esperar a vez (com o
+                # reforço, 8+ workers ficavam minutos parados), adia ~2 min e pega outro domínio.
+                # O dossiê (certificado/site) já ficou no cache.
+                c.execute("UPDATE domains SET claimed_at = now() - interval '28 minutes' WHERE id=%s", (did,))
+                return "deferred"
             except (httpx.HTTPError, webintel.BuscaIndisponivel) as e:
                 log.info("busca antes da IA indisponível p/ %s: %s", name, e)   # segue só com a IA
             else:
@@ -259,6 +264,9 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
                               detail="sem resultado na busca na web — IA dispensada (economia de ~40 s)")
                         return "done"
         rule = evaluate(dossier)
+    if not etapa2:
+        event("llm_start", name, did, detail=f"{drow['total_queries']} consultas · pelas regras: "
+                                             f"{CLASS_LABEL.get(drow['classification'], '—')}")
     if rule.final:  # (ex.: RDAP/TI mudou o quadro) regras bastam
         with db.conn() as c:
             save(c, drow, dossier, rule, rules_only(rule, False), False, None)
@@ -353,7 +361,7 @@ def classify_one(name: str) -> str:
     with db.conn() as c:
         cats = categories(c)
         drow = c.execute("UPDATE domains SET claimed_at=now() WHERE name=%s RETURNING *", (reg,)).fetchone()
-    return _refine(client, cats, drow)
+    return _refine(client, cats, drow, esperar_busca=True)
 
 
 def reanalyze_stale(days: int) -> int:
@@ -395,6 +403,7 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
+    db.set_max_size(6 + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls))
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:

@@ -14,17 +14,23 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 _pool: ConnectionPool | None = None
+_max_size = 8
+
+
+def set_max_size(n: int) -> None:
+    """Só o classificador aumenta (antes da 1ª conexão): cada análise simultânea da IA segura
+    1 conexão montando o dossiê (+1 rápida p/ o feed). API e coletor ficam em 8 — PostgreSQL: 40."""
+    global _max_size
+    _max_size = max(8, n)
+    if _pool is not None:
+        _pool.resize(_pool.min_size, _max_size)
 
 
 def pool() -> ConnectionPool:
     global _pool
     if _pool is None:
-        cfg = settings()
-        # cada análise simultânea da IA segura 1 conexão enquanto monta o dossiê (+1 rápida p/ o
-        # feed "IA ao vivo"): o pool cresce com os workers (reforço com GPU) — PostgreSQL: 40
-        workers = cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls)
         _pool = ConnectionPool(
-            cfg.database_url, min_size=1, max_size=max(8, 6 + workers), open=True,
+            settings().database_url, min_size=1, max_size=_max_size, open=True,
             kwargs={"row_factory": dict_row, "autocommit": False},
         )
     return _pool

@@ -280,7 +280,7 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
                               detail="sem resultado na busca na web — IA dispensada (economia de ~40 s)")
                         return "done"
         rule = evaluate(dossier)
-    if not etapa2:
+    if not etapa2 and not etapa3:   # (fases 2 e 3 já anunciaram o início)
         event("llm_start", name, did, detail=f"{drow['total_queries']} consultas · pelas regras: "
                                              f"{CLASS_LABEL.get(drow['classification'], '—')}")
     if rule.final:  # (ex.: RDAP/TI mudou o quadro) regras bastam

@@ -120,6 +120,21 @@ def _com_busca(modelo: str) -> bool:
     return modelo.startswith("gemini-2")
 
 
+def _evento(d: dict, cls: str, lista: str, conf: float, servico: str, meta: dict) -> None:
+    """Feed "IA ao vivo" (mesma tabela do classificador; conexão própria, nunca derruba a fase)."""
+    antes = d.get("lista_ia")
+    val = ("" if not antes else " · confirmou a IA local" if antes == lista else f" · corrigiu a IA local ({antes})")
+    try:
+        with db.conn() as c:
+            c.execute("INSERT INTO ai_events (kind, domain_id, name, classification, seconds, detail) VALUES "
+                      "('online_done', %s, %s, %s, %s, %s)",
+                      (d["id"], d["name"], cls, meta.get("seconds"),
+                       f"fase 4 · {meta.get('model')} · lista {lista} ({conf * 100:.0f}%){val}"
+                       + (f" · {servico}" if servico else "")))
+    except Exception as e:  # noqa: BLE001
+        log.debug("falha ao gravar evento: %s", e)
+
+
 def habilitado() -> bool:
     cfg = settings()
     return bool(cfg.gemini_api_key) and cfg.online_enabled and bool(cfg.gemini_modelos)
@@ -287,6 +302,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
                   "ON CONFLICT DO NOTHING", (d["name"], "IA sem certeza (desconhecido)"))
     log.info("IA online: %s -> %s / %s (%.2f)%s", d["name"], cls, lista, conf, " [busca]" if meta.get("busca") else "")
+    _evento(d, cls, lista, conf, servico, meta)
 
 
 def _fase5_se_duvida(c, domain_id: int) -> None:

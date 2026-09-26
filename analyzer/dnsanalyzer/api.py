@@ -717,10 +717,17 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
         events = c.execute(
             "SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
             "WHERE id > %s ORDER BY id DESC LIMIT %s", (after_id, limit)).fetchall()
+        # o que está em análise agora e em que fase (1-3 = claimed_at; listas; 4 = IA online)
         cur = c.execute(
-            "SELECT name, claimed_at, total_queries, extract(epoch from now() - claimed_at)::int AS elapsed "
-            "FROM domains WHERE claimed_at IS NOT NULL AND claimed_at > now() - interval '30 minutes' "
-            "ORDER BY claimed_at DESC LIMIT 1").fetchone()
+            "SELECT name, total_queries, fase, extract(epoch from now() - t)::int AS elapsed FROM ("
+            " SELECT name, total_queries, claimed_at AS t, CASE WHEN llm_pending THEN '1' "
+            "   WHEN classification = 'DESCONHECIDO' AND whois_at IS NULL THEN '2' "
+            "   WHEN classification = 'DESCONHECIDO' AND web_search_at IS NULL THEN '3' ELSE '1' END AS fase "
+            " FROM domains WHERE claimed_at > now() - interval '30 minutes' "
+            " UNION ALL SELECT name, total_queries, online_claimed_at, '4' FROM domains "
+            "   WHERE online_claimed_at > now() - interval '10 minutes' "
+            " UNION ALL SELECT name, total_queries, lista_claimed_at, 'L' FROM domains "
+            "   WHERE lista_claimed_at > now() - interval '10 minutes') x ORDER BY t DESC LIMIT 1").fetchone()
         queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS ia, "
                           "count(*) FILTER (WHERE needs_analysis) AS regras, "
                           "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by='llm' "

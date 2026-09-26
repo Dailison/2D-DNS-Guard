@@ -14,6 +14,9 @@
   .feed .ic{width:1.2rem;text-align:center;flex:0 0 auto}
   .feed .d{color:var(--mut);font-size:.82rem}
   .feed a{font-weight:600;text-decoration:none}
+  .fase{display:inline-block;font-size:.68rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;margin-right:.4rem;background:#e2e8f0;color:#334155;white-space:nowrap}
+  .fase.f1{background:#dbeafe;color:#1e40af} .fase.f2{background:#ede9fe;color:#5b21b6} .fase.f3{background:#fef3c7;color:#92400e}
+  .fase.f4{background:#dcfce7;color:#166534} .fase.fL{background:#e0f2fe;color:#075985} .fase.fB{background:#fee2e2;color:#991b1b}
 </style>
 
 <div class="ia-top">
@@ -38,7 +41,7 @@
       <button class="btn mini" id="pausa" style="padding:.25rem .6rem;font-size:.8rem;margin-left:.5rem">Pausar</button></span>
   </div>
   <ul class="feed" id="feed"><li class="mut">Carregando…</li></ul>
-  <p class="hint">Fase A = regras/catálogo/listas (instantâneo). A IA (Qwen3, local) refina um domínio por vez, do mais consultado para o menos.</p>
+  <p class="hint">Fluxo de cada site novo: <b>1</b> IA local (Qwen3) → <b>2</b> WHOIS + IA local → <b>3</b> busca na web + IA local → <b>4</b> IA online (Gemini/Gemma, valida a lista) → <b>5</b> Decisões (manual). "Listas" = a IA local escolhendo a lista de cada site; "Regras" = catálogo/listas de ameaça (instantâneo).</p>
 </div>
 
 <script>
@@ -55,11 +58,20 @@
   function link(name){ var a = el('a', null, name); a.href = URL_DOM.replace('__N__', encodeURIComponent(name)); return a; }
   function badge(c){ return el('span', 'cls ' + (c || 'PENDENTE'), LBL[c] || c || '—'); }
 
+  // fase de cada evento (fluxo: 1 IA local · 2 WHOIS · 3 busca na web · 4 IA online · 5 Decisões)
+  var FASE = {llm_start: '1', llm_done: '1', llm_error: '1', rules_final: '1', rules_alert: '1',
+              whois_start: '2', whois_done: '2', whois_error: '2', search_start: '3', search_done: '3', search_error: '3',
+              online_done: '4', lista_ia: 'L', auto_block: 'B', rules_batch: 'R'};
+  var FASE_TXT = {'1': 'Fase 1 · IA local', '2': 'Fase 2 · WHOIS', '3': 'Fase 3 · busca na web', '4': 'Fase 4 · IA online',
+                  'L': 'Listas', 'B': 'Bloqueio automático', 'R': 'Regras'};
+  function faseTag(f){ return f ? el('span', 'fase f' + f, FASE_TXT[f] || f) : null; }
+
   function row(ev){
     var li = el('li'), ic = el('span', 'ic'), body = el('span');
     li.appendChild(el('span', 'h', hora(ev.created_at)));
     li.appendChild(ic); li.appendChild(body);
-    var k = ev.kind;
+    var k = ev.kind, ft = faseTag(FASE[k]);
+    if (ft) body.appendChild(ft);
     if (k === 'llm_start') {
       ic.textContent = '⏳'; body.appendChild(document.createTextNode('Analisando '));
       body.appendChild(link(ev.name)); if (ev.detail) body.appendChild(el('span', 'd', ' — ' + ev.detail));
@@ -93,6 +105,11 @@
       body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ' — ' + (ev.detail || '')));
     } else if (k === 'auto_block') {
       ic.textContent = '⛔'; body.appendChild(el('span', 'd', 'Bloqueio automático — ' + (ev.detail || '')));
+    } else if (k === 'online_done') {
+      ic.textContent = '🌐'; body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' → '));
+      body.appendChild(badge(ev.classification));
+      if (ev.seconds != null) body.appendChild(el('span', 'd', ' ' + Math.round(ev.seconds) + 's'));
+      if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail.replace(/^fase 4 · /, ''))); }
     } else if (k === 'lista_ia') {
       ic.textContent = '🗂️'; body.appendChild(el('span', 'd', (ev.detail || '').replace(/^listas pela IA/, 'Listas pela IA')));
     } else if (k === 'llm_extra') {
@@ -125,6 +142,7 @@
     if (cur) {
       box.className = 'now'; txt.textContent = '';
       txt.appendChild(document.createTextNode('Analisando agora: '));
+      var ftc = faseTag(cur.fase); if (ftc) txt.appendChild(ftc);
       txt.appendChild(link(cur.name));
       txt.appendChild(el('span', 'd', ' · ' + dur(curBase + Date.now()/1000) + ' · ' + cur.total_queries + ' consultas'));
     } else {

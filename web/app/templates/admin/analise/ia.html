@@ -90,6 +90,8 @@
       body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ' — ' + (ev.detail || '')));
     } else if (k === 'auto_block') {
       ic.textContent = '⛔'; body.appendChild(el('span', 'd', 'Bloqueio automático — ' + (ev.detail || '')));
+    } else if (k === 'lista_ia') {
+      ic.textContent = '🗂️'; body.appendChild(el('span', 'd', (ev.detail || '').replace(/^listas pela IA/, 'Listas pela IA')));
     } else if (k === 'llm_extra') {
       ic.textContent = '🚀'; body.appendChild(el('span', 'd', 'Reforço da IA: ' + (ev.detail || '')));
     } else if (k === 'llm_unavailable') {

@@ -5,18 +5,23 @@
 {% set rot = dict(categorias) %}
 {% set tot = {} %}{% set tipo = {} %}{% for x in resumo.categorias %}{% set _ = tot.update({x.categoria: x.total}) %}{% set _ = tipo.update({x.categoria: x.tipo}) %}{% endfor %}
 <div class="card">
-  <div style="display:flex;flex-wrap:wrap;gap:.4rem">
-    {% for c, r in categorias %}
-    <a href="{{ url_for('admin.listas_categoria', cat=c) }}" style="text-decoration:none;padding:.45rem .8rem;border:1px solid {{ 'var(--b)' if c == cat else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if c == cat }}">{{ r }}{{ ' ⚡' if tipo.get(c) == 'auto' }} <span class="mut">({{ tot.get(c, 0) }})</span></a>
+  <div style="display:flex;flex-direction:column;gap:.45rem">
+    {% for titulo, itens in LISTAS_SECOES %}
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
+      <span class="mut" style="font-size:.8rem;font-weight:700;min-width:7.5rem">{{ titulo }}</span>
+      {% for c, r in itens %}
+      <a href="{{ url_for('admin.listas_categoria', cat=c) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if c == cat else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if c == cat }}">{{ r }}{{ ' ⚡' if c in LISTAS_RISCO }} <span class="mut">({{ tot.get(c, 0) }})</span></a>
+      {% endfor %}
+    </div>
     {% endfor %}
   </div>
   {% set emp_com = empresas_pol|selectattr('tem')|list %}
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-top:.8rem">
     <p class="mut" style="font-size:.85rem;margin:0;flex:1;min-width:280px">
       <b>{{ rot.get(cat, cat) }}</b> —
-      {% if tipo.get(cat) == 'auto' %}⚡ a IA põe aqui sozinha os sites desta categoria com recomendação <b>Bloquear</b> ({{ resumo.auto_24h }} site(s) nas últimas 24 h em todas as listas automáticas); dá para adicionar e tirar à mão.
-      {% elif tipo.get(cat) == 'curada' %}lista <b>curada</b>: só entra o que uma pessoa confirma. A IA sugere abaixo.
-      {% else %}lista manual (o que foi bloqueado à mão e não cabe numa categoria).{% endif %}
+      {% if cat == 'para_revisar' %}dúvidas da IA (com a lista que ela sugere) e sobras da migração — ninguém aplica esta lista; aprove as sugestões abaixo ou mova à mão. Depois a etapa 4 (IA online) resolve as dúvidas.
+      {% elif tipo.get(cat) == 'manual' %}lista manual: a IA não põe sites aqui sozinha (só sugere outra lista quando for o caso).
+      {% else %}a IA põe aqui os sites desta lista quando tem certeza ({{ resumo.auto_24h }} pelo bloqueio automático nas últimas 24 h); na dúvida, vão para <a href="{{ url_for('admin.listas_categoria', cat='para_revisar') }}">Para revisar</a>. Dá para adicionar e tirar à mão.{{ ' ⚡ = lista de risco.' if cat in LISTAS_RISCO }}{% endif %}
       <br>Aplicada em: {% if emp_com %}<b>{{ emp_com|map(attribute='nome')|join(', ') }}</b>{% else %}<b>nenhuma empresa</b>{% endif %}{% if default_tem %} + <b>redes sem cadastro</b>{% endif %}. O DNS baixa as listas de novo a cada 1 h.
     </p>
     <button type="button" class="primary" onclick="document.getElementById('dlgEmp').showModal()">Empresas…</button>
@@ -33,7 +38,7 @@
 
 <div class="card">
   <h2>{{ det.total }} domínio(s){% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem">de {{ det.total_geral }} na lista</span>{% endif %}</h2>
-  {% if cat == 'para_revisar' %}<p class="mut" style="font-size:.84rem;margin:-.3rem 0 .6rem">Sobras da migração dos grupos antigos — nenhuma empresa aplica esta lista. Filtre pela categoria da IA, marque e use <b>Mover para…</b> (ex.: tudo que a IA vê como Jogos → lista Jogos) ou <b>Tirar da lista</b>; os <b>Desconhecido</b> podem ir para <b>Pedir nova análise da IA</b>.</p>{% endif %}
+  {% if cat == 'para_revisar' %}<p class="mut" style="font-size:.84rem;margin:-.3rem 0 .6rem">Filtre por <b>Sugestão da IA</b>, marque e use <b>✓ Aprovar sugestão da IA</b> (cada site vai para a lista sugerida), ou <b>Mover para…</b> / <b>Tirar da lista</b> quando discordar. Os <b>Desconhecido</b> podem ir para <b>Pedir nova análise da IA</b>.</p>{% endif %}
   {% with modo = 'lista' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>
 {% if sugestoes %}

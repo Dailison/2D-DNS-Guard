@@ -1,3 +1,4 @@
+{% from "admin/_listas_caixas.html" import caixas with context %}
 {# Diálogo "Bloquear em quais listas?" — listas de bloqueio por categoria (um ou vários domínios) #}
 <dialog id="dlgBlq" class="dlg">
   <form method="post" action="{{ url_for('analise.decisoes_lote') }}" onsubmit="return dlgValida(this)" data-ajax>
@@ -7,12 +8,9 @@
     <div id="dlgItens"></div>
     <h2 style="margin:0 0 .3rem">Pôr em quais listas de bloqueio?</h2>
     <p class="mut" id="dlgNomes" style="margin:0 0 .6rem;font-size:.85rem;word-break:break-all"></p>
-    <p class="hint" style="margin:0 0 .4rem"><span class="tag" style="font-size:.7rem">sugerida</span> = categoria da IA. O domínio é bloqueado com todos os subdomínios, em todas as empresas que aplicam a lista (em até 1 h).</p>
-    <div style="max-height:45vh;overflow:auto;border-top:1px solid var(--bd)">
-      {% for c, rot in grp.listas %}
-      <label class="dlg-grp"><input type="checkbox" name="listas" value="{{ c }}">
-        <span><b>{{ rot }}</b>{{ ' ⚡' if c in grp.risco }} <span class="tag dlg-sug" style="font-size:.7rem" hidden>sugerida</span></span></label>
-      {% endfor %}
+    <p class="hint" style="margin:0 0 .4rem"><span class="tag" style="font-size:.7rem">sugerida</span> = lista sugerida pela IA. O domínio é bloqueado com todos os subdomínios, em todas as empresas que aplicam a lista (em até 1 h).</p>
+    <div style="max-height:52vh;overflow:auto;border-top:1px solid var(--bd)">
+      {{ caixas("dlgBlqL", 'name="listas"') }}
     </div>
     <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
       <button type="button" onclick="document.getElementById('dlgBlq').close()">Cancelar</button>
@@ -37,8 +35,8 @@
     document.getElementById("dlgNomes").textContent = nomes.length + " domínio(s): " + nomes.slice(0, 12).join(", ") + (nomes.length > 12 ? " …" : "");
     const cats = new Set(Array.isArray(src) ? (window._blqCats || []) : [src.dataset.cat || ""]);
     dlg.querySelectorAll('input[name="listas"]').forEach(function (c) {
-      c.checked = cats.size === 1 && cats.has(c.value);
-      c.closest("label").querySelector(".dlg-sug").hidden = !cats.has(c.value);
+      c.checked = false;   // sempre abre desmarcado (pedido do usuário); a sugestão só aparece como etiqueta
+      c.closest("label").querySelector(".lx-sug").hidden = !cats.has(c.value);
     });
     dlg.showModal();
   };
@@ -51,15 +49,14 @@
       if (!LISTAS.includes(p[0])) { sem += p[1].length ? 1 : 0; return; }
       p[1].forEach(function (it) { const i = document.createElement("input"); i.type = "hidden"; i.name = "sug"; i.value = p[0] + "|" + it; box.appendChild(i); n++; });
     });
-    if (!n) { alert("A categoria sugerida pela IA não é uma lista de bloqueio — use “Bloquear…” e escolha a lista."); return; }
+    if (!n) { alert("A IA não sugeriu lista de bloqueio para este site — use “Bloquear…” e escolha a lista."); return; }
     if (!confirm("Pôr " + (Array.isArray(src) ? "os selecionados" : "este site") + " na lista sugerida pela IA?" + (sem ? "\n(" + sem + " sem lista sugerida ficam de fora)" : ""))) return;
     window._blqSrc = Array.isArray(src) ? null : src;
     f.acao.value = "sugerida"; f.dataset.confirmado = "1"; f.requestSubmit(); f.acao.value = "bloquear";
   };
   window.dlgValida = function (f) {
     if (f.dataset.confirmado) { delete f.dataset.confirmado; return true; }
-    const g = Array.from(f.querySelectorAll('input[name="listas"]:checked')).map(function (c) { return c.closest("label").querySelector("b").textContent; });
-    if (!g.length) { alert("Escolha pelo menos uma lista."); return false; }
+    if (!f.querySelectorAll('input[name="listas"]:checked').length) { alert("Escolha pelo menos uma lista."); return false; }
     return true;
   };
 })();

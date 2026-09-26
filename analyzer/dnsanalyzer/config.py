@@ -87,6 +87,8 @@ class Settings:
     whois_enabled: bool
     whois_workers: int
     auto_block_categories: list[str]
+    lista_ia_enabled: bool
+    lista_confianca_min: float
     lists_allowed_ips: list[str]
 
     reanalyze_days: int
@@ -167,6 +169,8 @@ def load_settings() -> Settings:
         # bloqueio automático (pedido do usuário 2026-09-26): categorias de baixo risco de impacto,
         # recomendação BLOQUEAR, sem decisão -> lista da categoria (vazio = desligado)
         auto_block_categories=_list("AUTO_BLOCK_CATEGORIES", "jogos,apostas,adulto,vpn_proxy,ameaca"),
+        lista_ia_enabled=_bool(os.environ.get("LISTA_IA_ENABLED"), True),   # etapa "lista" (qual lista de bloqueio)
+        lista_confianca_min=float(os.environ.get("LISTA_CONFIANCA_MIN") or 0.9),
         # quem pode baixar /listas/<categoria>.txt sem token (o Technitium)
         lists_allowed_ips=_list("LISTS_ALLOWED_IPS", "10.100.10.15,127.0.0.1"),
         reanalyze_days=_int("REANALYZE_DAYS", 30),

@@ -262,7 +262,7 @@ def test_listas_curadas_so_manual_com_sugestoes(api):
     m = api.get("/listas-dominio/cdn.rede-social-1.com", headers=H).json()
     assert [(x["category"], x["domain"]) for x in m] == [("redes_sociais", "rede-social-1.com")]
     r = {x["categoria"]: x for x in api.get("/listas", headers=H).json()["categorias"]}
-    assert r["redes_sociais"]["tipo"] == "curada" and r["jogos"]["tipo"] == "auto" and r["outros_bloqueios"]["tipo"] == "manual"
+    assert r["redes_sociais"]["tipo"] == "ia" and r["pirataria"]["tipo"] == "ia" and r["outros_bloqueios"]["tipo"] == "manual"
 
 
 def test_politicas(api):

@@ -77,9 +77,11 @@
     <label class="chk" style="margin:.2rem 0;font-weight:600"><input type="checkbox" id="lDefault" {{ 'checked' if default_tem }}> <span>Redes sem cadastro (padrão)</span></label>
     {% for e in empresas_pol %}<label class="chk" style="margin:.2rem 0;font-weight:400"><input type="checkbox" class="lTid" value="{{ e.id }}" {{ 'checked' if e.tem }}> <span>{{ e.nome }}</span></label>{% endfor %}
   </div>
-  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.7rem">
-    <button type="button" onclick="document.getElementById('dlgLib').close()">Cancelar</button>
-    <button type="button" class="primary" id="lSalvar">Salvar e aplicar</button>
+  <div style="display:flex;gap:.5rem;justify-content:space-between;margin-top:.7rem;flex-wrap:wrap">
+    <div style="display:flex;gap:.3rem"><button type="button" class="mini" onclick="document.querySelectorAll('#dlgLib .lTid').forEach(c=>c.checked=true)">Marcar todas</button>
+      <button type="button" class="mini" onclick="document.querySelectorAll('#dlgLib .lTid').forEach(c=>c.checked=false)">Desmarcar todas</button></div>
+    <div style="display:flex;gap:.5rem"><button type="button" onclick="document.getElementById('dlgLib').close()">Cancelar</button>
+      <button type="button" class="primary" id="lSalvar">Salvar e aplicar</button></div>
   </div>
 </dialog>
 <script>

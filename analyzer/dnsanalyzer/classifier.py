@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, db, enrich, listas, ti, webintel, whois
+from . import catalog, db, enrich, listas, listas_ia, ti, webintel, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -466,6 +466,8 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
                     time.sleep(60)
                     continue
             st = phase_b(client, cats)
+            if st == "idle":            # fila da IA vazia: etapa "lista" (qual lista de bloqueio)
+                st = listas_ia.fase(client)
             if st == "idle":
                 time.sleep(20)
             elif st == "unavailable":
@@ -522,6 +524,12 @@ def run_forever(stop=lambda: False) -> None:
                 if feitos:
                     event("auto_block", detail=f"{len(feitos)} site(s) nas listas de bloqueio: " + ", ".join(
                         f"{r['name']} ({r['category']})" for r in feitos[:12]) + (" …" if len(feitos) > 12 else ""))
+                with db.conn() as c:
+                    ap = listas_ia.aplicar(c)
+                if ap["direto"] or ap["revisar"] or ap["resolvidos"]:
+                    event("lista_ia", detail=f"listas pela IA: {len(ap['direto'])} direto, {len(ap['revisar'])} p/ Para revisar, "
+                          f"{len(ap['resolvidos'])} resolvidos pela etapa 4: " + ", ".join(
+                              f"{n} ({c_})" for n, c_ in ap["direto"][:10]) + (" …" if len(ap["direto"]) > 10 else ""))
             if time.monotonic() - last_stale > 3600:
                 m = reanalyze_stale(cfg.reanalyze_days)
                 if m:
@@ -533,6 +541,8 @@ def run_forever(stop=lambda: False) -> None:
             status = phase_b(client, cats)
             if status == "idle":            # etapa 1 vazia: etapa 2 (busca na web); a 3 tem workers próprios
                 status = phase_c(cliente_etapa2(), cats)
+            if status == "idle":            # etapas 1 e 2 vazias: etapa "lista"
+                status = listas_ia.fase(cliente_etapa2())
             if status == "idle":
                 time.sleep(20)
             elif status == "unavailable":

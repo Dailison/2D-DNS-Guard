@@ -452,8 +452,6 @@ def listas_categoria():
     from app import politicas as pol
     sugestoes, empresas_pol, default_tem = [], [], False
     try:
-        if cat in ("redes_sociais", "streaming", "publicidade", "compras", "noticias"):
-            sugestoes = api.get(f"/listas/{quote(cat, safe='')}/sugestoes", limit=300)
         por = pol.por_escopo()
         default_tem = cat in ((por.get("default") or {}).get("lists") or [])
         for e in emp.lista():
@@ -484,13 +482,13 @@ def _det_filtros(ordem_padrao: str, cls_padrao: str = "") -> dict:
     a = request.args
     pp = a.get("pp", 100, type=int)
     return {"q": (a.get("q") or "").strip().lower(), "cls": a.get("cls", cls_padrao), "cat_ia": a.get("cat_ia", ""),
-            "revisao": a.get("revisao", ""), "ordem": a.get("ordem") or ordem_padrao,
+            "revisao": a.get("revisao", ""), "sug": a.get("sug", ""), "ordem": a.get("ordem") or ordem_padrao,
             "pp": pp if pp in (100, 250, 500) else 100, "pag": max(1, a.get("pag", 1, type=int))}
 
 
 def _det_params(fd: dict) -> dict:
     return {"q": fd["q"] or None, "cls": fd["cls"] or None, "cat_ia": fd["cat_ia"] or None,
-            "revisao": fd["revisao"] or None, "ordem": fd["ordem"], "limit": fd["pp"], "offset": (fd["pag"] - 1) * fd["pp"]}
+            "revisao": fd["revisao"] or None, "sug": fd["sug"] or None, "ordem": fd["ordem"], "limit": fd["pp"], "offset": (fd["pag"] - 1) * fd["pp"]}
 
 
 def _pag_url(n: int) -> str:
@@ -524,6 +522,22 @@ def listas_lote_dominios():
             r = api.post("/domains-reanalyze", {"domains": doms})
             return _json(True, f"{r.get('enviados', 0)} domínio(s) enviados para nova análise (regras agora; IA, busca na web e WHOIS na fila)."
                          + (f" {r['ignorados']} ficaram de fora (classificação travada à mão ou nunca acessados)." if r.get("ignorados") else ""))
+        if acao == "aprovar":
+            if cat not in rot:
+                return _json(False, "lista inválida")
+            r = api.post("/listas-aprovar", {"domains": doms, "de": cat, "by": quem})
+            for alvo, ds in (r.get("movidos") or {}).items():
+                for x in ds:
+                    _decisao_global(x, "blocked")
+            for x in r.get("tirados") or []:
+                _decisao_global(x, "allowed")
+            current_app.logger.info("DNS: %s aprovou sugestões da IA em %s: %s", quem, cat, r)
+            partes = [f"{len(ds)} → {rot.get(a, a)}" for a, ds in (r.get("movidos") or {}).items()]
+            if r.get("tirados"):
+                partes.append(f"{len(r['tirados'])} fora de {rot[cat]} (nenhuma lista)")
+            if r.get("sem_sugestao"):
+                partes.append(f"{len(r['sem_sugestao'])} sem sugestão ainda (ficaram)")
+            return _json(True, "Sugestões aprovadas: " + "; ".join(partes or ["nada a fazer"]) + ". O DNS atualiza em até 1 h.")
         if acao in ("mover", "tirar"):
             if cat not in rot:
                 return _json(False, "lista inválida")

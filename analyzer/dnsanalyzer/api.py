@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import __version__, db, listas
 from .config import settings
@@ -493,7 +493,8 @@ def review_queue(tid: int, days: int = 30, limit: int = Query(200, le=1000)):
             " GROUP BY q.tenant_id, q.domain_id, q.bucket ORDER BY q.tenant_id, q.domain_id, q.bucket DESC) "
             "SELECT v.tenant_id, t.name AS tenant_name, v.name, v.classification, v.category, v.topic, v.risk_score, "
             " v.corp_action, v.corp_reason, v.corp_by, "
-            " v.work_score, v.total_queries, v.clients_count, v.first_seen, v.last_seen "
+            " v.work_score, v.total_queries, v.clients_count, v.first_seen, v.last_seen, "
+            " (SELECT dd.lista_ia FROM domains dd WHERE dd.id = v.domain_id) AS lista_ia "
             "FROM cand v JOIN tenants t ON t.id=v.tenant_id "
             "LEFT JOIN ult u ON u.tenant_id=v.tenant_id AND u.domain_id=v.domain_id "
             "WHERE u.blocked IS NULL OR u.blocked < u.queries "
@@ -1072,8 +1073,8 @@ def listas_resumo():
         n = {k: len(listas.dominios(c, k)) for k in listas.CATEGORIAS}
         n24 = c.execute("SELECT count(*) AS n FROM category_lists WHERE added_by LIKE %s "
                         "AND added_at > now() - interval '24 hours'", (listas.AUTO_BY + "%",)).fetchone()["n"]
-    return {"categorias": [{"categoria": k, "total": n.get(k, 0), "tipo": "auto" if k in listas.CATEGORIAS_RISCO
-                            else "curada" if k in listas.CATEGORIAS_CURADAS else "manual"} for k in listas.CATEGORIAS],
+    return {"categorias": [{"categoria": k, "total": n.get(k, 0), "tipo": "manual" if k in listas.CATEGORIAS_MANUAIS
+                            else "ia"} for k in listas.CATEGORIAS],
             "auto": listas.categorias_auto(), "auto_24h": n24}
 
 
@@ -1103,23 +1104,23 @@ def lista_sugestoes(categoria: str, limit: int = Query(500, le=5000)):
 
 @app.get("/listas/{categoria}/detalhes", dependencies=[Depends(auth)])
 def lista_detalhes(categoria: str, q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
-                   revisao: Optional[str] = None, ordem: str = "recentes", offset: int = Query(0, ge=0),
+                   revisao: Optional[str] = None, sug: Optional[str] = None, ordem: str = "recentes", offset: int = Query(0, ge=0),
                    limit: int = Query(100, le=1000)):
     """Itens da lista com a classificação da IA, a revisão manual (quem/quando) e facetas p/ filtrar."""
     if categoria not in listas.CATEGORIAS:
         raise HTTPException(404, "categoria sem lista")
     with db.conn() as c:
-        return listas.detalhes(c, categoria, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, ordem=ordem,
+        return listas.detalhes(c, categoria, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, ordem=ordem,
                                offset=offset, limit=limit)
 
 
 @app.get("/sem-lista", dependencies=[Depends(auth)])
 def sem_lista(q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
-              revisao: Optional[str] = None, ordem: str = "consultas", offset: int = Query(0, ge=0),
+              revisao: Optional[str] = None, sug: Optional[str] = None, ordem: str = "consultas", offset: int = Query(0, ge=0),
               limit: int = Query(100, le=1000)):
     """Domínios analisados fora de qualquer lista (não vão p/ o Technitium)."""
     with db.conn() as c:
-        return listas.sem_lista(c, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, ordem=ordem,
+        return listas.sem_lista(c, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, ordem=ordem,
                                 offset=offset, limit=limit)
 
 
@@ -1144,6 +1145,88 @@ def listas_mover(body: MoverIn):
         n = 0 if body.de in body.para else c.execute(
             "DELETE FROM category_lists WHERE category=%s AND domain = ANY(%s)", (body.de, doms)).rowcount
     return {"ok": True, "movidos": len(doms), "removidos": n}
+
+
+class AprovarIn(BaseModel):
+    domains: list[str]
+    de: str
+    by: str = ""
+
+
+@app.post("/listas-aprovar", dependencies=[Depends(auth)])
+def listas_aprovar(body: AprovarIn):
+    """Aprova a sugestão da IA: cada domínio sai da lista `de` e vai p/ a lista sugerida (sugestão
+    "nenhuma" = só sai). Sem sugestão ainda: fica onde está."""
+    if body.de not in listas.CATEGORIAS:
+        raise HTTPException(422, "lista inexistente")
+    doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    out = {"movidos": {}, "tirados": [], "sem_sugestao": []}
+    with db.conn() as c:
+        sug = {r["name"]: r for r in c.execute("SELECT name, lista_ia, lista_at, lista_fonte FROM domains WHERE name = ANY(%s)", (doms,))}
+        for d in doms:
+            r = sug.get(d)
+            if not r or not r["lista_at"] or r["lista_fonte"] == "falhou":
+                out["sem_sugestao"].append(d)
+                continue
+            alvo = r["lista_ia"]
+            if alvo and alvo in listas.CATEGORIAS and alvo != body.de:
+                c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                          (alvo, d, body.by or None))
+                out["movidos"].setdefault(alvo, []).append(d)
+            elif alvo == body.de:
+                continue
+            else:
+                out["tirados"].append(d)
+            c.execute("DELETE FROM category_lists WHERE category = %s AND domain = %s", (body.de, d))
+    return {"ok": True, **out}
+
+
+@app.get("/listas-ia/status", dependencies=[Depends(auth)])
+def listas_ia_status():
+    from . import listas_ia
+    with db.conn() as c:
+        return listas_ia.status(c)
+
+
+# ------------------------------------------------------------------ etapa 4 (IA online: revisa as dúvidas)
+@app.get("/etapa4/pendentes", dependencies=[Depends(auth)])
+def etapa4_pendentes(limit: int = Query(50, le=500)):
+    """Dúvidas da etapa "lista" que estão em Para revisar, com o que já se sabe de cada domínio."""
+    from . import listas_ia
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT d.name, d.topic, d.classification, d.category, d.corp_reason, d.reasons, d.evidence, d.lista_ia, "
+            " d.lista_conf, d.lista_motivo, d.lista_servico, d.total_queries FROM category_lists l JOIN domains d ON d.name = l.domain "
+            "WHERE l.category = 'para_revisar' AND d.lista_at IS NOT NULL AND d.lista_fonte = 'local' "
+            "ORDER BY d.total_queries DESC LIMIT %s", (limit,)).fetchall()
+    return [{"domain": r["name"], "contexto": listas_ia._contexto(r), "sugestao_local": r["lista_ia"] or listas_ia.NENHUMA,
+             "confianca_local": r["lista_conf"], "motivo_local": r["lista_motivo"], "total_queries": r["total_queries"]}
+            for r in rows]
+
+
+class Etapa4In(BaseModel):
+    domain: str
+    lista: str
+    confianca: float = Field(ge=0, le=1)
+    motivo: str = ""
+    servico: str = ""
+    fonte: str = "claude"
+
+
+@app.post("/etapa4/decisao", dependencies=[Depends(auth)])
+def etapa4_decisao(body: Etapa4In):
+    """Resposta da IA online p/ um domínio: grava como a sugestão da lista (fonte etapa4:<quem>) e o
+    próximo ciclo aplica (certeza = entra na lista; "nenhuma" com certeza = sai de Para revisar)."""
+    from . import listas_ia
+    if body.lista not in listas_ia.LISTAS_IA and body.lista != listas_ia.NENHUMA:
+        raise HTTPException(422, "lista inválida")
+    with db.conn() as c:
+        r = c.execute("SELECT id FROM domains WHERE name = %s", (body.domain.strip().lower().rstrip("."),)).fetchone()
+        if not r:
+            raise HTTPException(404, "domínio não encontrado")
+        listas_ia.salvar(c, r["id"], body.lista, body.confianca, body.motivo, body.servico,
+                         "etapa4:" + (body.fonte or "online")[:30])
+    return {"ok": True}
 
 
 class NomesIn(BaseModel):

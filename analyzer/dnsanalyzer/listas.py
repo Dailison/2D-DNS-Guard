@@ -14,15 +14,16 @@ import logging
 from .config import settings
 
 log = logging.getLogger(__name__)
-CATEGORIAS_RISCO = ("jogos", "apostas", "adulto", "vpn_proxy", "ameaca")   # bloqueio automático
-# listas CURADAS à mão (pedido do usuário 2026-09-26): a IA só SUGERE a categoria; uma pessoa
-# confirma e o site entra na lista. Só as de risco (acima) a IA põe sozinha.
-CATEGORIAS_CURADAS = ("redes_sociais", "mensageiros", "streaming", "publicidade", "compras", "noticias")
-CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado — ver CATEGORIAS_CURADAS)
-# só manual: o que foi bloqueado à mão e não cabe numa categoria (migração dos grupos antigos)
-# infra_bloqueio: DoH/DNS alternativo e domínios que se passam por CDN (não é a CATEGORIA "infraestrutura"
-# da IA, que marca serviços de trabalho: nome próprio p/ o "⛔ Sugerida" nunca bloquear infra de verdade)
-CATEGORIAS_MANUAIS = ("infra_bloqueio", "outros_bloqueios", "para_revisar")   # para_revisar: sobras da migração, ninguém aplica
+# bloqueio automático RÁPIDO pela categoria da classificação principal (sem esperar a etapa "lista")
+CATEGORIAS_RISCO = ("jogos", "apostas", "adulto", "vpn_proxy", "ameaca")
+# nova organização (pedido do usuário 2026-09-26): a IA põe o site em QUALQUER destas listas quando tem
+# certeza (etapa "lista", listas_ia.py); sem certeza, vai p/ Para revisar com a sugestão
+CATEGORIAS_CURADAS = ("doh_dns", "redes_sociais", "streaming", "mensageiros", "publicidade", "compras", "noticias",
+                      "pirataria", "ia_chatbots", "nuvem_remoto")
+CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado)
+# Sistema = só manual. infra_bloqueio ("Infraestrutura"): NÃO é a categoria "infraestrutura" da IA (serviços
+# de trabalho); outros_bloqueios ("Outros"); para_revisar: dúvidas da IA + sobras da migração, ninguém aplica
+CATEGORIAS_MANUAIS = ("infra_bloqueio", "outros_bloqueios", "para_revisar")
 CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_CURADAS + CATEGORIAS_MANUAIS
 AUTO_BY = "bloqueio automático"
 
@@ -104,10 +105,11 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
 # ------------------------------------------------------------------ detalhes p/ o console
 # O que a IA achou de cada domínio + se alguém já revisou à mão. "manual" = classificação travada,
 # decisão (global ou de empresa), ajuste de empresa ou entrada posta na lista por um operador.
-_ORIGEM_NAO_MANUAL = (AUTO_BY, "migração", "serviço ", "catálogo", "classificação da IA")
+_ORIGEM_NAO_MANUAL = (AUTO_BY, "IA automática", "IA com dúvida", "migração", "serviço ", "catálogo", "classificação da IA")
 DETALHE_SQL = (
     "SELECT d.name AS domain, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
     " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "
+    " d.lista_ia, d.lista_conf, d.lista_motivo, d.lista_servico, d.lista_fonte, d.lista_at, "
     " g.status AS g_status, g.reviewed_by AS g_by, g.reviewed_at AS g_at, "
     " t.n_decisoes, t.n_ajustes, t.ult_status, t.ult_por, t.ult_em "
     "FROM domains d LEFT JOIN global_reviews g ON g.domain_id = d.id "
@@ -125,7 +127,7 @@ def _revisao(r: dict, added_by: str | None = None) -> str:
     if not r.get("classification") or r.get("llm_pending"):
         return "pendente"
     manual_lista = bool(added_by) and not any(added_by.startswith(p) for p in _ORIGEM_NAO_MANUAL)
-    global_manual = bool(r.get("g_status")) and not (r.get("g_by") or "").startswith(AUTO_BY)
+    global_manual = bool(r.get("g_status")) and not (r.get("g_by") or "").startswith((AUTO_BY, "IA automática"))
     if r.get("locked") or r.get("classified_by") == "manual" or global_manual or r.get("n_decisoes") \
             or r.get("n_ajustes") or manual_lista:
         return "manual"
@@ -143,22 +145,32 @@ def _detalhar(c, rows: list[dict]) -> list[dict]:
     return out
 
 
+def _sugestao(r: dict) -> str:
+    """Lista sugerida pela etapa "lista" ('_nenhuma' = a IA disse que não é de lista; '_sem' = ainda não viu)."""
+    if r.get("lista_ia"):
+        return r["lista_ia"]
+    return "_nenhuma" if r.get("lista_at") and r.get("lista_fonte") != "falhou" else "_sem"
+
+
+_CAMPO = {"classificacao": lambda r: r.get("classification") or "_sem",
+          "cat_ia": lambda r: r.get("cat_ia") or "_sem", "revisao": lambda r: r["revisao"], "sugestao": _sugestao}
+
+
 def _facetar(rows: list[dict]) -> dict:
-    fac: dict = {"cat_ia": {}, "classificacao": {}, "revisao": {}}
+    fac: dict = {k: {} for k in _CAMPO}
     for r in rows:
-        for k, v in (("cat_ia", r.get("cat_ia") or "_sem"), ("classificacao", r.get("classification") or "_sem"),
-                     ("revisao", r["revisao"])):
+        for k, f in _CAMPO.items():
+            v = f(r)
             fac[k][v] = fac[k].get(v, 0) + 1
     return fac
 
 
-def _filtrar_paginar(rows: list[dict], q=None, cls=None, cat_ia=None, revisao=None, ordem="recentes",
-                     offset=0, limit=100, fixo: dict | None = None) -> dict:
+def _filtrar_paginar(rows: list[dict], q=None, cls=None, cat_ia=None, revisao=None, sug=None, ordem="recentes",
+                     offset=0, limit=100) -> dict:
     """Facetas contadas com os OUTROS filtros aplicados (cada filtro mostra o que sobra nele)."""
     q = (q or "").strip().lower()
-    filtros = {"classificacao": cls, "cat_ia": cat_ia, "revisao": revisao}
-    campo = {"classificacao": lambda r: r.get("classification") or "_sem",
-             "cat_ia": lambda r: r.get("cat_ia") or "_sem", "revisao": lambda r: r["revisao"]}
+    filtros = {"classificacao": cls, "cat_ia": cat_ia, "revisao": revisao, "sugestao": sug}
+    campo = _CAMPO
 
     def passa(r, exceto=None):
         if q and q not in r["domain"]:

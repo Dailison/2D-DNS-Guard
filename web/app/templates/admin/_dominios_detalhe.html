@@ -1,3 +1,4 @@
+{% from "admin/_listas_caixas.html" import caixas with context %}
 {# Tabela de domínios com a classificação da IA e o estado da revisão manual (listas de bloqueio e
    "Classificados por IA como Trabalho"). Variáveis: det (API), fd (filtros atuais), modo ('lista' |
    'sem_lista'), cat (lista atual, modo 'lista'), categorias, scats {code: label}, pag_url(n). #}
@@ -26,6 +27,10 @@
     <option value="">todas</option>
     {% for k, n in det.facetas.cat_ia|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.cat_ia }}>{{ 'sem categoria' if k == '_sem' else scats.get(k, k) }} ({{ n }})</option>{% endfor %}
   </select></div>
+  <div><label>Sugestão da IA</label><select name="sug" onchange="this.form.submit()">
+    <option value="">todas</option>
+    {% for k, n in det.facetas.get('sugestao', {})|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.sug }}>{{ {'_nenhuma': 'nenhuma lista', '_sem': 'ainda não vista'}.get(k) or LISTAS_ROT.get(k, k) }} ({{ n }})</option>{% endfor %}
+  </select></div>
   <div><label>Revisão</label><select name="revisao" onchange="this.form.submit()">
     <option value="">todas</option>
     {% for k in ('ia', 'manual', 'pendente') %}<option value="{{ k }}" {{ 'selected' if k == fd.revisao }}>{{ REV[k] }} ({{ det.facetas.revisao.get(k, 0) }})</option>{% endfor %}
@@ -43,6 +48,7 @@
   <label class="chk" style="margin:0;font-weight:400"><input type="checkbox" id="ddTodos"> <span>todos da página</span></label>
   <span class="mut" id="ddN" style="font-size:.85rem">0 selecionado(s)</span>
   {% if modo == 'lista' %}
+  <button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" data-dd="aprovar" title="cada domínio vai para a lista que a IA sugeriu (sugestão 'nenhuma' = sai desta lista)">✓ Aprovar sugestão da IA</button>
   <button type="button" class="mini primary" data-dd="mover">Mover para…</button>
   <button type="button" class="mini danger" data-dd="tirar">✕ Tirar da lista</button>
   {% else %}
@@ -52,7 +58,7 @@
 </div>
 
 <table class="dd-t">
-  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>IA</th><th>Recomendação</th><th>Revisão</th><th class="num">Consultas</th>{% if modo == 'lista' %}<th>Entrou na lista</th><th></th>{% endif %}</tr></thead>
+  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>IA</th><th>Sugestão da IA</th><th>Recomendação</th><th>Revisão</th><th class="num">Consultas</th>{% if modo == 'lista' %}<th>Entrou na lista</th><th></th>{% endif %}</tr></thead>
   <tbody>
   {% for i in det['items'] %}
     {% set c = CLS.get(i.classification) %}
@@ -61,7 +67,14 @@
       <td><a href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}">{{ i.domain }}</a></td>
       <td>{% if c %}<span class="dd-cls" style="background:{{ c[1] }};color:{{ c[2] }}">{{ c[0] }}</span>{% else %}<span class="mut">—</span>{% endif %}
         {% if i.cat_ia %}<div class="dd-sub">{{ scats.get(i.cat_ia, i.cat_ia) }}{% if i.confidence %} · {{ (i.confidence * 100)|round|int }}%{% endif %}</div>{% endif %}</td>
-      <td style="font-size:.84rem;max-width:22rem">{{ REC.get(i.corp_action, i.corp_action or '—') }}
+      <td style="font-size:.84rem;max-width:16rem">
+        {% if i.lista_at and i.lista_fonte != 'falhou' %}
+          <b>{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else 'nenhuma lista' }}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}
+          {% if i.lista_ia and modo == 'lista' and i.lista_ia == cat %} <span class="dd-sub">✓ esta</span>{% endif %}
+          <div class="dd-sub">{{ i.lista_servico or '' }}{% if i.lista_motivo %} — {{ i.lista_motivo|truncate(90) }}{% endif %}{% if (i.lista_fonte or '').startswith('etapa4') %} · etapa 4{% endif %}</div>
+        {% else %}<span class="mut">—</span>{% endif %}
+      </td>
+      <td style="font-size:.84rem;max-width:20rem">{{ REC.get(i.corp_action, i.corp_action or '—') }}
         {% if i.corp_reason %}<div class="dd-sub">{{ i.corp_reason|truncate(140) }}</div>{% endif %}</td>
       <td style="font-size:.84rem">
         <b>{{ REV[i.revisao] }}</b>
@@ -88,7 +101,7 @@
       {% endif %}
     </tr>
   {% else %}
-    <tr><td colspan="8" class="mut">Nada {{ 'nesta lista' if modo == 'lista' else 'aqui' }} para esses filtros.</td></tr>
+    <tr><td colspan="9" class="mut">Nada {{ 'nesta lista' if modo == 'lista' else 'aqui' }} para esses filtros.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -108,12 +121,8 @@
 <dialog id="dlgDD" class="dlg" style="max-width:560px;width:calc(100vw - 32px)">
   <h2 style="margin:0 0 .3rem" id="ddTit">Pôr em quais listas?</h2>
   <p class="mut" id="ddSub" style="font-size:.85rem;margin:.1rem 0 .5rem"></p>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.2rem .8rem;max-height:50vh;overflow:auto">
-    {% for c, r in categorias if not (modo == 'lista' and c == cat) %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" class="ddL" value="{{ c }}"> <span>{{ r }}</span></label>{% endfor %}
-  </div>
-  <div style="display:flex;gap:.5rem;justify-content:space-between;margin-top:.7rem;flex-wrap:wrap">
-    <div style="display:flex;gap:.3rem"><button type="button" class="mini" onclick="document.querySelectorAll('#dlgDD .ddL').forEach(c=>c.checked=true)">Marcar todas</button>
-      <button type="button" class="mini" onclick="document.querySelectorAll('#dlgDD .ddL').forEach(c=>c.checked=false)">Desmarcar todas</button></div>
+  <div style="max-height:55vh;overflow:auto">{{ caixas("ddG", 'class="ddL"', [cat] if modo == 'lista' else []) }}</div>
+  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.7rem;flex-wrap:wrap">
     <div style="display:flex;gap:.5rem"><button type="button" onclick="document.getElementById('dlgDD').close()">Cancelar</button>
       <button type="button" class="danger" id="ddOk">Confirmar</button></div>
   </div>
@@ -141,6 +150,8 @@
     if (!n) { alert("Selecione pelo menos um domínio."); return; }
     if (acao === "tirar") {
       if (confirm(`Tirar ${n} domínio(s) da lista ${nomeCat}? Fica registrado como “manter liberado”.`)) envia("tirar");
+    } else if (acao === "aprovar") {
+      if (confirm(`Aprovar a sugestão da IA para ${n} domínio(s)? Cada um vai para a lista sugerida (sugestão "nenhuma" = sai de ${nomeCat}). Sem sugestão ainda, fica onde está.`)) envia("aprovar");
     } else if (acao === "reanalisar") {
       if (confirm(`Pedir nova análise da IA para ${n} domínio(s)? Classificações travadas à mão ficam como estão.`)) envia("reanalisar");
     } else {

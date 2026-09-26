@@ -1,5 +1,6 @@
 {% extends "admin/analise/_base.html" %}
 {% import "admin/analise/_macros.html" as m with context %}
+{% from "admin/_listas_caixas.html" import caixas with context %}
 {% block an %}
 <p><a href="{{ url_for('analise.dominios', t=tid) }}">← Domínios</a></p>
 {% if not d %}
@@ -179,9 +180,10 @@
       {% set nas = blq.listas|selectattr('entrada', 'equalto', blq.nome)|map(attribute='cat')|list %}
       <form id="fListas" style="margin:.4rem 0 .6rem" onsubmit="return false">
         <label style="margin:0">Listas de bloqueio de <code>{{ blq.nome }}</code></label>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.2rem .8rem;margin:.3rem 0 .5rem">
-          {% for c, rot in blq.categorias %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" value="{{ c }}" {{ 'checked' if c in nas }}> <span>{{ rot }}{{ ' ⚡' if c in blq.risco }}{% if c == dm.category %} <span class="tag" style="font-size:.68rem">sugerida</span>{% endif %}</span></label>{% endfor %}
-        </div>
+        {{ caixas("fListasG") }}
+        <script>(function () { const nas = {{ nas|tojson }}, sug = {{ (dm.lista_ia or '')|tojson }};
+          document.querySelectorAll("#fListasG .lx-sec input").forEach(i => { i.checked = nas.includes(i.value);
+            i.closest("label").querySelector(".lx-sug").hidden = i.value !== sug; }); })();</script>
         <button type="button" class="danger" id="bListas">Salvar listas</button>
         <span class="mut" style="font-size:.8rem;margin-left:.5rem">vale para todas as empresas que aplicam cada lista (no DNS em até 1 h); nenhuma marcada = manter liberado</span>
       </form>

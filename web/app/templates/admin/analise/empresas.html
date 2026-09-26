@@ -1,6 +1,7 @@
 {% extends "admin/analise/_base.html" %}
 {% import "admin/analise/_macros.html" as m with context %}
 {% block an %}
+{% from "admin/_listas_caixas.html" import caixas with context %}
 {% set cadastradas = tenants|rejectattr('auto_created')|list %}
 {% set sem = tenants|selectattr('auto_created')|list %}
 <style>
@@ -153,24 +154,15 @@ II 10.52.0.0/16"></textarea>
     <label class="chk" id="pHerdarBox" style="margin:0 0 .45rem;display:none"><input type="checkbox" id="pHerdar"> <span>usar as listas da empresa</span></label>
   </div>
   <div id="pCampos" style="max-height:58vh;overflow:auto;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:.3rem 0">
-    {% for c, rot in cats %}
-    {% set srvs = pacotes|selectattr('category', 'equalto', c)|list %}
-    <div class="pcat">
-      <label class="chk" style="margin:0;font-weight:600"><input type="checkbox" class="pLista" value="{{ c }}"> <span>{{ rot }}{{ ' ⚡' if c in cats_risco }}</span></label>
-      {% if srvs %}<div class="psrv">
-        {% for x in srvs %}<span class="ps"><span>{{ x.name }}</span>
-          <select data-srv="{{ x.slug }}"><option value="">herda</option><option value="bloquear">bloquear</option><option value="liberar">liberar</option></select></span>{% endfor %}
-      </div>{% endif %}
-    </div>
-    {% endfor %}
-    {% set avulsas = pacotes|rejectattr('category')|list %}
+    {{ caixas("pListas", 'class="pLista"', ['para_revisar']) }}
+    {% set avulsas = pacotes %}
     {% if avulsas %}
     <div class="pcat"><div style="font-weight:600;margin:.2rem 0">Liberar como exceção <span class="mut" style="font-weight:400;font-size:.8rem">(serviços e listas de liberação — vencem qualquer bloqueio)</span></div>
       <div class="psrv">{% for x in avulsas %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" class="pAvulsa" value="{{ x.slug }}"> <span>{{ x.name }}</span></label>{% endfor %}</div>
     </div>
     {% endif %}
   </div>
-  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = a IA põe os sites sozinha. Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 1 h; as exceções, na hora.</p>
+  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = listas de risco. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 1 h; as exceções, na hora.</p>
   <div style="display:flex;gap:.5rem;justify-content:flex-end">
     <button type="button" onclick="document.getElementById('dlgPol').close()">Cancelar</button>
     <button type="button" class="primary" id="pSalvar">Salvar e aplicar</button>
@@ -184,8 +176,6 @@ II 10.52.0.0/16"></textarea>
   let atual = null;
   function marca(p) {
     dlg.querySelectorAll(".pLista").forEach(i => i.checked = (p.lists || []).includes(i.value));
-    dlg.querySelectorAll("select[data-srv]").forEach(s => s.value = (p.services || []).includes(s.dataset.srv) ? "liberar"
-                                                                 : (p.blocked || []).includes(s.dataset.srv) ? "bloquear" : "");
     dlg.querySelectorAll(".pAvulsa").forEach(i => i.checked = (p.services || []).includes(i.value));
   }
   function mostra() {
@@ -207,11 +197,9 @@ II 10.52.0.0/16"></textarea>
   herdar.addEventListener("change", () => { document.getElementById("pCampos").style.opacity = herdar.checked ? .45 : 1; if (herdar.checked) marca(atual.pol); });
   document.getElementById("pSalvar").addEventListener("click", async (ev) => {
     const b = ev.target; b.disabled = true;
-    const sel = v => [...dlg.querySelectorAll("select[data-srv]")].filter(s => s.value === v).map(s => s.dataset.srv);
     const body = {unidade: esc.value, herdar: herdar.checked,
       lists: [...dlg.querySelectorAll(".pLista:checked")].map(i => i.value),
-      services: sel("liberar").concat([...dlg.querySelectorAll(".pAvulsa:checked")].map(i => i.value)),
-      blocked: sel("bloquear")};
+      services: [...dlg.querySelectorAll(".pAvulsa:checked")].map(i => i.value), blocked: []};
     try {
       const r = await fetch(URL.replace("/0/", "/" + atual.tid + "/"), {method: "POST", credentials: "same-origin",
         headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(body)});

@@ -210,13 +210,19 @@ def grupo_da_rede(cidr, ngm):
 
 # ------------------------------------------------ listas por categoria (assinadas pelos grupos)
 # O analisador publica /listas/<categoria>.txt; cada grupo assina as que quiser (blockListUrls).
-CATEGORIAS_LISTA = [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("adulto", "Conteúdo adulto"),
-                    ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"), ("mensageiros", "Mensageiros"),
-                    ("streaming", "Vídeo e streaming"), ("publicidade", "Publicidade e rastreamento"),
-                    ("compras", "Compras"), ("noticias", "Notícias"), ("infra_bloqueio", "Infraestrutura (DoH, DNS, CDN)"),
-                    ("outros_bloqueios", "Outros bloqueios"),
-                    ("para_revisar", "Para revisar")]
-CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "adulto", "apostas", "jogos"}   # bloqueio automático
+# organização das listas (pedido do usuário 2026-09-26): seções só p/ a tela; ⚡ = risco (só destaque)
+SECOES_LISTA = [
+    ("🔒 Segurança", [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS")]),
+    ("🚫 Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
+                    ("streaming", "Streaming"), ("mensageiros", "Mensageiros")]),
+    ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("compras", "Compras"), ("noticias", "Notícias"),
+               ("pirataria", "Pirataria / Downloads")]),
+    ("🏢 Trabalho", [("ia_chatbots", "IA / Chatbots"), ("nuvem_remoto", "Nuvem / Acesso remoto")]),
+    ("🔧 Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros"), ("para_revisar", "Para revisar")]),
+]
+CATEGORIAS_LISTA = [x for _, itens in SECOES_LISTA for x in itens]
+CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adulto", "apostas"}   # ⚡ (só destaque visual)
+CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # a IA não põe sozinha
 
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")
 

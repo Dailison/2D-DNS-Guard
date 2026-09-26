@@ -127,11 +127,17 @@ def perguntar(d: dict, categorias: list[str], buscar: bool) -> tuple[dict, dict]
     else:
         corpo["generationConfig"]["responseMimeType"] = "application/json"
     t0 = time.monotonic()
-    try:
-        r = httpx.post(URL.format(model=cfg.gemini_model), json=corpo, timeout=90,
-                       headers={"x-goog-api-key": cfg.gemini_api_key})
-    except httpx.HTTPError as e:
-        raise OnlineIndisponivel(f"Gemini: {e.__class__.__name__}") from e
+    modelo = cfg.gemini_model
+    for tentativa in (cfg.gemini_model, cfg.gemini_fallback_model):
+        if not tentativa:
+            continue
+        modelo = tentativa
+        try:
+            r = httpx.post(URL.format(model=modelo), json=corpo, timeout=90, headers={"x-goog-api-key": cfg.gemini_api_key})
+        except httpx.HTTPError as e:
+            raise OnlineIndisponivel(f"Gemini: {e.__class__.__name__}") from e
+        if r.status_code not in (500, 503):   # sobrecarga do modelo: tenta o reserva (flash-lite)
+            break
     if r.status_code == 429:
         dia = "day" in r.text.lower() or "perday" in r.text.lower().replace("_", "")
         COTA.pausar_dia() if dia else COTA.pausar(65)
@@ -148,7 +154,7 @@ def perguntar(d: dict, categorias: list[str], buscar: bool) -> tuple[dict, dict]
     obj = _json_da_resposta(texto)
     fontes = [c.get("web", {}).get("uri") for c in
               ((j.get("candidates") or [{}])[0].get("groundingMetadata") or {}).get("groundingChunks") or []][:5]
-    return obj, {"model": cfg.gemini_model, "seconds": round(time.monotonic() - t0, 1), "busca": buscar,
+    return obj, {"model": modelo, "seconds": round(time.monotonic() - t0, 1), "busca": buscar,
                  "fontes": [f for f in fontes if f]}
 
 

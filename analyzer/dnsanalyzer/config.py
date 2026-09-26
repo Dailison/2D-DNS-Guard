@@ -92,6 +92,7 @@ class Settings:
     online_enabled: bool
     gemini_api_key: str
     gemini_model: str
+    gemini_fallback_model: str
     gemini_rpm: int
     gemini_rpd: int
     gemini_grounding: bool
@@ -180,6 +181,7 @@ def load_settings() -> Settings:
         online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 3 (só com GEMINI_API_KEY)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip(),
+        gemini_fallback_model=os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite").strip(),   # se o principal der 503
         gemini_rpm=max(_int("GEMINI_RPM", 5), 1),
         gemini_rpd=max(_int("GEMINI_RPD", 200), 1),
         gemini_grounding=_bool(os.environ.get("GEMINI_GROUNDING"), True),   # busca no Google p/ desconhecidos

@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}Gráficos{% endblock %}
+{% block content %}
+<style>
+  /* papéis de cor dos gráficos (paleta validada: CVD e contraste nos dois temas) */
+  .viz{--s-lib:#2a78d6;--s-blk:#eb6834;--grid:#eef0f3;--axis:#d1d5db;--ink:var(--txt);--ink2:#4b5563;--surf:#fff}
+  html[data-theme="dark"] .viz{--s-lib:#3987e5;--s-blk:#d95926;--grid:#2b3a50;--axis:#475569;--ink2:#cbd5e1;--surf:#1e293b}
+  .viz .fil{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
+  .viz .fil>div{min-width:130px;flex:1}
+  .viz .fil label{display:block;font-size:.78rem;color:var(--mut);margin-bottom:.2rem}
+  .viz .per{display:flex;gap:.25rem;flex-wrap:wrap}
+  .viz .per a{font-size:.82rem;padding:.35rem .6rem;border:1px solid var(--bd);border-radius:8px;text-decoration:none;color:var(--ink2)}
+  .viz .per a.on{border-color:var(--b);color:var(--b);font-weight:700}
+  .viz .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;margin-bottom:1rem}
+  .viz .kpi{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:.8rem 1rem}
+  .viz .kpi .l{font-size:.8rem;color:var(--mut)}
+  .viz .kpi .v{font-size:1.6rem;font-weight:650;margin-top:.15rem;color:var(--ink)}
+  .viz .kpi .s{font-size:.78rem;color:var(--mut)}
+  .viz .leg{display:flex;gap:1rem;font-size:.82rem;color:var(--ink2);margin:.1rem 0 .6rem}
+  .viz .leg i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:.35rem;vertical-align:-1px}
+  .viz .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+  @media (max-width:900px){.viz .grid2{grid-template-columns:1fr}}
+  .viz .grid2 .card{margin:0}
+  .viz .hb{display:grid;grid-template-columns:minmax(90px,190px) 1fr;gap:.35rem .6rem;align-items:center;font-size:.85rem}
+  .viz .hb .lb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+  .viz .hb .lb a{color:inherit;text-decoration:none}.viz .hb .lb a:hover{text-decoration:underline}
+  .viz .hb .row{display:flex;align-items:center;gap:.45rem;min-width:0;padding:4px 0;cursor:default}
+  .viz .hb .trk{display:flex;gap:2px;height:14px;min-width:0}
+  .viz .hb .sg{height:100%}
+  .viz .hb .sg:last-child{border-radius:0 4px 4px 0}
+  .viz .hb .vl{font-size:.8rem;color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .viz .hb .row:hover .trk,.viz .hb .row:focus .trk{filter:brightness(1.12)}
+  .viz details{margin-top:.6rem;font-size:.85rem}.viz summary{cursor:pointer;color:var(--mut)}
+  .viz details table td,.viz details table th{padding:.3rem .5rem}
+  .viz .tt{position:fixed;z-index:50;pointer-events:none;background:var(--card);border:1px solid var(--bd);border-radius:8px;
+           padding:.45rem .6rem;font-size:.8rem;box-shadow:0 6px 20px rgba(0,0,0,.18);display:none;min-width:150px;color:var(--ink)}
+  .viz .tt .h{color:var(--mut);margin-bottom:.2rem}
+  .viz .tt .r{display:flex;align-items:center;gap:.4rem;justify-content:space-between}
+  .viz .tt .r span.k{display:inline-block;width:12px;height:2px;border-radius:1px;margin-right:.3rem;vertical-align:3px}
+  .viz .tt b{font-variant-numeric:tabular-nums}
+  .viz svg text{fill:var(--mut);font-size:11px;font-family:inherit}
+  .viz .vazio{color:var(--mut);font-size:.9rem;padding:.6rem 0}
+</style>
+<div class="viz">
+<h1>Gráficos <span class="mut" style="font-size:.8rem">· consultas DNS liberadas e bloqueadas{% if coletado_ate %} · coletado até {{ coletado_ate[11:16] }} (~5-7 min de atraso){% endif %}</span></h1>
+
+<div class="card">
+  <form method="get" class="fil">
+    <div style="flex:0 0 auto"><label>Período</label>
+      <div class="per">
+        {% for k, rot in [('hoje','Hoje'),('ontem','Ontem'),('7d','7 dias'),('30d','30 dias')] %}
+        <a href="{{ url_for('admin.graficos', periodo=k, empresa=empresa, categoria=categoria, cls=cls_f, resposta=resposta) }}" class="{{ 'on' if periodo == k }}">{{ rot }}</a>
+        {% endfor %}
+      </div></div>
+    <div><label>Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
+    <div><label>Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
+    <div><label>Empresa</label>
+      <select name="empresa"><option value="">— Todas —</option>
+        {% for e in lista_empresas %}<option value="{{ e.id }}" {{ 'selected' if empresa == e.id|string }}>{{ e.name }}</option>{% endfor %}
+      </select></div>
+    <div><label>Categoria do site</label>
+      <select name="categoria"><option value="">— Todas —</option>
+        {% for c in site_categorias %}<option value="{{ c.code }}" {{ 'selected' if categoria == c.code }}>{{ c.label }}</option>{% endfor %}
+      </select></div>
+    <div><label>Classificação IA</label>
+      <select name="cls">{% for v, rot in cls_filtros %}<option value="{{ v }}" {{ 'selected' if cls_f == v }}>{{ rot }}</option>{% endfor %}</select></div>
+    <div><label>Resposta</label>
+      <select name="resposta">{% for v, rot in respostas %}<option value="{{ v }}" {{ 'selected' if resposta == v }}>{{ rot }}</option>{% endfor %}</select></div>
+    <div style="flex:0 0 auto"><button class="primary">Filtrar</button></div>
+  </form>
+</div>
+
+{% if dados %}
+<div class="kpis" id="kpis"></div>
+
+<div class="card">
+  <h2 style="margin-bottom:.2rem" id="tTempo">Consultas no tempo</h2>
+  <div class="leg" id="leg0"></div>
+  <div id="cTempo"></div>
+  <details><summary>Ver tabela</summary><div id="tbTempo"></div></details>
+</div>
+
+<div class="grid2">
+  <div class="card"><h2>Por classificação da IA</h2><div class="leg"></div><div id="cCls"></div><details><summary>Ver tabela</summary><div id="tbCls"></div></details></div>
+  <div class="card"><h2>Por categoria do site</h2><div class="leg"></div><div id="cCat"></div><details><summary>Ver tabela</summary><div id="tbCat"></div></details></div>
+  <div class="card"><h2>Por empresa</h2><div class="leg"></div><div id="cEmp"></div><details><summary>Ver tabela</summary><div id="tbEmp"></div></details></div>
+  <div class="card"><h2>Sites mais consultados</h2><div class="leg"></div><div id="cTop"></div><details><summary>Ver tabela</summary><div id="tbTop"></div></details></div>
+</div>
+<p class="mut" style="font-size:.82rem;margin-top:.8rem">Clique no nome de uma barra para abrir os <b>Logs DNS</b> já filtrados. Classificação = a da IA para o site, com o ajuste manual da empresa quando houver. <b>Bloqueadas</b> = respondidas como bloqueio pelo Technitium; <b>Liberadas</b> = o resto.</p>
+<div class="tt" id="tt"></div>
+{% endif %}
+</div>
+
+{% if dados %}
+<script>
+(function () {
+  const D = {{ dados|tojson }};
+  const CLS = {{ cls_label|tojson }}, CAT = {{ cat_label|tojson }};
+  const RESP = {{ resposta|tojson }};
+  const LOGS = {{ url_for('admin.logs_dns')|tojson }};
+  const BASE = {inicio: {{ inicio|tojson }}, fim: {{ fim|tojson }}, empresa: {{ empresa|tojson }},
+                categoria: {{ categoria|tojson }}, cls: {{ cls_f|tojson }}, vista: "agrupado",
+                resposta: RESP === "bloqueado" ? "Blocked" : ""};
+  const SERIES = [{k: "liberadas", nome: "Liberadas", cor: "var(--s-lib)"}, {k: "bloqueadas", nome: "Bloqueadas", cor: "var(--s-blk)"}]
+    .filter(s => !RESP || (RESP === "liberado" ? s.k === "liberadas" : s.k === "bloqueadas"));
+  const nf = new Intl.NumberFormat("pt-BR"), cf = new Intl.NumberFormat("pt-BR", {notation: "compact", maximumFractionDigits: 1});
+  const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const tot = r => SERIES.reduce((a, s) => a + (r[s.k] || 0), 0);
+  function logsUrl(extra) {
+    const p = new URLSearchParams();
+    Object.entries(Object.assign({}, BASE, extra)).forEach(([k, v]) => { if (v) p.set(k, v); });
+    return LOGS + "?" + p.toString();
+  }
+
+  // ---------- tooltip (valor forte, rótulo secundário; textContent sempre)
+  const tt = document.getElementById("tt");
+  function mostra(ev, titulo, r) {
+    tt.textContent = ""; tt.appendChild(el("div", "h", titulo));
+    SERIES.forEach(s => {
+      const row = el("div", "r"), n = el("span"), k = el("span", "k");
+      k.style.background = s.cor; n.appendChild(k); n.appendChild(document.createTextNode(s.nome));
+      row.appendChild(n); row.appendChild(el("b", null, nf.format(r[s.k] || 0))); tt.appendChild(row);
+    });
+    if (SERIES.length > 1) { const row = el("div", "r"); row.appendChild(el("span", null, "Total")); row.appendChild(el("b", null, nf.format(tot(r)))); tt.appendChild(row); }
+    tt.style.display = "block";
+    const b = ev.target.getBoundingClientRect ? ev.target.getBoundingClientRect() : null;
+    const x = ev.clientX || (b ? b.right : 0), y = ev.clientY || (b ? b.top : 0);
+    const w = tt.offsetWidth, h = tt.offsetHeight;
+    tt.style.left = Math.min(x + 14, window.innerWidth - w - 8) + "px";
+    tt.style.top = Math.max(8, Math.min(y - h - 10, window.innerHeight - h - 8)) + "px";
+  }
+  const esconde = () => { tt.style.display = "none"; };
+
+  // ---------- legenda (sempre presente com 2 séries; 1 série = o título já diz)
+  document.querySelectorAll(".viz .leg").forEach(lg => {
+    if (SERIES.length < 2) { lg.remove(); return; }
+    SERIES.forEach(s => { const sp = el("span"), i = el("i"); i.style.background = s.cor; sp.appendChild(i); sp.appendChild(document.createTextNode(s.nome)); lg.appendChild(sp); });
+  });
+
+  // ---------- KPIs
+  const T = D.totais, total = (T.liberadas || 0) + (T.bloqueadas || 0), k = document.getElementById("kpis");
+  [["Consultas", total, SERIES.length > 1 ? "liberadas + bloqueadas" : (RESP === "liberado" ? "só liberadas" : "só bloqueadas")],
+   ...(SERIES.length > 1 ? [["Liberadas", T.liberadas, total ? Math.round(T.liberadas * 100 / total) + "% do total" : ""],
+                            ["Bloqueadas", T.bloqueadas, total ? Math.round(T.bloqueadas * 100 / total) + "% do total" : ""]] : []),
+   ["Sites", T.sites, "domínios distintos"], ["Consultas a ameaças", T.ameacas, "Malicioso + Suspeito"]].forEach(([l, v, s]) => {
+    const c = el("div", "kpi"); c.appendChild(el("div", "l", l)); const vv = el("div", "v", cf.format(v || 0)); vv.title = nf.format(v || 0);
+    c.appendChild(vv); c.appendChild(el("div", "s", s)); k.appendChild(c);
+  });
+
+  // ---------- tabela equivalente de cada gráfico
+  function tabela(alvo, cab, linhas) {
+    const t = el("table"), th = el("tr");
+    cab.concat(SERIES.map(s => s.nome), SERIES.length > 1 ? ["Total"] : []).forEach(c => th.appendChild(el("th", null, c)));
+    const hd = el("thead"); hd.appendChild(th); t.appendChild(hd); const tb = el("tbody");
+    linhas.forEach(([rot, r]) => {
+      const tr = el("tr"); tr.appendChild(el("td", null, rot));
+      SERIES.forEach(s => tr.appendChild(el("td", null, nf.format(r[s.k] || 0))));
+      if (SERIES.length > 1) tr.appendChild(el("td", null, nf.format(tot(r))));
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); document.getElementById(alvo).appendChild(t);
+  }
+
+  // ---------- barras horizontais empilhadas (liberadas | bloqueadas), top N + "Outras"
+  function barras(alvo, tb, rows, rotulo, link, max) {
+    const box = document.getElementById(alvo);
+    rows = rows.slice();
+    if (!rows.length) { box.appendChild(el("div", "vazio", "Nada no filtro/período.")); return; }
+    if (max && rows.length > max) {
+      const resto = rows.splice(max - 1), o = {chave: null, outras: resto.length};
+      SERIES.forEach(s => { o[s.k] = resto.reduce((a, r) => a + (r[s.k] || 0), 0); }); rows.push(o);
+    }
+    const nomeDe = r => r.outras ? `Outras (${r.outras})` : rotulo(r);
+    const maior = Math.max(...rows.map(tot)) || 1, g = el("div", "hb");
+    rows.forEach(r => {
+      const lb = el("div", "lb"), nome = nomeDe(r), url = r.outras ? null : link(r);
+      if (url) { const a = el("a", null, nome); a.href = url; lb.appendChild(a); } else lb.textContent = nome;
+      lb.title = nome;
+      const row = el("div", "row"), trk = el("div", "trk");
+      row.tabIndex = 0; row.setAttribute("aria-label", nome + ": " + nf.format(tot(r)));
+      trk.style.width = Math.max(tot(r) / maior * 100, 0.6) + "%";
+      SERIES.forEach(s => { if (!(r[s.k] > 0)) return; const sg = el("div", "sg"); sg.style.background = s.cor; sg.style.flex = String(r[s.k]); trk.appendChild(sg); });
+      row.appendChild(trk); row.appendChild(el("span", "vl", cf.format(tot(r))));
+      ["pointermove", "focus"].forEach(ev => row.addEventListener(ev, e => mostra(e, nome, r)));
+      ["pointerleave", "blur"].forEach(ev => row.addEventListener(ev, esconde));
+      g.appendChild(lb); g.appendChild(row);
+    });
+    box.appendChild(g);
+    tabela(tb, ["Nome"], rows.map(r => [nomeDe(r), r]));
+  }
+  barras("cCls", "tbCls", D.por_classificacao, r => r.chave === "PENDENTE" ? "Aguardando IA" : (CLS[r.chave] || r.chave), r => logsUrl({cls: r.chave}));
+  barras("cCat", "tbCat", D.por_categoria, r => r.chave ? (CAT[r.chave] || r.chave) : "Sem categoria", r => r.chave ? logsUrl({categoria: r.chave}) : null, 12);
+  barras("cEmp", "tbEmp", D.por_empresa, r => r.chave, r => logsUrl({empresa: String(r.id)}), 12);
+  barras("cTop", "tbTop", D.top_dominios, r => r.chave, r => logsUrl({dominio: r.chave}));
+
+  // ---------- colunas empilhadas no tempo (SVG): eixo único, grade em linhas finas, hover por coluna
+  const gran = D.granularidade, serie = D.serie;
+  document.getElementById("tTempo").textContent = "Consultas no tempo (por " + (gran === "hour" ? "hora" : "dia") + ")";
+  const fmtT = t => { const d = new Date(t); return gran === "hour"
+      ? d.toLocaleString("pt-BR", {timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit"}) + "h"
+      : d.toLocaleDateString("pt-BR", {timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit"}); };
+  const tick = t => { const d = new Date(t); return gran === "hour"
+      ? d.toLocaleString("pt-BR", {timeZone: "America/Sao_Paulo", hour: "2-digit"}) + "h"
+      : d.toLocaleDateString("pt-BR", {timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit"}); };
+  tabela("tbTempo", [gran === "hour" ? "Hora" : "Dia"], serie.map(r => [fmtT(r.t), r]));
+  const NS = "http://www.w3.org/2000/svg", sv = (t, a) => { const e = document.createElementNS(NS, t); Object.entries(a || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; };
+  function topoRedondo(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h);
+    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+  }
+  function desenha() {
+    const box = document.getElementById("cTempo"); box.textContent = "";
+    if (!serie.length) { box.appendChild(el("div", "vazio", "Nada no filtro/período.")); return; }
+    const W = Math.max(box.clientWidth, 320), H = 240, m = {l: 52, r: 8, t: 8, b: 26}, pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const mx = Math.max(...serie.map(tot)) || 1, pot = Math.pow(10, Math.floor(Math.log10(mx / 4)));
+    const passo = [1, 2, 2.5, 5, 10].map(f => f * pot).find(p => mx / p <= 5) || pot * 10, topo = Math.ceil(mx / passo) * passo;
+    const y = v => m.t + ph - v / topo * ph, svg = sv("svg", {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Consultas no tempo"});
+    for (let v = 0; v <= topo + 1e-9; v += passo) {
+      svg.appendChild(sv("line", {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: v === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1}));
+      const tx = sv("text", {x: m.l - 6, y: y(v) + 4, "text-anchor": "end"}); tx.textContent = cf.format(v); svg.appendChild(tx);
+    }
+    const n = serie.length, banda = pw / n, bw = Math.max(Math.min(24, banda * 0.7), 1), cada = Math.max(1, Math.ceil(n / Math.floor(pw / 46)));
+    const cols = [];
+    serie.forEach((r, i) => {
+      const x = m.l + i * banda + (banda - bw) / 2, g = sv("g"); let base = y(0);
+      const visiveis = SERIES.filter(s => r[s.k] > 0);
+      visiveis.forEach((s, j) => {
+        const gap = j > 0 ? 2 : 0, h = Math.max(r[s.k] / topo * ph - gap, 0.5), yy = base - gap - h;
+        const ultimo = j === visiveis.length - 1;
+        g.appendChild(ultimo ? sv("path", {d: topoRedondo(x, yy, bw, h, 4), fill: s.cor}) : sv("rect", {x, y: yy, width: bw, height: h, fill: s.cor}));
+        base = yy;
+      });
+      const hit = sv("rect", {x: m.l + i * banda, y: m.t, width: banda, height: ph, fill: "transparent", tabindex: 0});
+      hit.addEventListener("pointermove", e => { cols.forEach((c, j) => c.style.opacity = j === i ? 1 : .55); mostra(e, fmtT(r.t), r); });
+      hit.addEventListener("focus", e => { cols.forEach((c, j) => c.style.opacity = j === i ? 1 : .55); mostra(e, fmtT(r.t), r); });
+      ["pointerleave", "blur"].forEach(ev => hit.addEventListener(ev, () => { cols.forEach(c => c.style.opacity = 1); esconde(); }));
+      svg.appendChild(g); cols.push(g); svg.appendChild(hit);
+      if (i % cada === 0) { const tx = sv("text", {x: m.l + i * banda + banda / 2, y: H - 8, "text-anchor": "middle"}); tx.textContent = tick(r.t); svg.appendChild(tx); }
+    });
+    box.appendChild(svg);
+  }
+  desenha();
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(desenha, 150); });
+})();
+</script>
+{% endif %}
+{% endblock %}

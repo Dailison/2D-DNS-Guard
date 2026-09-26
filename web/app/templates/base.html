@@ -91,7 +91,8 @@
       <a href="{{ url_for('admin.dominios') }}" class="{{ 'on' if request.endpoint == 'admin.dominios' }}">Domínios</a>
       <a href="{{ url_for('admin.liberados') }}" class="{{ 'on' if request.endpoint == 'admin.liberados' }}">Liberados</a>
       <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs DNS</a>{% endif %}
-      {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">Empresas</a>{% endif %}
+      {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('admin.graficos') }}" class="{{ 'on' if request.endpoint == 'admin.graficos' }}">Gráficos</a>
+      <a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">Empresas</a>{% endif %}
       {% if adm.is_super %}<a href="{{ url_for('operadores.lista') }}" class="{{ 'on' if request.blueprint == 'operadores' }}">Operadores</a>{% endif %}
       {% endif %}
     </nav>

@@ -981,6 +981,73 @@ def logs_classificar(body: ClassificarIn):
     return out
 
 
+@app.get("/charts", dependencies=[Depends(auth)])
+def charts(start: datetime, end: datetime, tid: int = 0, cls: list[str] = Query(default=[]),
+           categoria: Optional[str] = None, resposta: Optional[str] = None, top: int = Query(15, le=50)):
+    """Tela Gráficos: consultas liberadas × bloqueadas no tempo e por classificação da IA,
+    categoria do site, empresa e site (top), com os mesmos filtros. resposta = liberado |
+    bloqueado (só aquela parte das consultas). Série por hora até 2 dias; acima, por dia."""
+    if end <= start:
+        raise HTTPException(400, "período inválido")
+    gran = "hour" if end - start <= timedelta(days=2) else "day"
+    p: dict = {"s": start, "e": end, "top": top}
+    wq = ["q.bucket >= date_trunc('hour', %(s)s::timestamptz)", "q.bucket < %(e)s"]
+    if tid:
+        wq.append("q.tenant_id = %(t)s"); p["t"] = tid
+    wf = []
+    cls = [x.strip().upper() for x in cls if x and x.strip()]
+    if cls:
+        p["cls"] = [x for x in cls if x != "PENDENTE"]
+        cond = ["cls = ANY(%(cls)s)"] if p["cls"] else []
+        if "PENDENTE" in cls:
+            cond.append("cls IS NULL")
+        wf.append("(" + " OR ".join(cond) + ")")
+    if categoria:
+        wf.append("cat = %(cat)s"); p["cat"] = categoria
+    lib, blk = "(n - blk)", "blk"
+    if resposta == "liberado":
+        blk = "0"
+    elif resposta == "bloqueado":
+        lib = "0"
+    elif resposta:
+        raise HTTPException(400, "resposta inválida (liberado | bloqueado)")
+    medida = f"sum({lib}) AS liberadas, sum({blk}) AS bloqueadas"
+    ordem = f"sum({lib}) + sum({blk}) DESC"
+    with db.conn() as c:
+        # 1 passada em query_agg (por período × empresa × domínio); o resto sai dessa tabela
+        c.execute(
+            f"CREATE TEMP TABLE ch ON COMMIT DROP AS SELECT * FROM ("
+            f" SELECT b.t, b.tenant_id, b.domain_id, b.n, b.blk, {_CLS_EFETIVA} AS cls, d.category AS cat, "
+            "  d.name AS dom FROM ("
+            f"  SELECT date_trunc('{gran}', q.bucket) AS t, q.tenant_id, q.domain_id, sum(q.queries) AS n, "
+            "   sum(q.blocked) AS blk FROM query_agg q "
+            f"  WHERE {' AND '.join(wq)} GROUP BY 1, 2, 3) b "
+            " JOIN domains d ON d.id=b.domain_id "
+            " LEFT JOIN tenant_domains td ON td.tenant_id=b.tenant_id AND td.domain_id=b.domain_id) x"
+            + (f" WHERE {' AND '.join(wf)}" if wf else ""), p)
+        serie = c.execute(f"SELECT t, {medida} FROM ch GROUP BY t ORDER BY t").fetchall()
+        por_cls = c.execute(f"SELECT COALESCE(cls, 'PENDENTE') AS chave, {medida} FROM ch GROUP BY 1 "
+                            f"ORDER BY {ordem}").fetchall()
+        por_cat = c.execute(f"SELECT cat AS chave, {medida} FROM ch GROUP BY 1 ORDER BY {ordem}").fetchall()
+        por_emp = c.execute(f"SELECT t.id, t.name AS chave, {medida} FROM ch JOIN tenants t ON t.id=ch.tenant_id "
+                            f"GROUP BY t.id, t.name ORDER BY {ordem}").fetchall()
+        top_dom = c.execute(
+            f"SELECT dom AS chave, {medida}, (array_agg(cls ORDER BY n DESC))[1] AS classificacao, "
+            f" min(cat) AS categoria FROM ch GROUP BY dom HAVING sum({lib}) + sum({blk}) > 0 "
+            f"ORDER BY {ordem} LIMIT %(top)s", p).fetchall()
+        tot = c.execute(
+            f"SELECT COALESCE(sum({lib}), 0) AS liberadas, COALESCE(sum({blk}), 0) AS bloqueadas, "
+            f" count(DISTINCT domain_id) FILTER (WHERE {lib} + {blk} > 0) AS sites, "
+            f" COALESCE(sum({lib} + {blk}) FILTER (WHERE cls IN ('MALICIOSO', 'SUSPEITO')), 0) AS ameacas FROM ch"
+        ).fetchone()
+        cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
+    def limpa(rows):   # com o filtro de resposta, tira o que zerou
+        return [r for r in rows if (r["liberadas"] or 0) + (r["bloqueadas"] or 0) > 0]
+    return {"granularidade": gran, "serie": serie, "por_classificacao": limpa(por_cls),
+            "por_categoria": limpa(por_cat), "por_empresa": limpa(por_emp), "top_dominios": top_dom,
+            "totais": tot, "coletado_ate": cursor}
+
+
 # ------------------------------------------------------------------ configuração dos grupos (console)
 class GroupSettingIn(BaseModel):
     name: str

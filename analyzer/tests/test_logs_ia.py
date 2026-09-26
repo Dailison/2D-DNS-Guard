@@ -136,3 +136,37 @@ def test_classificar_herda_do_pai_e_traz_ajustes(api):
 
 def test_classificar_exige_token(api):
     assert api.post("/logs/classificar", json={"nomes": ["x.com"]}).status_code == 401
+
+
+def _charts(api, **kw):
+    p = {"start": (AGORA - timedelta(hours=1)).isoformat(), "end": (AGORA + timedelta(hours=2)).isoformat(), **kw}
+    r = api.get("/charts", params=p, headers=H)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_charts_totais_e_quebras(api):
+    j = _charts(api)
+    assert j["granularidade"] == "hour"
+    assert j["totais"] == {"liberadas": 12, "bloqueadas": 3, "sites": 3, "ameacas": 5}
+    assert sum(r["liberadas"] + r["bloqueadas"] for r in j["serie"]) == 15
+    cls = {r["chave"]: (r["liberadas"], r["bloqueadas"]) for r in j["por_classificacao"]}
+    # loja.com: A ajustou p/ TRABALHO (5), B segue NAO_TRABALHO (4) — por empresa, não a pior
+    assert cls == {"MALICIOSO": (2, 3), "TRABALHO": (5, 0), "NAO_TRABALHO": (4, 0), "PENDENTE": (1, 0)}
+    emp = {r["chave"]: r["liberadas"] + r["bloqueadas"] for r in j["por_empresa"]}
+    assert emp == {"Empresa A": 9, "Empresa B": 6}
+    assert [r["chave"] for r in j["top_dominios"]][0] == "loja.com"
+
+
+def test_charts_filtros(api):
+    j = _charts(api, resposta="bloqueado")
+    assert j["totais"]["liberadas"] == 0 and j["totais"]["bloqueadas"] == 3
+    assert [r["chave"] for r in j["top_dominios"]] == ["ruim.com"]
+    assert [r["chave"] for r in j["por_empresa"]] == ["Empresa A"]   # B não teve bloqueio: some
+    j = _charts(api, cls=["MALICIOSO", "SUSPEITO"])
+    assert j["totais"]["liberadas"] + j["totais"]["bloqueadas"] == 5
+    j = _charts(api, categoria="compras", resposta="liberado")
+    assert j["totais"] == {"liberadas": 9, "bloqueadas": 0, "sites": 1, "ameacas": 0}
+    assert api.get("/charts", params={"start": AGORA.isoformat(), "end": AGORA.isoformat()}, headers=H).status_code == 400
+    assert api.get("/charts", params={"start": (AGORA - timedelta(hours=1)).isoformat(), "end": AGORA.isoformat(),
+                                      "resposta": "x"}, headers=H).status_code == 400

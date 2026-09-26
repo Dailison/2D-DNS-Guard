@@ -679,3 +679,50 @@ def logs_dns():
         cidr=cidr, ip=ip, dominio=dominio, resposta=resposta,
         respostas=dnslib.RESPONSE_TYPES,
         inicio=inicio, fim=fim, scanned=scanned, cap=cap, voltar=request.full_path, **_ctx_cls(cls_f, categoria))
+
+
+# ------------------------------------------------- Gráficos (analisador: query_agg + classificação da IA)
+RESPOSTAS_GRAF = [("", "Todas"), ("liberado", "Liberadas"), ("bloqueado", "Bloqueadas")]
+
+
+@admin_bp.get("/graficos")
+@login_required
+def graficos():
+    """Consultas liberadas × bloqueadas no tempo e por classificação da IA, categoria do site,
+    empresa e site, com filtros de empresa, categoria, classificação e resposta."""
+    if not current_app.config.get("ANALYZER_ENABLED"):
+        return render_template("admin/nao_configurado.html", oque="Analisador (ANALYZER_URL/ANALYZER_TOKEN)")
+    from datetime import timedelta
+    from app import empresas as emp
+    hoje = dnslib.agora_local().date()
+    presets = {"hoje": (hoje, hoje), "ontem": (hoje - timedelta(days=1),) * 2,
+               "7d": (hoje - timedelta(days=6), hoje), "30d": (hoje - timedelta(days=29), hoje)}
+    periodo = (request.args.get("periodo") or ("" if request.args.get("inicio") else "hoje")).strip()
+    if periodo in presets:
+        a, b = presets[periodo]
+        inicio, fim = f"{a}T00:00", f"{b}T23:59"
+    else:
+        periodo = ""
+        inicio = (request.args.get("inicio") or f"{hoje}T00:00").strip()
+        fim = (request.args.get("fim") or f"{hoje}T23:59").strip()
+    empresa = (request.args.get("empresa") or "").strip()
+    categoria = (request.args.get("categoria") or "").strip()
+    cls_f = (request.args.get("cls") or "").strip().upper()
+    cls_f = cls_f if cls_f in dict(CLS_FILTROS) else ""
+    resposta = (request.args.get("resposta") or "").strip()
+    resposta = resposta if resposta in dict(RESPOSTAS_GRAF) else ""
+
+    def utc(v):
+        iso = dnslib.local_para_utc_iso(v)
+        return iso + "+00:00" if iso and len(iso) == 19 else iso
+    dados = None
+    try:
+        dados = api.get("/charts", start=utc(inicio), end=utc(fim), tid=int(empresa) if empresa.isdigit() else 0,
+                        cls=_cls_lista(cls_f) or None, categoria=categoria or None, resposta=resposta or None)
+    except AnalyzerError as e:
+        flash(f"Não foi possível carregar os gráficos: {e}", "erro")
+    return render_template(
+        "admin/graficos.html", dados=dados, periodo=periodo, inicio=inicio, fim=fim, empresa=empresa,
+        resposta=resposta, respostas=RESPOSTAS_GRAF, lista_empresas=emp.lista(),
+        coletado_ate=dnslib.utc_para_local(dados["coletado_ate"]) if dados and dados.get("coletado_ate") else None,
+        **_ctx_cls(cls_f, categoria))

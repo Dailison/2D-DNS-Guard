@@ -1,7 +1,9 @@
 {% from "admin/_listas_caixas.html" import caixas with context %}
-{# Tabela de domínios com a classificação da IA e o estado da revisão manual (listas de bloqueio e
-   "Classificados por IA como Trabalho"). Variáveis: det (API), fd (filtros atuais), modo ('lista' |
-   'sem_lista' | 'decisoes' = Para revisar na tela Decisões), cat (lista atual), categorias, scats, pag_url(n). #}
+{# Tabela de domínios com a classificação da IA e o estado da revisão manual — listas de bloqueio, whitelists,
+   Aprovados e Decisões. Variáveis: det (API), fd (filtros), modo ('lista' | 'whitelist' | 'sem_lista' = Aprovados |
+   'decisoes'), cat (lista atual), wl (whitelist atual), categorias, scats, pag_url(n).
+   Tudo sem recarregar a página: filtros, paginação e ações trocam só o bloco #ddBox (a rota devolve só ele com o
+   cabeçalho X-Partial; `so_tabela`). Clique no domínio = painel com o histórico completo. #}
 {% set dec = modo == 'decisoes' %}{% set lst = modo in ('lista', 'decisoes') %}{% set wlm = modo == 'whitelist' %}
 {% set rot = dict(categorias) %}
 {% set CLS = {'TRABALHO': ('Trabalho', '#dcfce7', '#166534'), 'NAO_TRABALHO': ('Não trabalho', '#fef3c7', '#92400e'),
@@ -10,40 +12,57 @@
 {% set REC = {'BLOQUEAR': '⛔ bloquear', 'LIBERAR': '✅ liberar', 'REVISAR': '👀 revisar', 'MONITORAR': '👁 monitorar'} %}
 {% set POR = {'llm': 'fase 1 · IA local', 'web': 'fase 3 · busca na web + IA', 'online': 'fase 4 · IA online', 'catalog': 'catálogo', 'rules': 'regras', 'internal': 'interno', 'manual': 'manual'} %}
 {% set REV = {'ia': '🤖 Só IA', 'manual': '✋ Revisado', 'pendente': '⏳ Sem análise'} %}
+{% if not so_tabela %}
 <style>
   .dd-t td{vertical-align:top} .dd-cls{display:inline-block;padding:.05rem .45rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
   .dd-sub{font-size:.76rem;color:var(--mut)} .dd-bar{position:sticky;top:0;z-index:2;background:var(--card);display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--bd);margin-bottom:.4rem}
   .dd-f{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end} .dd-f>div{min-width:150px} .dd-pg{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.6rem;align-items:center}
   .dd-pg a,.dd-pg b{padding:.2rem .55rem;border:1px solid var(--bd);border-radius:8px;text-decoration:none;font-size:.85rem}
+  #ddBox{transition:opacity .15s;min-width:0} .dd-tw{overflow-x:auto;max-width:100%} .dd-ra{display:flex;gap:.2rem;flex-wrap:nowrap}
+  .dd-ra button{padding:.12rem .4rem;font-size:.78rem;border:1px solid var(--bd);border-radius:6px;background:var(--card);cursor:pointer;line-height:1.3}
+  .dd-ra button:hover{border-color:var(--b)} .dd-ra .blk{color:#b91c1c} .dd-ra .lib{color:#15803d}
+  a.dd-hist{cursor:pointer}
+  .dd-toast{position:fixed;right:18px;bottom:18px;max-width:440px;padding:.7rem .9rem;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);
+            font-size:.88rem;z-index:1000;opacity:0;transform:translateY(12px);transition:.2s;pointer-events:none;background:#14532d;color:#fff}
+  .dd-toast.erro{background:#991b1b} .dd-toast.on{opacity:1;transform:none;pointer-events:auto}
+  #histPainel{position:fixed;top:0;right:0;height:100vh;width:min(560px,100vw);background:var(--card);border-left:1px solid var(--bd);
+              box-shadow:-10px 0 30px rgba(0,0,0,.15);z-index:900;transform:translateX(105%);transition:transform .2s;display:flex;flex-direction:column}
+  #histPainel.on{transform:none} #histPainel .hp-top{padding:.8rem 1rem;border-bottom:1px solid var(--bd)} #histPainel .hp-body{padding:.6rem 1rem;overflow:auto;flex:1}
+  .hp-tl{list-style:none;margin:0;padding:0;border-left:2px solid var(--bd);margin-left:.4rem}
+  .hp-tl li{position:relative;padding:.35rem 0 .35rem .9rem;font-size:.85rem} .hp-tl li::before{content:"";position:absolute;left:-6px;top:.7rem;width:10px;height:10px;border-radius:50%;background:var(--b)}
+  .hp-tl li.lista::before{background:#dc2626} .hp-tl li.lista.remove::before{background:#16a34a} .hp-tl li.decisao::before{background:#ea580c} .hp-tl li.evento::before{background:#94a3b8}
+  .hp-tl .h{color:var(--mut);font-size:.74rem} .hp-chip{display:inline-block;font-size:.72rem;padding:.05rem .45rem;border-radius:6px;background:#e2e8f0;margin:0 .2rem .2rem 0}
 </style>
+{% endif %}
+<div id="ddBox" data-modo="{{ modo }}" data-cat="{{ cat if lst else '' }}" data-nomecat="{{ rot.get(cat, cat) if lst else '' }}" data-dec="{{ '1' if dec else '' }}">
 <form method="get" class="dd-f" style="margin-bottom:.8rem">
   {% if dec %}<input type="hidden" name="t" value="{{ tid }}">{% elif wlm %}<input type="hidden" name="wl" value="{{ wl }}">{% elif lst %}<input type="hidden" name="cat" value="{{ cat }}">{% else %}<input type="hidden" name="slug" value="_trabalho">{% endif %}
-  <div style="flex:1"><label>Buscar</label><input type="text" name="q" value="{{ fd.q or '' }}" placeholder="parte do domínio"></div>
-  <div><label>Classificação da IA</label><select name="cls" onchange="this.form.submit()">
+  <div style="flex:1"><label>Buscar</label><input type="text" name="q" value="{{ fd.q or '' }}" placeholder="parte do domínio (filtra enquanto digita)" autocomplete="off"></div>
+  <div><label>Classificação da IA</label><select name="cls">
     <option value="">todas</option>
     {% for k, n in det.facetas.classificacao|dictsort %}<option value="{{ k }}" {{ 'selected' if k == fd.cls }}>{{ CLS.get(k, ('sem classificação',))[0] }} ({{ n }})</option>{% endfor %}
     {% if fd.cls and fd.cls not in det.facetas.classificacao %}<option value="{{ fd.cls }}" selected>{{ CLS.get(fd.cls, (fd.cls,))[0] }} (0)</option>{% endif %}
   </select></div>
-  <div><label>Categoria da IA</label><select name="cat_ia" onchange="this.form.submit()">
+  <div><label>Categoria da IA</label><select name="cat_ia">
     <option value="">todas</option>
     {% for k, n in det.facetas.cat_ia|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.cat_ia }}>{{ 'sem categoria' if k == '_sem' else scats.get(k, k) }} ({{ n }})</option>{% endfor %}
   </select></div>
-  <div><label>Sugestão da IA</label><select name="sug" onchange="this.form.submit()">
+  <div><label>Sugestão da IA</label><select name="sug">
     <option value="">todas</option>
     {% for k, n in det.facetas.get('sugestao', {})|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.sug }}>{{ {'_nenhuma': 'nenhuma lista', '_sem': 'ainda não vista'}.get(k) or LISTAS_ROT.get(k, k) }} ({{ n }})</option>{% endfor %}
   </select></div>
-  <div><label>Recomendação</label><select name="rec" onchange="this.form.submit()">
+  <div><label>Recomendação</label><select name="rec">
     <option value="">todas</option>
     {% for k in ('BLOQUEAR', 'LIBERAR', 'REVISAR', '_sem') if k in det.facetas.get('recomendacao', {}) or k == fd.rec %}<option value="{{ k }}" {{ 'selected' if k == fd.rec }}>{{ {'BLOQUEAR': '⛔ Bloquear', 'LIBERAR': '✅ Liberar', 'REVISAR': '👀 Revisar', '_sem': 'sem recomendação'}[k] }} ({{ det.facetas.get('recomendacao', {}).get(k, 0) }})</option>{% endfor %}
   </select></div>
-  <div><label>Revisão</label><select name="revisao" onchange="this.form.submit()">
+  <div><label>Revisão</label><select name="revisao">
     <option value="">todas</option>
     {% for k in ('ia', 'manual', 'pendente') %}<option value="{{ k }}" {{ 'selected' if k == fd.revisao }}>{{ REV[k] }} ({{ det.facetas.revisao.get(k, 0) }})</option>{% endfor %}
   </select></div>
-  <div><label>Ordem</label><select name="ordem" onchange="this.form.submit()">
+  <div><label>Ordem</label><select name="ordem">
     {% for k, l in (('recentes', 'mais recentes'), ('consultas', 'mais acessados'), ('nome', 'nome')) %}<option value="{{ k }}" {{ 'selected' if k == fd.ordem }}>{{ l }}</option>{% endfor %}
   </select></div>
-  <div style="min-width:90px"><label>Por página</label><select name="pp" onchange="this.form.submit()">
+  <div style="min-width:90px"><label>Por página</label><select name="pp">
     {% for n in (100, 250, 500) %}<option {{ 'selected' if n == fd.pp }}>{{ n }}</option>{% endfor %}
   </select></div>
   <div style="min-width:0"><button class="primary">Filtrar</button></div>
@@ -63,21 +82,36 @@
   <button type="button" class="mini danger" data-dd="por">⛔ Pôr em lista de bloqueio…</button>
   {% endif %}
   <button type="button" class="mini" data-dd="reanalisar" title="regras agora; IA, busca na web e WHOIS na fila">🔁 Pedir nova análise da IA</button>
+  <span class="mut" style="font-size:.8rem;margin-left:auto">{{ det.total }} domínio(s)</span>
 </div>
 
-<table class="dd-t">
-  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>IA</th><th>Sugestão da IA</th><th>Recomendação</th><th>Revisão</th><th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if wlm %}<th>Entrou na whitelist</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th><th></th>{% endif %}</tr></thead>
+<div class="dd-tw"><table class="dd-t">
+  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>Ações</th><th>IA</th><th>Sugestão da IA</th><th>Recomendação</th><th>Revisão</th><th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if wlm %}<th>Entrou na whitelist</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th>{% endif %}</tr></thead>
   <tbody>
   {% for i in det['items'] %}
     {% set c = CLS.get(i.classification) %}
+    {% set tem_sug = i.lista_at and i.lista_fonte != 'falhou' %}
     <tr>
       <td><input type="checkbox" class="ddSel" value="{{ i.domain }}"></td>
-      <td><a href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}">{{ i.domain }}</a></td>
+      <td><a class="dd-hist" data-dom="{{ i.domain }}" href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}" title="clique: histórico · Ctrl+clique: página completa">{{ i.domain }}</a></td>
+      <td><div class="dd-ra">
+        {% if lst %}
+          {% if tem_sug and i.lista_ia != cat %}<button type="button" class="lib" data-ra="aprovar" data-dom="{{ i.domain }}" title="aprovar a sugestão da IA: {{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else 'nenhuma lista (sai desta)' }}">✓</button>{% endif %}
+          <button type="button" class="blk" data-ra="mover" data-dom="{{ i.domain }}" title="{{ 'pôr em lista de bloqueio' if dec else 'mover para outra lista' }}">⛔</button>
+          <button type="button" class="lib" data-ra="tirar" data-dom="{{ i.domain }}" title="{{ 'manter liberado' if dec else 'tirar desta lista (manter liberado)' }}">✅</button>
+        {% elif wlm %}
+          <button type="button" class="blk" data-ra="tirar_wl" data-dom="{{ i.domain }}" title="tirar da whitelist">✕</button>
+          <button type="button" class="blk" data-ra="por" data-dom="{{ i.domain }}" title="pôr em lista de bloqueio">⛔</button>
+        {% else %}
+          <button type="button" class="blk" data-ra="por" data-dom="{{ i.domain }}" title="pôr em lista de bloqueio">⛔</button>
+        {% endif %}
+        <button type="button" data-ra="reanalisar" data-dom="{{ i.domain }}" title="pedir nova análise da IA">🔁</button>
+      </div></td>
       <td>{% if c %}<span class="dd-cls" style="background:{{ c[1] }};color:{{ c[2] }}">{{ c[0] }}</span>{% else %}<span class="mut">—</span>{% endif %}
         {% if i.cat_ia %}<div class="dd-sub">{{ scats.get(i.cat_ia, i.cat_ia) }}{% if i.confidence %} · {{ (i.confidence * 100)|round|int }}%{% endif %}</div>{% endif %}
         {% if cat == 'ameaca' %}<div class="dd-sub">{% if i.ti_signature %}🛡 nos feeds: {{ i.ti_signature }}{% elif i.ti_cleared_at %}saiu dos feeds em {{ i.ti_cleared_at|dt_sp('%d/%m/%y') }}{% else %}fora dos feeds{% endif %}</div>{% endif %}</td>
       <td style="font-size:.84rem;max-width:16rem">
-        {% if i.lista_at and i.lista_fonte != 'falhou' %}
+        {% if tem_sug %}
           <b>{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else 'nenhuma lista' }}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}
           {% if i.lista_ia and lst and i.lista_ia == cat %} <span class="dd-sub">✓ esta</span>{% endif %}
           <div class="dd-sub">{{ i.lista_servico or '' }}{% if i.lista_motivo %} — {{ i.lista_motivo|truncate(90) }}{% endif %}{% if (i.lista_fonte or '').startswith('online') %} · fase 4 (IA online){% endif %}</div>
@@ -102,21 +136,12 @@
       {% if lst or wlm %}
       <td class="dd-sub" style="white-space:nowrap">{{ i.added_by or '—' }}<br>{{ i.added_at|dt_sp('%d/%m/%y %H:%M') }}</td>
       {% endif %}
-      {% if modo == 'lista' %}
-      <td style="white-space:nowrap">
-        <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline" onsubmit="return confirm('Tirar {{ i.domain }} da lista {{ rot.get(cat, cat) }}? Fica registrado como “manter liberado” (o bloqueio automático não põe de volta).')">
-          <input type="hidden" name="cat" value="{{ cat }}"><input type="hidden" name="dominio" value="{{ i.domain }}">
-          <input type="hidden" name="voltar" value="{{ request.full_path }}">
-          <button class="danger" style="padding:.15rem .5rem;font-size:.78rem">✕</button>
-        </form>
-      </td>
-      {% endif %}
     </tr>
   {% else %}
-    <tr><td colspan="10" class="mut">{{ 'Nada aguardando decisão' if dec else 'Nada nesta lista' if lst else 'Nada aqui' }} para esses filtros.</td></tr>
+    <tr><td colspan="11" class="mut">{{ 'Nada aguardando decisão' if dec else 'Nada nesta lista' if lst else 'Nada aqui' }} para esses filtros.</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% set npag = ((det.total + fd.pp - 1) // fd.pp) if det.total else 1 %}
 {% if npag > 1 %}
 <div class="dd-pg">
@@ -129,7 +154,8 @@
   <span class="mut" style="font-size:.85rem">{{ det.total }} domínio(s)</span>
 </div>
 {% endif %}
-
+</div>
+{% if not so_tabela %}
 <dialog id="dlgDD" class="dlg" style="max-width:560px;width:calc(100vw - 32px)">
   <h2 style="margin:0 0 .3rem" id="ddTit">Pôr em quais listas?</h2>
   <p class="mut" id="ddSub" style="font-size:.85rem;margin:.1rem 0 .5rem"></p>
@@ -139,57 +165,145 @@
       <button type="button" class="danger" id="ddOk">Confirmar</button></div>
   </div>
 </dialog>
+<div id="ddToast" class="dd-toast" role="status"></div>
+<aside id="histPainel" aria-label="Histórico do domínio">
+  <div class="hp-top"><div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center">
+    <b id="hpDom" style="font-size:1.05rem"></b>
+    <span><a id="hpLink" href="#" style="font-size:.82rem;margin-right:.6rem">página completa ↗</a><button type="button" id="hpFechar" class="mini">✕</button></span></div>
+    <div id="hpResumo" style="font-size:.84rem;margin-top:.3rem"></div></div>
+  <div class="hp-body" id="hpCorpo"></div>
+</aside>
 <script>
 (function () {
-  const sel = () => [...document.querySelectorAll(".ddSel:checked")].map(i => i.value);
-  const conta = () => { document.getElementById("ddN").textContent = sel().length + " selecionado(s)"; };
-  document.querySelectorAll(".ddSel").forEach(i => i.addEventListener("change", conta));
-  document.getElementById("ddTodos").addEventListener("change", e => {
-    document.querySelectorAll(".ddSel").forEach(i => { i.checked = e.target.checked; }); conta(); });
-  const cat = {{ (cat if lst else '')|tojson }}, nomeCat = {{ (rot.get(cat, cat) if lst else '')|tojson }}, DEC = {{ dec|tojson }};
-  let acaoDlg = null;
-  async function envia(acao, para) {
-    const doms = sel();
-    try {
-      const r = await fetch({{ url_for('admin.listas_lote_dominios')|tojson }}, {method: "POST", credentials: "same-origin",
-        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
-        body: JSON.stringify({acao: acao, cat: cat, para: para || [], dominios: doms})});
-      const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
-    } catch (e) { alert("Falha (sessão expirou?)"); }
+  if (window._ddInit) return;
+  window._ddInit = true;
+  const URL_LOTE = {{ url_for('admin.listas_lote_dominios')|tojson }}, URL_IMP = {{ url_for('admin.dominios_impacto')|tojson }},
+        URL_HIST = {{ url_for('admin.dominio_historico')|tojson }}, ROT = {{ LISTAS_ROT|tojson }};
+  const box = () => document.getElementById("ddBox");
+  const info = () => box().dataset;
+  const sel = () => [...document.querySelectorAll("#ddBox .ddSel:checked")].map(i => i.value);
+  const conta = () => { const n = document.getElementById("ddN"); if (n) n.textContent = sel().length + " selecionado(s)"; };
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  const quando = iso => iso ? new Date(iso).toLocaleString("pt-BR", {timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit"}) : "—";
+  function toast(msg, ok) {
+    const t = document.getElementById("ddToast");
+    t.textContent = msg; t.className = "dd-toast on" + (ok === false ? " erro" : "");
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), ok === false ? 9000 : 6000);
   }
-  document.querySelectorAll("[data-dd]").forEach(b => b.addEventListener("click", () => {
-    const acao = b.dataset.dd, n = sel().length;
-    if (!n) { alert("Selecione pelo menos um domínio."); return; }
+  async function recarregar(url) {
+    url = url || location.href;
+    box().style.opacity = .5;
+    try {
+      const r = await fetch(url, {credentials: "same-origin", headers: {"X-Partial": "1"}});
+      if (!r.ok) throw new Error(r.status);
+      const tmp = document.createElement("div"); tmp.innerHTML = await r.text();
+      const novo = tmp.querySelector("#ddBox");
+      if (!novo) throw new Error("sem tabela");
+      const foco = document.activeElement && document.activeElement.name === "q" ? document.activeElement.selectionStart : null;
+      box().replaceWith(novo); history.replaceState(null, "", url);
+      if (foco !== null) { const q = novo.querySelector("input[name=q]"); q.focus(); q.setSelectionRange(foco, foco); }
+    } catch (e) { toast("Falha ao atualizar a tabela (sessão expirou?)", false); box().style.opacity = 1; }
+  }
+  function urlFiltros(form) {
+    const u = new URL(location.href);
+    [...u.searchParams.keys()].forEach(k => u.searchParams.delete(k));
+    new FormData(form).forEach((v, k) => { if (v !== "") u.searchParams.set(k, v); });
+    return u.toString();
+  }
+  async function envia(acao, para, doms) {
+    try {
+      const r = await fetch(URL_LOTE, {method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
+        body: JSON.stringify({acao: acao, cat: info().cat, para: para || [], dominios: doms})});
+      const j = await r.json(); toast(j.msg, j.ok);
+      if (j.ok) recarregar();
+    } catch (e) { toast("Falha (sessão expirou?)", false); }
+  }
+  let acaoDlg = null, domsDlg = [];
+  function pedir(acao, doms) {
+    const n = doms.length, d = info(), DEC = !!d.dec, nomeCat = d.nomecat, q = n === 1 ? doms[0] : n + " domínio(s)";
+    if (!n) { toast("Selecione pelo menos um domínio.", false); return; }
     if (acao === "tirar") {
-      if (confirm(DEC ? `Manter liberado ${n} domínio(s)? Saem de Decisões sem entrar em nenhuma lista (decisão registrada).`
-                      : `Tirar ${n} domínio(s) da lista ${nomeCat}? Fica registrado como “manter liberado”.`)) envia("tirar");
+      if (confirm(DEC ? `Manter liberado ${q}? Sai de Decisões sem entrar em nenhuma lista (decisão registrada).`
+                      : `Tirar ${q} da lista ${nomeCat}? Fica registrado como “manter liberado” e vale na hora.`)) envia("tirar", [], doms);
     } else if (acao === "tirar_wl") {
-      if (confirm(`Tirar ${n} domínio(s) da whitelist? Voltam a valer as listas de bloqueio (o DNS atualiza em até 1 h).`)) envia("tirar_wl");
+      if (confirm(`Tirar ${q} da whitelist? Voltam a valer as listas de bloqueio (o DNS atualiza em até 1 h).`)) envia("tirar_wl", [], doms);
     } else if (acao === "aprovar") {
-      if (confirm(`Aprovar a sugestão da IA para ${n} domínio(s)? Cada um vai para a lista sugerida (sugestão "nenhuma" = sai de ${nomeCat}). Sem sugestão ainda, fica onde está.`)) envia("aprovar");
+      if (n === 1 || confirm(`Aprovar a sugestão da IA para ${q}? Cada um vai para a lista sugerida (sugestão "nenhuma" = sai de ${nomeCat}).`)) envia("aprovar", [], doms);
     } else if (acao === "reanalisar") {
-      if (confirm(`Pedir nova análise da IA para ${n} domínio(s)? Classificações travadas à mão ficam como estão.`)) envia("reanalisar");
+      if (n === 1 || confirm(`Pedir nova análise da IA para ${q}?`)) envia("reanalisar", [], doms);
     } else {
-      acaoDlg = acao;
+      acaoDlg = acao; domsDlg = doms;
       document.querySelectorAll("#dlgDD .ddL").forEach(c => { c.checked = false; });
-      document.getElementById("ddTit").textContent = acao === "mover" && !DEC ? `Mover ${n} domínio(s) para…` : `Pôr ${n} domínio(s) em…`;
-      document.getElementById("ddSub").textContent = acao === "mover"
+      document.getElementById("ddTit").textContent = acao === "mover" && !DEC ? `Mover ${q} para…` : `Pôr ${q} em…`;
+      const sub = document.getElementById("ddSub");
+      sub.textContent = acao === "mover"
         ? (DEC ? "Entram nas listas marcadas (decisão: bloquear) e saem de Decisões." : `Saem da lista ${nomeCat} e entram nas listas marcadas (decisão: bloquear).`)
         : "Entram nas listas marcadas (decisão: bloquear) e passam a valer no DNS para as empresas que aplicam cada lista.";
-      const sub = document.getElementById("ddSub"), base = sub.textContent;
-      fetch({{ url_for('admin.dominios_impacto')|tojson }}, {method: "POST", credentials: "same-origin",
-        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify({dominios: sel()})})
+      const base = sub.textContent;
+      fetch(URL_IMP, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
+                      body: JSON.stringify({dominios: doms})})
         .then(r => r.json()).then(j => { const x = j.impacto; if (!j.ok || !x) return;
           sub.textContent = base + (x.computadores ? ` Nos últimos 7 dias: ${x.computadores} computador(es), ${x.consultas} consulta(s), `
             + `empresas: ${x.empresas.slice(0, 6).join(", ")}${x.empresas.length > 6 ? " …" : ""}.` : " Nenhum acesso nos últimos 7 dias."); })
         .catch(() => {});
       document.getElementById("dlgDD").showModal();
     }
-  }));
-  document.getElementById("ddOk").addEventListener("click", () => {
-    const para = [...document.querySelectorAll("#dlgDD .ddL:checked")].map(c => c.value);
-    if (!para.length) { alert("Marque pelo menos uma lista."); return; }
-    document.getElementById("dlgDD").close(); envia(acaoDlg, para);
+  }
+  async function historico(dom, href) {
+    const p = document.getElementById("histPainel");
+    document.getElementById("hpDom").textContent = dom; document.getElementById("hpLink").href = href;
+    document.getElementById("hpResumo").textContent = ""; document.getElementById("hpCorpo").innerHTML = '<p class="mut">carregando o histórico…</p>';
+    p.classList.add("on");
+    try {
+      const r = await fetch(URL_HIST + "?d=" + encodeURIComponent(dom), {credentials: "same-origin"});
+      const j = await r.json(); if (!j.ok) throw new Error(j.msg);
+      const h = j.historico, lst = c => (c.startsWith("wl:") ? "whitelist " : "") + (ROT[c.replace(/^wl:/, "")] || c.replace(/^wl:/, ""));
+      document.getElementById("hpResumo").innerHTML =
+        `<b>${esc(h.estado)}</b> · ${esc(h.classificacao || "—")} · ${esc(h.categoria || "—")}${h.servico ? " · " + esc(h.servico) : ""}`
+        + `<br><span class="mut">${esc(h.fonte || "")}${h.recomendacao ? " · recomendação " + esc(h.recomendacao) : ""} · ${h.consultas || 0} consultas</span>`
+        + `<div style="margin-top:.3rem">${h.listas.map(c => `<span class="hp-chip" style="background:#fee2e2">⛔ ${esc(lst(c))}</span>`).join("")}`
+        + `${h.whitelist.map(c => `<span class="hp-chip" style="background:#dcfce7">✅ ${esc(lst("wl:" + c))}</span>`).join("")}`
+        + `${h.feeds ? `<span class="hp-chip" style="background:#fee2e2">🛡 feeds: ${esc(h.feeds)}</span>` : ""}</div>`
+        + `<div class="mut" style="font-size:.76rem;margin-top:.2rem">visto ${quando(h.fases.visto)} · fase 1 ${quando(h.fases.fase1)} · WHOIS ${quando(h.fases.fase2_whois)} · busca ${quando(h.fases.fase3_busca)} · IA online ${quando(h.fases.fase4_online)}</div>`;
+      document.getElementById("hpCorpo").innerHTML = h.linha_do_tempo.length ? '<ul class="hp-tl">' + h.linha_do_tempo.slice().reverse().map(x =>
+        `<li class="${esc(x.tipo)} ${esc(x.acao || "")}"><div class="h">${quando(x.at)}</div><b>${esc(x.tipo === "lista" ? x.titulo.replace(/(entrou em |saiu de )(.*)/, (m, a, c) => a + lst(c)) : x.titulo)}</b>`
+        + `${x.texto ? "<div>" + esc(x.texto) + "</div>" : ""}${x.nota ? '<div class="mut" style="font-size:.78rem">' + esc(x.nota) + "</div>" : ""}</li>`).join("") + "</ul>"
+        : '<p class="mut">Sem histórico registrado.</p>';
+    } catch (e) { document.getElementById("hpCorpo").innerHTML = '<p class="mut">Não consegui carregar o histórico.</p>'; }
+  }
+  document.addEventListener("submit", e => {
+    const f = e.target.closest("#ddBox form.dd-f"); if (!f) return;
+    e.preventDefault(); recarregar(urlFiltros(f));
   });
+  let tq;
+  document.addEventListener("input", e => {
+    if (!e.target.matches("#ddBox form.dd-f input[name=q]")) return;
+    clearTimeout(tq); const f = e.target.form; tq = setTimeout(() => recarregar(urlFiltros(f)), 450);
+  });
+  document.addEventListener("change", e => {
+    const t = e.target;
+    if (t.matches("#ddBox form.dd-f select")) recarregar(urlFiltros(t.form));
+    else if (t.id === "ddTodos") { document.querySelectorAll("#ddBox .ddSel").forEach(i => { i.checked = t.checked; }); conta(); }
+    else if (t.matches("#ddBox .ddSel")) conta();
+  });
+  document.addEventListener("click", e => {
+    const pg = e.target.closest("#ddBox .dd-pg a");
+    if (pg) { e.preventDefault(); recarregar(pg.href); box().scrollIntoView({behavior: "smooth"}); return; }
+    const b = e.target.closest("#ddBox [data-dd]");
+    if (b) { pedir(b.dataset.dd, sel()); return; }
+    const rb = e.target.closest("#ddBox [data-ra]");
+    if (rb) { pedir(rb.dataset.ra, [rb.dataset.dom]); return; }
+    const h = e.target.closest("#ddBox a.dd-hist");
+    if (h && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); historico(h.dataset.dom, h.href); return; }
+    if (e.target.id === "hpFechar") { document.getElementById("histPainel").classList.remove("on"); return; }
+    if (e.target.id === "ddOk") {
+      const para = [...document.querySelectorAll("#dlgDD .ddL:checked")].map(c => c.value);
+      if (!para.length) { toast("Marque pelo menos uma lista.", false); return; }
+      document.getElementById("dlgDD").close(); envia(acaoDlg, para, domsDlg);
+    }
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") document.getElementById("histPainel").classList.remove("on"); });
 })();
 </script>
+{% endif %}

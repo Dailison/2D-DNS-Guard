@@ -463,6 +463,9 @@ def listas_categoria():
         servicos = api.get("/liberacao")
     except AnalyzerError:
         servicos = []
+    if request.headers.get("X-Partial"):   # filtros/paginação/ações via Ajax: só a tabela
+        return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="lista", cat=cat, det=det, fd=fd,
+                               categorias=dnslib.CATEGORIAS_LISTA, scats=_site_cats(), pag_url=_pag_url)
     try:
         historico = api.get("/auditoria", category=cat, limit=25)
     except AnalyzerError:
@@ -663,6 +666,17 @@ def _json(ok: bool, msg: str, **kw):
     return jsonify(ok=ok, msg=msg, **kw), (200 if ok else 400)
 
 
+# ------------------------------------------------- Histórico do domínio (painel lateral, Ajax)
+@admin_bp.get("/dominios/historico")
+@login_required
+def dominio_historico():
+    d = (request.args.get("d") or "").strip().lower().rstrip(".")
+    try:
+        return _json(True, "", historico=api.get(f"/domains/{quote(d, safe='')}/historico"))
+    except AnalyzerError as e:
+        return _json(False, f"{e}")
+
+
 # ------------------------------------------------- Prévia de impacto (plano de confiabilidade, fase 3.1)
 @admin_bp.get("/politicas/impacto")
 @login_required
@@ -824,6 +838,9 @@ def listas_liberacao():
             ctx = _servico_ctx(slug) if slug else {"servico": None, "todas": todas}
     except AnalyzerError as e:
         flash(f"Falha ao carregar as listas de liberação: {e}", "erro")
+    if request.headers.get("X-Partial") and ctx.get("det") is not None:
+        return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="whitelist" if ctx.get("wl") else "sem_lista",
+                               categorias=dnslib.CATEGORIAS_LISTA, cat="", **{k: v for k, v in ctx.items() if k in ("det", "fd", "wl", "scats", "pag_url")})
     return render_template("admin/servico.html", modo="liberacao", categorias=dnslib.CATEGORIAS_LISTA, whitelists=ctx_wl,
                            cats_wl=dnslib.CATEGORIAS_WHITELIST, **ctx)
 

@@ -197,6 +197,9 @@ def decisoes():
             det = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, fase5=True, **_det_params(fd))
         except AnalyzerError as e:
             flash(f"Falha ao carregar as decisões: {e}", "erro")
+    if request.headers.get("X-Partial"):
+        return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="decisoes", det=det, fd=fd, cat="para_revisar",
+                               categorias=dnslib.CATEGORIAS_LISTA, scats=_rotulos_cat(), pag_url=_pag_url, tid=ctx["tid"])
     fases = {}
     try:
         ev = api.get("/ai/events", limit=1)

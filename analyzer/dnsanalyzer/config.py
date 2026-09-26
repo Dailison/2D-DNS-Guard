@@ -84,6 +84,7 @@ class Settings:
     web_search_results: int
     web_search_min_interval: int
     web_search_before_llm: bool
+    whois_enabled: bool
 
     reanalyze_days: int
     retention_days: int
@@ -156,6 +157,7 @@ def load_settings() -> Settings:
         # busca ANTES da IA na etapa 1 (desligada a pedido do usuário em 2026-09-26: a IA analisa
         # primeiro; o que ela não reconhecer vai p/ Decisões e a etapa 2 busca quando a fila zerar)
         web_search_before_llm=_bool(os.environ.get("WEB_SEARCH_BEFORE_LLM"), False),
+        whois_enabled=_bool(os.environ.get("WHOIS_ENABLED"), True),   # etapa 3 (RDAP + CNPJ/BrasilAPI)
         reanalyze_days=_int("REANALYZE_DAYS", 30),
         retention_days=_int("RETENTION_DAYS", 180),
         classify_batch=_int("CLASSIFY_BATCH", 10),

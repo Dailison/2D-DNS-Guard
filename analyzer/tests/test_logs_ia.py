@@ -170,3 +170,19 @@ def test_charts_filtros(api):
     assert api.get("/charts", params={"start": AGORA.isoformat(), "end": AGORA.isoformat()}, headers=H).status_code == 400
     assert api.get("/charts", params={"start": (AGORA - timedelta(hours=1)).isoformat(), "end": AGORA.isoformat(),
                                       "resposta": "x"}, headers=H).status_code == 400
+
+
+def test_etapa3_fila_so_depois_das_etapas_1_e_2(api):
+    from dnsanalyzer import classifier, db
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, web_search_at, total_queries) "
+                  "VALUES ('desconhecido-etapa3.com', 'com', 'DESCONHECIDO', 'llm', now(), 50)")
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, llm_pending) "
+                  "VALUES ('na-fila-da-ia.com', 'com', 'DESCONHECIDO', 'rules', true)")
+    with db.conn() as c:
+        assert classifier._claim_etapa3(c) is None          # etapa 1 ainda tem fila
+        c.execute("UPDATE domains SET llm_pending=false WHERE name='na-fila-da-ia.com'")
+        d = classifier._claim_etapa3(c)
+        assert d and d["name"] == "desconhecido-etapa3.com"
+        c.execute("UPDATE domains SET whois_at=now(), claimed_at=NULL WHERE id=%s", (d["id"],))
+        assert classifier._claim_etapa3(c) is None          # já consultado: não volta

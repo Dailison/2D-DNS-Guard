@@ -12,6 +12,8 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
+from .whois import evidencia as whois_evidencia
+
 THREAT_TOPIC = {"malware": "Malware", "c2": "Comando e controle (C2)", "phishing": "Phishing",
                 "threat": "Ameaça (feed agregado)", "badware": "Hospedagem de badware",
                 "dyndns": "DNS dinâmico", "bypass": "VPN/Proxy/DoH (contorno de filtro)"}
@@ -109,6 +111,10 @@ def build_evidence(d: dict) -> list[Evidence]:
     for r in (d.get("search") or []):
         add("websearch", f"resultado de busca na web (texto de TERCEIROS, não verificado) em {r['host']}: "
                          f"'{r.get('title') or ''}' — {r.get('snippet') or ''}", False, host=r["host"])
+
+    wh = whois_evidencia(d.get("whois"))
+    if wh:
+        add("whois", wh[0], False, **wh[1])
 
     hits = d.get("ti_hits") or []
     for h in hits:

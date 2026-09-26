@@ -19,6 +19,7 @@ from .rules import RuleResult
 
 RISK_KINDS = {"ti", "tld", "lexical", "age", "tunnel", "logs"}
 # identidade externa confiável (curada/validada por terceiros). "site" NÃO entra: é autodeclarado.
+# "whois" entra só com titular pessoa jurídica com CNPJ no registro.br (data.confiavel).
 TRUSTED_ID_KINDS = {"wikidata", "cert"}
 
 
@@ -88,7 +89,9 @@ def combine(rule: RuleResult, llm: LLMResult, evidence: list[dict]) -> Final:
             notes.append(f"IA não reconhece o serviço (sugeriu {cls}): classificado como DESCONHECIDO")
             cls, work_forced = "DESCONHECIDO", 50
         elif not rule.flags.get("ranked") and not any(
-                ev_by_id[r["evidence_id"]]["kind"] in TRUSTED_ID_KINDS for r in valid) and not (
+                ev_by_id[r["evidence_id"]]["kind"] in TRUSTED_ID_KINDS
+                or (ev_by_id[r["evidence_id"]]["kind"] == "whois" and ev_by_id[r["evidence_id"]]["data"].get("confiavel"))
+                for r in valid) and not (
                 any(ev_by_id[r["evidence_id"]]["kind"] in ("websearch", "site") for r in valid) and len(
                     {e["data"].get("host") for e in evidence if e["kind"] == "websearch"} - {None}) >= 2):
             # modelos pequenos "reconhecem" domínios da cauda longa por chute: fora do top 1M

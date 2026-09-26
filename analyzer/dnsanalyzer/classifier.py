@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, db, enrich, ti, webintel
+from . import catalog, db, enrich, ti, webintel, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -52,7 +52,7 @@ def site_categories(c) -> list[dict]:
 
 
 def build_dossier(c, drow: dict, with_rdap: bool = False, with_web: bool = False,
-                  with_search: bool = False) -> dict:
+                  with_search: bool = False, with_whois: bool = False) -> dict:
     cfg = settings()
     name = drow["name"]
     info = analyze_name(name, cfg.internal_suffixes)
@@ -85,6 +85,10 @@ def build_dossier(c, drow: dict, with_rdap: bool = False, with_web: bool = False
                                    allow_site=not d["ti_hits"] and not d["abused_tld"])
         # etapa 2: resultados de busca (só busca na rede quando with_search; senão usa o cache)
         d["search"] = webintel.search(c, name, fetch=with_search)
+        # etapa 3: WHOIS do domínio registrável (na rede só com with_whois; senão o cache).
+        # Subdomínio de plataforma (x.myshopify.com): o WHOIS seria o da plataforma — não vale.
+        if not info.private_suffix:
+            d["whois"] = whois.lookup(c, info.icann_registrable, fetch=with_whois)
 
     reg = drow.get("registered_at")
     if reg is None and with_rdap and not d["catalog"] and not info.private_suffix and \
@@ -216,7 +220,7 @@ def phase_b(client: OllamaClient, cats: list[dict]) -> str:
 
 
 def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = False,
-            esperar_busca: bool = False) -> str:
+            esperar_busca: bool = False, etapa3: bool = False) -> str:
     """Regras + fontes externas + IA para um domínio já reservado (claimed).
     etapa2 = domínio que a IA deixou DESCONHECIDO: busca na web antes de reclassificar.
     esperar_busca = espera a vez da busca na web (1 domínio pedido na mão) em vez de adiar."""
@@ -224,13 +228,25 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     name, did = drow["name"], drow["id"]
     if etapa2:
         event("search_start", name, did, detail=f"etapa 2 · busca na web · {drow['total_queries']} consultas")
+    if etapa3:
+        event("whois_start", name, did, detail=f"etapa 3 · WHOIS/RDAP · {drow['total_queries']} consultas")
     with db.conn() as c:
         try:
-            dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=etapa2)
+            dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=etapa2, with_whois=etapa3)
         except (httpx.HTTPError, webintel.BuscaIndisponivel) as e:   # SearXNG fora/bloqueado: depois
             c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
             event("search_error", name, did, detail=f"busca indisponível: {e.__class__.__name__}")
             return "unavailable"
+        except whois.WhoisIndisponivel as e:   # RDAP/Receita fora ou limitando: depois
+            c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
+            event("whois_error", name, did, detail=f"WHOIS indisponível: {e}")
+            return "unavailable"
+        if etapa3:
+            c.execute("UPDATE domains SET whois_at=now() WHERE id=%s", (did,))
+            if not whois.evidencia(dossier.get("whois")):
+                c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
+                event("whois_done", name, did, drow["classification"], detail="etapa 3: WHOIS sem dados úteis")
+                return "done"
         if etapa2:
             c.execute("UPDATE domains SET web_search_at=now() WHERE id=%s", (did,))
             if not dossier.get("search"):
@@ -299,9 +315,9 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     svc = (res.service or "").strip() if res.recognized else "não reconhecido pela IA"
     extra = "; ".join(fin.notes)
     scat = next((s["label"] for s in scats if s["code"] == fin.category), fin.category or "")
-    event("search_done" if etapa2 else "llm_done", name, did, fin.classification, fin.risk, fin.work,
+    event("whois_done" if etapa3 else "search_done" if etapa2 else "llm_done", name, did, fin.classification, fin.risk, fin.work,
           meta.get("seconds"),
-          detail=" · ".join(x for x in (("etapa 2 (busca na web)" if etapa2 else
+          detail=" · ".join(x for x in (("etapa 3 (WHOIS)" if etapa3 else "etapa 2 (busca na web)" if etapa2 else
                                          f"com busca na web ({len(dossier['search'])} resultados)"
                                          if dossier.get("search") else ""),
                                         "reforço (GPU)" if meta.get("extra") else "", svc, scat, extra) if x))
@@ -346,6 +362,37 @@ def phase_c(client: OllamaClient, cats: list[dict]) -> str:
     if not drow:
         return "idle"
     return _refine(client, cats, drow, etapa2=True)
+
+
+def _claim_etapa3(c) -> dict | None:
+    """Próximo DESCONHECIDO p/ WHOIS — só com as filas das etapas 1 e 2 vazias."""
+    if c.execute(ETAPA1_PENDENTE + " LIMIT 1").fetchone():
+        return None
+    if settings().web_search_url and c.execute(
+            "SELECT 1 FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by = 'llm' "
+            "AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public' "
+            "AND NOT dominio_decidido(id) LIMIT 1").fetchone():
+        return None
+    return c.execute(
+        """UPDATE domains SET claimed_at=now() WHERE id = (
+             SELECT id FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')
+               AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
+               AND (web_search_at IS NOT NULL OR %s = '')
+               AND NOT dominio_decidido(id)
+               AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
+             ORDER BY total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
+           RETURNING *""", (settings().web_search_url,)).fetchone()
+
+
+def phase_d(client: OllamaClient, cats: list[dict]) -> str:
+    """Etapa 3: WHOIS/RDAP (+ CNPJ) + IA para UM desconhecido. Só com as etapas 1 e 2 vazias."""
+    if not settings().whois_enabled:
+        return "idle"
+    with db.conn() as c:
+        drow = _claim_etapa3(c)
+    if not drow:
+        return "idle"
+    return _refine(client, cats, drow, etapa3=True)
 
 
 def classify_one(name: str) -> str:
@@ -454,6 +501,8 @@ def run_forever(stop=lambda: False) -> None:
             status = phase_b(client, cats)
             if status == "idle":            # etapa 1 vazia: etapa 2 (busca na web)
                 status = phase_c(cliente_etapa2(), cats)
+            if status == "idle":            # etapas 1 e 2 vazias: etapa 3 (WHOIS)
+                status = phase_d(cliente_etapa2(), cats)
             if status == "idle":
                 time.sleep(20)
             elif status == "unavailable":

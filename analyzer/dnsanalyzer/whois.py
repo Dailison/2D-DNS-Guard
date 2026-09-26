@@ -138,11 +138,15 @@ def lookup(c, domain: str, fetch: bool) -> dict | None:
         return row["value"] if row else None
     br = domain.endswith(".br")
     j = _get(f"https://rdap.registro.br/domain/{domain}" if br else f"https://rdap.org/domain/{domain}",
-             "registro.br" if br else "rdap.org", 2.0 if br else 1.5)
+             "registro.br" if br else "rdap.org", 6.0 if br else 1.5)
     out: dict = {"encontrado": False, "fonte": "registro.br" if br else "rdap"}
     if j:
         out.update(parse_rdap(j), encontrado=True)
         t = out.get("titular") or {}
+        if br and t.get("nome") and not t.get("tipo"):
+            # todo titular .br tem CPF/CNPJ: sem o documento = o registro.br limitou as consultas
+            # (medido: ~2 consultas/10 s bastam p/ ele omitir). Não grava; tenta de novo depois.
+            raise WhoisIndisponivel("registro.br omitiu o documento do titular (limite de consultas)")
         if t.get("tipo") == "cnpj":
             try:
                 t["receita"] = cnpj_info(c, t.get("doc") or "")

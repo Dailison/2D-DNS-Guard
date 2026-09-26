@@ -66,3 +66,24 @@ def test_policy_titular_declarado_nao_vale():
     wid = next(e.id for e in r.evidence if e.kind == "whois")
     f = combine(r, llm("TRABALHO", work=85, recognized=True, reasons=[{"evidence_id": wid, "text": "Acme"}]), ev(r))
     assert f.classification == "DESCONHECIDO"
+
+
+def test_registro_br_sem_documento_e_limite_nao_grava(monkeypatch):
+    import copy
+    import pytest
+    sem_doc = copy.deepcopy(RDAP_BR)
+    sem_doc["entities"][0].pop("publicIds")
+    monkeypatch.setattr(whois, "_get", lambda *a, **k: sem_doc)
+    gravou = []
+
+    class C:
+        def execute(self, sql, *a):
+            if sql.startswith("INSERT"):
+                gravou.append(sql)
+            return self
+
+        def fetchone(self):
+            return None
+    with pytest.raises(whois.WhoisIndisponivel):
+        whois.lookup(C(), "iotsuite.com.br", fetch=True)
+    assert not gravou

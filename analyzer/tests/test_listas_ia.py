@@ -384,13 +384,23 @@ def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
         listas_ia.aplicar(c)
         m = em(c, "talvez-nada.com")
     assert "IA online sem certeza" in m.get("para_revisar", ""), m
-    # 5) dns.google (popular, categoria infraestrutura) com resposta online doh_dns 0,9 -> entra em doh_dns
+    # 5) DoH/DNS nunca entra sozinha (incidente: impervadns.net/apple-dns.net pareciam resolvedor) -> Decisões
     with db.conn() as c:
         i = novo(c, "dns.google", "TRABALHO", "infraestrutura", rank=50)
         listas_ia.salvar(c, i, "doh_dns", 0.9, "", "", "online:gemini")
+        j2 = novo(c, "impervadns.net", "TRABALHO", "infraestrutura", rank=506)
+        listas_ia.salvar(c, j2, "doh_dns", 1.0, "", "", "online:gemini")
         listas_ia.aplicar(c)
-        m = em(c, "dns.google")
-    assert "doh_dns" in m and "para_revisar" not in m, m
+        m, m2 = em(c, "dns.google"), em(c, "impervadns.net")
+    assert "doh_dns" not in m and "DoH/DNS só com revisão" in m.get("para_revisar", ""), m
+    assert "doh_dns" not in m2 and "para_revisar" in m2, m2
+    # 5b) uso misto (Mensageiros) popular e "comunicação" entra (só a trava do catálogo vale)
+    with db.conn() as c:
+        i = novo(c, "viber.com", "TRABALHO", "comunicacao", rank=900)
+        listas_ia.salvar(c, i, "mensageiros", 0.95, "", "", "online:gemini")
+        listas_ia.aplicar(c)
+        m = em(c, "viber.com")
+    assert "mensageiros" in m and "para_revisar" not in m, m
     # 6) CMP de cookies: a IA local diz "produtividade", a online diz "publicidade" -> sem trava, entra
     with db.conn() as c:
         i = novo(c, "cookie-cmp.com", "TRABALHO", "produtividade")

@@ -188,7 +188,11 @@ PARA_REVISAR = "para_revisar"
 # listas de serviços de uso misto por definição (a empresa escolhe aplicar): a categoria da IA para eles é
 # "de trabalho" e são populares (WhatsApp = comunicação, ChatGPT = produtividade, Dropbox = TI) — as travas
 # de categoria e de popularidade as deixariam vazias. Só a do catálogo (protegidos) vale.
-_USO_MISTO = {"doh_dns", "mensageiros", "ia_chatbots", "nuvem_remoto"}
+_USO_MISTO = {"mensageiros", "ia_chatbots", "nuvem_remoto"}
+# DoH/DNS nunca entra sozinha (incidente 2026-09-26): nomes de DNS de CDN/plataforma (impervadns.net,
+# apple-dns.net, herokudns.com…) parecem "resolvedor" p/ as IAs, e são destino de CNAME de milhares de
+# sites — um erro derruba tudo o que está atrás deles. A IA sugere; uma pessoa confirma em Decisões.
+_SO_MANUAL = {"doh_dns"}
 
 
 def guardado(r: dict, cat: str | None = None) -> str | None:
@@ -196,11 +200,13 @@ def guardado(r: dict, cat: str | None = None) -> str | None:
     Travas: infraestrutura protegida do catálogo; categoria de trabalho (corporate.NEVER_BLOCK) — com
     resposta da IA online, só quando AS DUAS IAs dão categoria de trabalho (a local erra justamente aí:
     CMP de cookies = "produtividade"); site de trabalho popular (Tranco ≤ 10.000; classificação da IA
-    online quando é ela quem responde). Listas de uso misto (DoH/DNS, Mensageiros, IA/Chatbots,
-    Nuvem/Acesso remoto) só têm a trava do catálogo (ver _USO_MISTO)."""
+    online quando é ela quem responde). Listas de uso misto (Mensageiros, IA/Chatbots, Nuvem/Acesso
+    remoto) só têm a trava do catálogo (ver _USO_MISTO); DoH/DNS é sempre revisão (ver _SO_MANUAL)."""
     e = catalog.match(r["name"])
     if e and e.get("protected"):
         return "trava: infraestrutura protegida (catálogo)"
+    if cat in _SO_MANUAL:
+        return "trava: DoH/DNS só com revisão (DNS de CDN também parece resolvedor)"
     if cat in _USO_MISTO:
         return None
     online = (r.get("lista_fonte") or "").startswith("online")

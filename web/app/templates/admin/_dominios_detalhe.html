@@ -2,7 +2,7 @@
 {# Tabela de domínios com a classificação da IA e o estado da revisão manual (listas de bloqueio e
    "Classificados por IA como Trabalho"). Variáveis: det (API), fd (filtros atuais), modo ('lista' |
    'sem_lista' | 'decisoes' = Para revisar na tela Decisões), cat (lista atual), categorias, scats, pag_url(n). #}
-{% set dec = modo == 'decisoes' %}{% set lst = modo in ('lista', 'decisoes') %}
+{% set dec = modo == 'decisoes' %}{% set lst = modo in ('lista', 'decisoes') %}{% set wlm = modo == 'whitelist' %}
 {% set rot = dict(categorias) %}
 {% set CLS = {'TRABALHO': ('Trabalho', '#dcfce7', '#166534'), 'NAO_TRABALHO': ('Não trabalho', '#fef3c7', '#92400e'),
               'SUSPEITO': ('Suspeito', '#ffedd5', '#9a3412'), 'MALICIOSO': ('Malicioso', '#fee2e2', '#991b1b'),
@@ -17,7 +17,7 @@
   .dd-pg a,.dd-pg b{padding:.2rem .55rem;border:1px solid var(--bd);border-radius:8px;text-decoration:none;font-size:.85rem}
 </style>
 <form method="get" class="dd-f" style="margin-bottom:.8rem">
-  {% if dec %}<input type="hidden" name="t" value="{{ tid }}">{% elif lst %}<input type="hidden" name="cat" value="{{ cat }}">{% else %}<input type="hidden" name="slug" value="_trabalho">{% endif %}
+  {% if dec %}<input type="hidden" name="t" value="{{ tid }}">{% elif wlm %}<input type="hidden" name="wl" value="{{ wl }}">{% elif lst %}<input type="hidden" name="cat" value="{{ cat }}">{% else %}<input type="hidden" name="slug" value="_trabalho">{% endif %}
   <div style="flex:1"><label>Buscar</label><input type="text" name="q" value="{{ fd.q or '' }}" placeholder="parte do domínio"></div>
   <div><label>Classificação da IA</label><select name="cls" onchange="this.form.submit()">
     <option value="">todas</option>
@@ -56,6 +56,9 @@
   <button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" data-dd="aprovar" title="cada domínio vai para a lista que a IA sugeriu (sugestão 'nenhuma' = sai desta lista)">✓ Aprovar sugestão da IA</button>
   <button type="button" class="mini {{ 'danger' if dec else 'primary' }}" data-dd="mover">{{ '⛔ Pôr em lista…' if dec else 'Mover para…' }}</button>
   <button type="button" class="mini {{ 'ok' if dec else 'danger' }}" data-dd="tirar"{% if dec %} style="background:#16a34a;color:#fff;border:0"{% endif %}>{{ '✅ Manter liberado' if dec else '✕ Tirar da lista' }}</button>
+  {% elif wlm %}
+  <button type="button" class="mini danger" data-dd="tirar_wl">✕ Tirar da whitelist</button>
+  <button type="button" class="mini danger" data-dd="por">⛔ Pôr em lista de bloqueio…</button>
   {% else %}
   <button type="button" class="mini danger" data-dd="por">⛔ Pôr em lista de bloqueio…</button>
   {% endif %}
@@ -63,7 +66,7 @@
 </div>
 
 <table class="dd-t">
-  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>IA</th><th>Sugestão da IA</th><th>Recomendação</th><th>Revisão</th><th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th><th></th>{% endif %}</tr></thead>
+  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>IA</th><th>Sugestão da IA</th><th>Recomendação</th><th>Revisão</th><th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if wlm %}<th>Entrou na whitelist</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th><th></th>{% endif %}</tr></thead>
   <tbody>
   {% for i in det['items'] %}
     {% set c = CLS.get(i.classification) %}
@@ -96,7 +99,7 @@
       </td>
       <td class="num">{{ i.total_queries or 0 }}</td>
       {% if dec %}<td style="font-size:.82rem">{% for e in (i.empresas or [])[:3] %}<a href="{{ url_for('analise.dominio', nome=i.domain, t=e.id) }}">{{ e.name }}</a>{{ ', ' if not loop.last }}{% else %}<span class="mut">nenhuma (nunca acessado)</span>{% endfor %}{% if (i.empresas or [])|length > 3 %} <span class="dd-sub">+{{ i.empresas|length - 3 }}</span>{% endif %}</td>{% endif %}
-      {% if lst %}
+      {% if lst or wlm %}
       <td class="dd-sub" style="white-space:nowrap">{{ i.added_by or '—' }}<br>{{ i.added_at|dt_sp('%d/%m/%y %H:%M') }}</td>
       {% endif %}
       {% if modo == 'lista' %}
@@ -160,6 +163,8 @@
     if (acao === "tirar") {
       if (confirm(DEC ? `Manter liberado ${n} domínio(s)? Saem de Decisões sem entrar em nenhuma lista (decisão registrada).`
                       : `Tirar ${n} domínio(s) da lista ${nomeCat}? Fica registrado como “manter liberado”.`)) envia("tirar");
+    } else if (acao === "tirar_wl") {
+      if (confirm(`Tirar ${n} domínio(s) da whitelist? Voltam a valer as listas de bloqueio (o DNS atualiza em até 1 h).`)) envia("tirar_wl");
     } else if (acao === "aprovar") {
       if (confirm(`Aprovar a sugestão da IA para ${n} domínio(s)? Cada um vai para a lista sugerida (sugestão "nenhuma" = sai de ${nomeCat}). Sem sugestão ainda, fica onde está.`)) envia("aprovar");
     } else if (acao === "reanalisar") {

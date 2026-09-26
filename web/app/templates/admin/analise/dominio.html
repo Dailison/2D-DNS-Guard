@@ -212,6 +212,14 @@
         b.disabled = false;
       });
       </script>
+      {% if tenant and not todos %}
+      <form method="post" action="{{ url_for('analise.dominio_liberar_empresa', nome=dm.name) }}" style="margin:.5rem 0"
+            onsubmit="return confirm('Liberar {{ blq.nome }} só para {{ tenant.name }}? Vale na hora; as demais empresas seguem com as listas delas.')">
+        <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">
+        <button class="btn" style="background:#16a34a">🔓 Liberar só para {{ tenant.name }}</button>
+        <span class="mut" style="font-size:.8rem">(lista “Exceções · {{ tenant.name }}”, em Domínios liberados)</span>
+      </form>
+      {% endif %}
       <p class="hint" style="margin-top:.5rem">As listas são compartilhadas: a mudança vale para todas as empresas que aplicam cada lista. Quais listas cada empresa aplica: Empresas → Listas…. Para exceções só de alguns computadores, use IPs liberados.</p>
     </div>
     {% endif %}

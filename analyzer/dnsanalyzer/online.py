@@ -271,6 +271,11 @@ def _certo(obj: dict) -> bool:
     return conf >= settings().online_confianca_min and (obj.get("lista") in LISTAS_IA or bool(obj.get("reconhecido")))
 
 
+def _candidato_whitelist(obj: dict) -> bool:
+    """Trabalho, reconhecido, sem lista: pode ir p/ a whitelist (vence qualquer bloqueio) — só com 2 modelos de acordo."""
+    return obj.get("lista") in (None, NENHUMA) and obj.get("classificacao") == "TRABALHO" and bool(obj.get("reconhecido"))
+
+
 def _buscas_no_mes(c) -> int:
     """Buscas no Google (grounding) já feitas no mês: o plano grátis dá 5.000/mês p/ os modelos 3.x."""
     return c.execute("SELECT count(*) AS n FROM domains WHERE online_at >= date_trunc('month', now()) "
@@ -321,7 +326,8 @@ def fase(categorias: list[str]) -> str:
         # próximo nível (modelo maior) se não há resposta, se ela não tem certeza ou se DISCORDA da IA local
         if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")) \
                 and not (revalidar and not meta.get("nivel_reforco")) \
-                and not (obj.get("lista") in listas_ia._DOIS_MODELOS and not meta.get("nivel_reforco")):
+                and not (obj.get("lista") in listas_ia._DOIS_MODELOS and not meta.get("nivel_reforco")) \
+                and not (_candidato_whitelist(obj) and not meta.get("nivel_reforco")):
             break
         if obj is not None and meta.get("nivel_reforco") and nivel is not busca:
             break
@@ -330,7 +336,8 @@ def fase(categorias: list[str]) -> str:
             r[1]["nivel_reforco"] = True
         if r:
             if obj is not None:
-                r[1]["antes"] = {"modelo": meta.get("model"), "lista": obj.get("lista"), "confianca": obj.get("confianca")}
+                r[1]["antes"] = {"modelo": meta.get("model"), "lista": obj.get("lista"), "confianca": obj.get("confianca"),
+                                 "classificacao": obj.get("classificacao")}
             obj, meta = r
     with db.conn() as c:
         if obj is None:   # nenhum modelo respondeu (cota/sobrecarga): tenta de novo depois
@@ -347,14 +354,13 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     except (TypeError, ValueError):
         conf = 0.0
     cls = obj.get("classificacao") if obj.get("classificacao") in CLASSES else "DESCONHECIDO"
-    if cls == "MALICIOSO":   # regra do sistema: MALICIOSO só com lista de ameaça; palpite da IA = SUSPEITO (fase 5)
-        cls = "SUSPEITO"
-        obj = {**obj, "classificacao": cls, "classificacao_original": "MALICIOSO"}   # (a coerência de `aplicar` lê daqui)
+    # MALICIOSO com certeza da IA online, depois das fases 1-3, vale (pedido do usuário 2026-09-26: "não tem mais o
+    # que decidir"): com lista ameaca entra direto em Ameaças; sem certeza, Decisões.
     cat = obj.get("categoria") if obj.get("categoria") in categorias else None
     servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:300]
     salvar(c, d["id"], lista, conf, motivo, servico, fonte)
-    c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, online_resp = %s "
-              "WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
+    c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, online_resp = %s, "
+              "revisado_at = now() WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
     reconhecido = bool(obj.get("reconhecido")) and cls != "DESCONHECIDO" and conf >= settings().online_confianca_min
     if d["classification"] == "DESCONHECIDO" and reconhecido:
         razoes = [{"evidence_id": "E0", "text": f"IA online ({meta.get('model')}): {servico} — {motivo}"[:400], "by": "online"}]

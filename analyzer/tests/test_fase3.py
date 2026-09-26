@@ -196,3 +196,74 @@ def test_lista_publicada_nao_esvazia(api):
     assert api.get("/listas/pirataria.txt").status_code == 503
     assert api.post("/listas/pirataria/aceitar", headers=H, params={"by": "op"}).json()["dominios"] == 40
     assert api.get("/listas/pirataria.txt").status_code == 200 and "pirataria" not in api.get("/health").json()["listas_recusadas"]
+
+
+# ---------------------------------------------------------------- whitelists e Sites Revisados
+def test_whitelist_automatica_e_travas(api):
+    import json as _j
+
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import classifier, db, whitelist
+    trab = {"classificacao": "TRABALHO", "reconhecido": True, "categoria": "financas", "servico": "Banco",
+            "_meta": {"antes": {"lista": "nenhuma", "classificacao": "TRABALHO", "confianca": 0.95}}}
+    with db.conn() as c:
+        def dom(n, cls="TRABALHO", fonte="online:gemini", resp=trab, ev=None, por="llm", conf=0.9, lista=None):
+            return c.execute("INSERT INTO domains (name, classification, category, lista_fonte, lista_conf, lista_ia, online_resp, "
+                             "evidence, classified_by, analyzed_at) VALUES (%s, %s, 'financas', %s, %s, %s, %s, %s, %s, now()) RETURNING id",
+                             (n, cls, fonte, conf, lista, Jsonb(resp), _j.dumps(ev or []), por)).fetchone()["id"]
+        dom("banco-wl.com.br")
+        dom("microsoft.com", por="catalog", fonte=None, resp={})
+        dom("site.pages.dev", ev=[{"kind": "platform", "text": "x"}])
+        dom("cdnpai.net")
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'jogo.cdnpai.net', 'op')")
+        dom("duvida-wl.com", conf=0.5)
+        dom("loja-wl.com", resp={"classificacao": "NAO_TRABALHO", "reconhecido": True})
+        dom("um-modelo-so.com", resp={"classificacao": "TRABALHO", "reconhecido": True, "categoria": "produtividade"})
+        dom("google-analytics-teste.com", resp={**trab, "servico": "Plataforma de analytics e rastreamento"})
+        dom("imgcdn-trab.com", resp=trab)
+        out = whitelist.aplicar(c)
+        wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains")}
+    assert wl.get("banco-wl.com.br") == "financas" and wl.get("microsoft.com") == "essenciais"
+    assert not {"site.pages.dev", "cdnpai.net", "duvida-wl.com", "loja-wl.com", "um-modelo-so.com",
+                "google-analytics-teste.com", "imgcdn-trab.com"} & set(wl), wl
+    # apareceu em feed de ameaça -> sai; conflito com lista de bloqueio -> sai (automática)
+    with db.conn() as c:
+        c.execute("UPDATE domains SET ti_signature = 'urlhaus' WHERE name = 'banco-wl.com.br'")
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('compras', 'microsoft.com', 'op')")
+        whitelist.aplicar(c)
+        wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains")}
+        rev = c.execute("SELECT count(*) AS n FROM list_audit WHERE category LIKE 'wl:%%' AND acao = 'remove'").fetchone()["n"]
+    assert "banco-wl.com.br" not in wl and "microsoft.com" not in wl and rev >= 2
+    # Sites Revisados ficam fora da reanálise periódica
+    with db.conn() as c:
+        c.execute("UPDATE domains SET revisado_at = now(), analyzed_at = now() - interval '90 days', needs_analysis = false "
+                  "WHERE name = 'loja-wl.com'")
+        c.execute("UPDATE domains SET revisado_at = NULL, analyzed_at = now() - interval '90 days', needs_analysis = false "
+                  "WHERE name = 'duvida-wl.com'")
+    classifier.reanalyze_stale(30)
+    with db.conn() as c:
+        na = {r["name"]: r["needs_analysis"] for r in c.execute("SELECT name, needs_analysis FROM domains WHERE name IN ('loja-wl.com', 'duvida-wl.com')")}
+    assert na == {"loja-wl.com": False, "duvida-wl.com": True}
+
+
+def test_whitelist_api(api):
+    from dnsanalyzer import config, db
+    if "testclient" not in config.settings().lists_allowed_ips:
+        config.settings().lists_allowed_ips.append("testclient")
+    with db.conn() as c:
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('compras', 'erp-manual.com.br', 'IA automática (compras)')")
+    r = api.post("/whitelist/produtividade", headers=H, json={"domains": ["erp-manual.com.br"], "by": "op@2d"}).json()
+    assert r["dominios"] == 1
+    assert "erp-manual.com.br" in api.get("/whitelist/produtividade.txt").text
+    assert api.get("/auditoria", headers=H, params={"domain": "erp-manual.com.br", "limit": 5}).json()[0]["category"] == "wl:produtividade"
+    with db.conn() as c:
+        assert not c.execute("SELECT 1 FROM category_lists WHERE domain='erp-manual.com.br'").fetchone(), "saiu da lista de bloqueio"
+    j = api.get("/whitelist", headers=H).json()
+    assert next(x for x in j["categorias"] if x["categoria"] == "produtividade")["total"] >= 1
+    d = api.get("/whitelist/produtividade/detalhes", headers=H).json()
+    assert any(x["domain"] == "erp-manual.com.br" for x in d["items"])
+    assert "erp-manual.com.br" in api.get("/whitelist-dominios", headers=H).json()
+    # pôr numa lista de bloqueio tira da whitelist
+    api.post("/listas-lote", headers=H, json={"cats": ["jogos"], "domains": ["erp-manual.com.br"], "by": "op"})
+    assert "erp-manual.com.br" not in api.get("/whitelist-dominios", headers=H).json()

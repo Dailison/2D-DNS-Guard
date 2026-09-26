@@ -535,6 +535,8 @@ def review_decide(tid: int, name: str, body: ReviewIn):
             (body.status, body.by or None, body.status, reg, tid)).fetchone()
         if not r:
             raise HTTPException(404, "domínio não observado nesta empresa")
+        if body.status:   # decidido por pessoa: Site Revisado (não volta p/ a IA sem pedido)
+            c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE id = %s", (r["domain_id"],))
         return {"ok": True, "domain": reg, "status": body.status}
 
 
@@ -554,6 +556,7 @@ def review_global(name: str, body: ReviewIn):
             c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s,%s,%s) "
                       "ON CONFLICT (domain_id) DO UPDATE SET status=EXCLUDED.status, "
                       "reviewed_by=EXCLUDED.reviewed_by, reviewed_at=now()", (d["id"], body.status, body.by or None))
+            c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE id = %s", (d["id"],))
         return {"ok": True, "domain": reg, "status": body.status}
 
 
@@ -616,7 +619,7 @@ def reanalyze(name: str):
     reg = _domain_name(name)
     with db.conn() as c:
         r = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, "
-                      "llm_attempts=0 WHERE name=%s AND NOT locked RETURNING id", (reg,)).fetchone()
+                      "llm_attempts=0, revisado_at=NULL WHERE name=%s AND NOT locked RETURNING id", (reg,)).fetchone()
         if not r:
             raise HTTPException(404, "domínio não encontrado (ou travado)")
         return {"ok": True, "domain": reg}
@@ -1208,6 +1211,8 @@ def listas_mover(body: MoverIn):
     with db.conn() as c:
         listas.contexto(c, body.by or "manual", (f"pôs em {', '.join(body.para)}" if body.para else "manter liberado")
                         + f" (saiu de {body.de})")
+        if body.para:
+            _tira_da_whitelist(c, doms)
         for cat in body.para:
             c.execute("INSERT INTO category_lists (category, domain, added_by) SELECT %s, d, %s FROM unnest(%s::text[]) d "
                       "ON CONFLICT DO NOTHING", (cat, body.by or None, doms))
@@ -1249,6 +1254,7 @@ def listas_aprovar(body: AprovarIn):
                 continue
             alvo = r["lista_ia"]
             if alvo and alvo in listas.CATEGORIAS and alvo != body.de:
+                _tira_da_whitelist(c, [d])
                 c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                           (alvo, d, body.by or None))
                 out["movidos"].setdefault(alvo, []).append(d)
@@ -1464,8 +1470,8 @@ def reanalyze_lote(body: NomesIn):
     """Nova análise em lote (regras agora; IA + busca na fila). Travados à mão ficam de fora."""
     nomes = sorted({_domain_name(x) for x in body.domains if x and x.strip()})
     with db.conn() as c:
-        n = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, llm_attempts=0 "
-                      "WHERE name = ANY(%s) AND NOT locked", (nomes,)).rowcount
+        n = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, llm_attempts=0, "
+                      "revisado_at=NULL WHERE name = ANY(%s) AND NOT locked", (nomes,)).rowcount
     return {"ok": True, "enviados": n, "ignorados": len(nomes) - n}
 
 
@@ -1485,6 +1491,90 @@ def auditoria(domain: Optional[str] = None, category: Optional[str] = None, limi
         return c.execute("SELECT id, at, domain, category, acao, por, motivo FROM list_audit"
                          + (" WHERE " + " AND ".join(cond) if cond else "") + " ORDER BY id DESC LIMIT %s",
                          (*par, limit)).fetchall()
+
+
+# ------------------------------------------------------------------ whitelists por categoria
+@app.get("/whitelist/{categoria}.txt", response_class=PlainTextResponse)
+def whitelist_txt(categoria: str, request: Request):
+    """Whitelist publicada p/ o Technitium (allowListUrls de todos os grupos). Sem token; só LISTS_ALLOWED_IPS."""
+    from . import whitelist
+    if request.client is None or request.client.host not in settings().lists_allowed_ips:
+        raise HTTPException(403, "IP sem acesso às listas")
+    if categoria not in whitelist.CATEGORIAS:
+        raise HTTPException(404, "categoria sem whitelist")
+    with db.conn() as c:
+        doms = whitelist.dominios(c, categoria)
+        c.execute("INSERT INTO list_fetches (category, last_at, last_ip, last_n) VALUES (%s, now(), %s, %s) "
+                  "ON CONFLICT (category) DO UPDATE SET last_at = now(), last_ip = EXCLUDED.last_ip, last_n = EXCLUDED.last_n",
+                  ("wl:" + categoria, request.client.host, len(doms)))
+    return f"# 2D DNS Guard - whitelist {categoria} ({len(doms)} domínios)\n" + "".join(d + "\n" for d in doms)
+
+
+@app.get("/whitelist", dependencies=[Depends(auth)])
+def whitelist_resumo():
+    from . import whitelist
+    with db.conn() as c:
+        n = {r["category"]: r["n"] for r in c.execute("SELECT category, count(*) AS n FROM whitelist_domains GROUP BY 1")}
+        revisados = c.execute("SELECT count(*) AS n FROM domains WHERE revisado_at IS NOT NULL").fetchone()["n"]
+    return {"categorias": [{"categoria": k, "rotulo": v, "total": n.get(k, 0)} for k, v in whitelist.CATEGORIAS.items()],
+            "revisados": revisados}
+
+
+@app.get("/whitelist-dominios", dependencies=[Depends(auth)])
+def whitelist_dominios():
+    """Todos os domínios das whitelists (o console considera no índice de bloqueio: vencem as listas)."""
+    with db.conn() as c:
+        return [r["domain"] for r in c.execute("SELECT DISTINCT domain FROM whitelist_domains")]
+
+
+@app.get("/whitelist/{categoria}/detalhes", dependencies=[Depends(auth)])
+def whitelist_detalhes(categoria: str, q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
+                       revisao: Optional[str] = None, sug: Optional[str] = None, rec: Optional[str] = None,
+                       ordem: str = "consultas", offset: int = Query(0, ge=0), limit: int = Query(100, le=1000)):
+    from . import whitelist
+    if categoria not in whitelist.CATEGORIAS:
+        raise HTTPException(404, "categoria sem whitelist")
+    with db.conn() as c:
+        return listas.detalhes_whitelist(c, categoria, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, rec=rec,
+                                         ordem=ordem, offset=offset, limit=limit)
+
+
+class WhitelistIn(BaseModel):
+    domains: list[str]
+    by: str = ""
+
+
+@app.post("/whitelist/{categoria}", dependencies=[Depends(auth)])
+def whitelist_add(categoria: str, body: WhitelistIn):
+    """Liberação manual numa whitelist: sai das listas de bloqueio (a whitelist venceria de qualquer jeito)."""
+    from . import whitelist
+    if categoria not in whitelist.CATEGORIAS:
+        raise HTTPException(404, "categoria sem whitelist")
+    doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    with db.conn() as c:
+        listas.contexto(c, body.by or "manual", f"liberou na whitelist {whitelist.CATEGORIAS[categoria]}")
+        c.execute("DELETE FROM category_lists WHERE domain = ANY(%s)", (doms,))
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by) SELECT %s, d, %s FROM unnest(%s::text[]) d "
+                  "ON CONFLICT DO NOTHING", (categoria, body.by or "manual", doms))
+        c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE name = ANY(%s)", (doms,))
+    for d in doms:
+        _decisao(d, f"wl:{categoria}", f"liberou na whitelist {whitelist.CATEGORIAS[categoria]}", body.by)
+    return {"ok": True, "dominios": len(doms)}
+
+
+@app.post("/whitelist-remover", dependencies=[Depends(auth)])
+def whitelist_remover(body: WhitelistIn):
+    with db.conn() as c:
+        listas.contexto(c, body.by or "manual", "tirou da whitelist")
+        n = c.execute("DELETE FROM whitelist_domains WHERE domain = ANY(%s)", (body.domains,)).rowcount
+    for d in body.domains[:200]:
+        _decisao(d, "wl", "tirou da whitelist", body.by)
+    return {"ok": True, "removidos": n}
+
+
+def _tira_da_whitelist(c, doms: list[str]) -> None:
+    """Pessoa pôs numa lista de bloqueio: sai da whitelist (senão a whitelist venceria o bloqueio)."""
+    c.execute("DELETE FROM whitelist_domains WHERE domain = ANY(%s)", (doms,))
 
 
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
@@ -1518,6 +1608,7 @@ def lista_add(categoria: str, body: ListaIn):
         raise HTTPException(400, "domínio inválido")
     with db.conn() as c:
         listas.contexto(c, body.by or "manual", f"pôs em {categoria}")
+        _tira_da_whitelist(c, [d])
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                   (categoria, d, body.by or None))
     _decisao(d, categoria, f"pôs em {categoria}", body.by)
@@ -1544,6 +1635,7 @@ def listas_lote(body: ListasLoteIn):
     doms = sorted({x for x in map(_dom_ok, body.domains) if x})
     with db.conn() as c, c.cursor() as cur:
         listas.contexto(c, body.by or "manual", f"pôs em {', '.join(body.cats)}")
+        _tira_da_whitelist(c, doms)
         cur.executemany("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                         [(cat, d, body.by or None) for cat in body.cats for d in doms])
     if len(doms) <= 200:   # (migrações em massa não enchem o feed)

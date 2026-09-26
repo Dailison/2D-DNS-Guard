@@ -44,7 +44,10 @@ def test_aplica_politica(app):
     assert U + "/listas/adulto.txt" not in g["blockListUrls"] and U + "/listas/jogos.txt" in g["blockListUrls"]
     assert U + "/servico/tiktok.txt" in g["blockListUrls"] and U + "/servico/instagram.txt" not in g["blockListUrls"], \
         "serviço liberado vence o bloqueado"
-    assert g["allowListUrls"] == ["https://outra/allow.txt", U + "/servico/instagram.txt"]
+    wl = [U + f"/whitelist/{c}.txt" for c, _ in dnslib.CATEGORIAS_WHITELIST]
+    assert g["allowListUrls"] == ["https://outra/allow.txt"] + wl + [U + "/servico/instagram.txt"], "whitelists em todos os grupos"
+    dnslib._aplica_politica(g, [], [], [])
+    assert g["allowListUrls"] == ["https://outra/allow.txt"] + wl, "reaplicar não duplica"
 
 
 def test_sincronizar_sem_gravar_nao_toca_isencao(app, tech):

@@ -1,6 +1,8 @@
-"""Telas de DNS do console: Domínios bloqueados (listas por categoria) e liberados (listas de liberação), (em quais listas
-cada domínio está), políticas por empresa (sincronizadas no Technitium), Liberados (IPs isentos), Logs DNS e Gráficos."""
+"""Telas de DNS do console: Domínios bloqueados (listas por categoria), Domínios liberados (whitelists por categoria,
+listas de liberação/serviços, exceções por empresa e Sites revisados), políticas por empresa (sincronizadas no
+Technitium), IPs liberados (isentos), Logs DNS e Gráficos."""
 
+import re
 from urllib.parse import quote
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
@@ -520,6 +522,10 @@ def listas_lote_dominios():
             r = api.post("/domains-reanalyze", {"domains": doms})
             return _json(True, f"{r.get('enviados', 0)} domínio(s) enviados para nova análise (regras agora; IA, busca na web e WHOIS na fila)."
                          + (f" {r['ignorados']} ficaram de fora (classificação travada à mão ou nunca acessados)." if r.get("ignorados") else ""))
+        if acao == "tirar_wl":
+            api.post("/whitelist-remover", {"domains": doms, "by": quem})
+            current_app.logger.info("DNS: %s tirou %s da whitelist", quem, doms)
+            return _json(True, f"{len(doms)} domínio(s) fora da whitelist (voltam a valer as listas de bloqueio; o DNS atualiza em até 1 h).")
         if acao == "aprovar":
             if cat not in rot:
                 return _json(False, "lista inválida")
@@ -795,11 +801,22 @@ def listas_liberacao():
     """Listas de liberação avulsas (whitelist): vencem qualquer lista de bloqueio."""
     ctx = {"servico": None, "todas": []}
     slug = request.args.get("slug") or ""
+    wl = request.args.get("wl") or ""
     try:
         todas = api.get("/liberacao")
         avulsas = [x for x in todas if not x.get("category")]
-        if slug == "_trabalho":   # só consulta: não é lista, não vai p/ o Technitium
-            fd = _det_filtros("consultas", "TRABALHO")
+        try:
+            ctx_wl = api.get("/whitelist")
+        except AnalyzerError:
+            ctx_wl = {"categorias": [], "revisados": 0}
+        if wl in dict(dnslib.CATEGORIAS_WHITELIST):   # whitelist por categoria (vai p/ o Technitium, vence bloqueio)
+            fd = _det_filtros("consultas")
+            p = _det_params(fd)
+            p.pop("offset"), p.pop("limit")
+            ctx = {"servico": None, "todas": todas, "wl": wl, "fd": fd, "scats": _site_cats(), "pag_url": _pag_url,
+                   "det": api.get(f"/whitelist/{quote(wl, safe='')}/detalhes", offset=(fd["pag"] - 1) * fd["pp"], limit=fd["pp"], **p)}
+        elif slug == "_trabalho":   # só consulta: não é lista, não vai p/ o Technitium
+            fd = _det_filtros("consultas")
             ctx = {"servico": None, "todas": todas, "trabalho": True, "fd": fd, "det": api.get("/sem-lista", **_det_params(fd)),
                    "scats": _site_cats(), "pag_url": _pag_url}
         else:
@@ -807,7 +824,25 @@ def listas_liberacao():
             ctx = _servico_ctx(slug) if slug else {"servico": None, "todas": todas}
     except AnalyzerError as e:
         flash(f"Falha ao carregar as listas de liberação: {e}", "erro")
-    return render_template("admin/servico.html", modo="liberacao", categorias=dnslib.CATEGORIAS_LISTA, **ctx)
+    return render_template("admin/servico.html", modo="liberacao", categorias=dnslib.CATEGORIAS_LISTA, whitelists=ctx_wl,
+                           cats_wl=dnslib.CATEGORIAS_WHITELIST, **ctx)
+
+
+@admin_bp.post("/whitelist/add")
+@login_required
+def whitelist_add():
+    wl = request.form.get("wl", "")
+    doms = [x.strip().lower().rstrip(".") for x in re.split(r"[\s,;]+", request.form.get("dominio", "")) if x.strip()]
+    try:
+        antes = _antes(doms)
+        api.post(f"/whitelist/{quote(wl, safe='')}", {"domains": doms, "by": admin_atual().email})
+        for x in doms:
+            _decisao_global(x, "allowed")
+        flash(f"{len(doms)} domínio(s) na whitelist {dict(dnslib.CATEGORIAS_WHITELIST).get(wl, wl)} (e fora das listas de bloqueio)."
+              + _libera_agora(doms, antes), "ok")
+    except AnalyzerError as e:
+        flash(f"Falha: {e}", "erro")
+    return redirect(url_for("admin.listas_liberacao", wl=wl))
 
 
 @admin_bp.get("/servicos/<slug>")

@@ -251,10 +251,29 @@ SECOES_LISTA = [
     ("🔧 Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros"), ("para_revisar", "Para revisar")]),
 ]
 CATEGORIAS_LISTA = [x for _, itens in SECOES_LISTA for x in itens]
+# whitelists por categoria (analisador: whitelist.py) — assinadas por TODOS os grupos (vencem qualquer bloqueio)
+CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividade", "Produtividade e negócios"),
+                        ("comunicacao", "Comunicação corporativa"), ("financas", "Bancos e finanças"), ("governo", "Governo"),
+                        ("infraestrutura", "Infraestrutura e sistemas"), ("seguranca", "Segurança"),
+                        ("desenvolvimento", "TI e desenvolvimento"), ("educacao", "Educação"), ("saude", "Saúde"),
+                        ("outros_trabalho", "Outros de trabalho")]
+_WL_RE = re.compile(r"/whitelist/([a-z_]+)\.txt$")
 CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas"}   # ⚡ (só destaque visual)
 CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # a IA não põe sozinha
 
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")
+
+
+def url_whitelist(cat):
+    return f"{current_app.config['ANALYZER_URL'].rstrip('/')}/whitelist/{cat}.txt"
+
+
+def dominios_whitelist() -> set[str]:
+    from app import analyzer_client as api
+    try:
+        return {d.lower() for d in api.get("/whitelist-dominios")}
+    except Exception:  # noqa: BLE001 — sem o analisador, o índice segue sem a whitelist
+        return set()
 
 
 def url_lista(cat):
@@ -304,6 +323,7 @@ def indice_bloqueio(cfg=None):
     cats = sorted({c for g in ativos for c in listas_assinadas(g)})
     doms = dominios_das_listas(cats) if cats else {}
     grupos, permitidos = {}, {}
+    wl = dominios_whitelist()   # whitelists: assinadas por todos os grupos, vencem as listas
     for g in ativos:
         s = {x.lower() for x in g.get("blocked", [])}
         for c in listas_assinadas(g):
@@ -316,6 +336,8 @@ def indice_bloqueio(cfg=None):
         permitidos[g["name"]] = {x.lower() for x in g.get("allowed") or []}
         for slug in listas_liberacao_do_grupo(g):
             permitidos[g["name"]] |= dominios_liberacao(slug)
+        if any(_WL_RE.search(str(u)) for u in g.get("allowListUrls") or []):
+            permitidos[g["name"]] |= wl
     return {"grupos": grupos, "permitidos": permitidos, "ngm": ngm_de(cfg), "ativos": sorted(grupos)}
 
 
@@ -509,8 +531,9 @@ def _aplica_politica(g, lists, services, bloqueados=()):
     outras = [u for u in (g.get("blockListUrls") or []) if not _LISTA_RE.search(str(u)) and not _LIB_RE.search(str(u))]
     g["blockListUrls"] = (outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(lists)]
                           + [url_liberacao(s) for s in sorted(set(bloqueados) - set(services))])
-    outras = [u for u in (g.get("allowListUrls") or []) if not _LIB_RE.search(str(u))]
-    g["allowListUrls"] = outras + [url_liberacao(s) for s in sorted(set(services))]
+    outras = [u for u in (g.get("allowListUrls") or []) if not _LIB_RE.search(str(u)) and not _WL_RE.search(str(u))]
+    g["allowListUrls"] = (outras + [url_whitelist(c) for c, _ in CATEGORIAS_WHITELIST]
+                          + [url_liberacao(s) for s in sorted(set(services))])
 
 
 def _valida_sincronizacao(antes: dict, depois: dict, lib: str) -> None:
@@ -609,6 +632,11 @@ def liberar_agora(dominios, antes: dict[str, list[str]], por: str = "console") -
     depois = grupos_bloqueando(dominios)
     mapa = {d: [g for g in antes.get(d, []) if g not in depois.get(d, [])] for d in dominios}
     mapa = {d: gs for d, gs in mapa.items() if gs}
+    return excecao_direta(mapa, por, "manter liberado agora")
+
+
+def excecao_direta(mapa: dict[str, list[str]], por: str = "console", motivo: str = "exceção") -> list[str]:
+    """Põe cada domínio no `allowed` dos grupos indicados ({domínio: [grupos]}) e registra no analisador."""
     if not mapa:
         return []
     from app import analyzer_client as api
@@ -622,7 +650,7 @@ def liberar_agora(dominios, antes: dict[str, list[str]], por: str = "console") -
                     al.append(d)
                     mudou = True
         return None, mudou
-    _read_modify_write(muda, por, "manter liberado agora: " + ", ".join(sorted(mapa))[:200])
+    _read_modify_write(muda, por, f"{motivo}: " + ", ".join(sorted(mapa))[:200])
     api.post("/console/excecoes", {"excecoes": mapa, "por": por})
     return sorted({g for gs in mapa.values() for g in gs})
 
@@ -648,6 +676,12 @@ def remover_excecao(dominios, por: str = "console") -> list[str]:
     _read_modify_write(muda, por, "fim da exceção: " + ", ".join(sorted(nossos))[:200])
     api.post("/console/excecoes/remover", {"domains": sorted(nossos)})
     return sorted({g for gs in nossos.values() for g in gs})
+
+
+def grupos_da_empresa(nome_empresa: str) -> list[str]:
+    """Grupos internos da empresa no Technitium ("Empresa: X" e "Empresa: X · unidade")."""
+    base = nome_grupo(nome_empresa)
+    return [g.get("name") for g in _get_config().get("groups", []) if g.get("name") == base or (g.get("name") or "").startswith(base + " · ")]
 
 
 def msg_liberado(grupos: list[str]) -> str:

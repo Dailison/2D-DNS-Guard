@@ -442,15 +442,35 @@ def test_doh_pede_segunda_opiniao(env, monkeypatch):
     assert antes["lista"] == "doh_dns" and antes["confianca"] == 1.0
 
 
-def test_malicioso_da_ia_online_nao_entra_em_ameacas(env):
+def test_malicioso_da_ia_online_com_certeza_entra_em_ameacas(env):
     from dnsanalyzer import db, listas_ia, online
     with db.conn() as c:
-        i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at) VALUES "
-                      "('fdacebook-teste.info', 'DESCONHECIDO', 'desconhecido', now()) RETURNING id").fetchone()["id"]
-        online.gravar(c, {"id": i, "name": "fdacebook-teste.info", "classification": "DESCONHECIDO"},
+        ids = {}
+        for n in ("fdacebook-teste.info", "talvez-golpe.info"):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at) VALUES "
+                               "(%s, 'DESCONHECIDO', 'desconhecido', now()) RETURNING id", (n,)).fetchone()["id"]
+        online.gravar(c, {"id": ids["fdacebook-teste.info"], "name": "fdacebook-teste.info", "classification": "DESCONHECIDO"},
                       {"lista": "ameaca", "confianca": 0.95, "classificacao": "MALICIOSO", "reconhecido": True}, {"model": "g"}, [])
+        online.gravar(c, {"id": ids["talvez-golpe.info"], "name": "talvez-golpe.info", "classification": "DESCONHECIDO"},
+                      {"lista": "ameaca", "confianca": 0.6, "classificacao": "MALICIOSO", "reconhecido": True}, {"model": "g"}, [])
         listas_ia.aplicar(c)
-        em = {r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain='fdacebook-teste.info'")}
-        cls = c.execute("SELECT classification, online_resp->>'classificacao' AS o FROM domains WHERE id=%s", (i,)).fetchone()
-    assert "ameaca" not in em and "para_revisar" in em, em
-    assert cls["classification"] == "SUSPEITO" and cls["o"] == "SUSPEITO"
+        em = {r["domain"]: r["category"] for r in c.execute(
+            "SELECT domain, category FROM category_lists WHERE domain IN ('fdacebook-teste.info', 'talvez-golpe.info')")}
+    assert em == {"fdacebook-teste.info": "ameaca", "talvez-golpe.info": "para_revisar"}, em
+
+
+def test_candidato_a_whitelist_pede_segunda_opiniao(env, monkeypatch):
+    from dnsanalyzer import config, db, online
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, lista_duvida) "
+                  "VALUES ('erp-wl.com.br', 'TRABALHO', 'produtividade', now(), 7000, true)")
+    vistos = []
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)
+    monkeypatch.setattr(online, "perguntar", lambda d, cats, b, m: (vistos.append((d["name"], m)) or
+                        {"lista": "nenhuma", "confianca": 0.95, "classificacao": "TRABALHO", "reconhecido": True}, {"model": m}))
+    online.fase(["produtividade"])
+    assert [m for n, m in vistos if n == "erp-wl.com.br"] == ["gemini-3.5-flash-lite", "gemma-4-31b-it"]
+    with db.conn() as c:
+        a = c.execute("SELECT online_resp->'_meta'->'antes' AS a FROM domains WHERE name='erp-wl.com.br'").fetchone()["a"]
+    assert a["classificacao"] == "TRABALHO" and a["lista"] == "nenhuma"

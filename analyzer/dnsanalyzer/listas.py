@@ -274,6 +274,15 @@ def detalhes(c, cat: str, tid: int | None = None, fase5: bool = False, **filtros
     return {**_filtrar_paginar(rows, **filtros), "aguardando_ia": aguardando}
 
 
+def detalhes_whitelist(c, cat: str, **filtros) -> dict:
+    rows = c.execute("SELECT domain, added_by, added_at FROM whitelist_domains WHERE category=%s", (cat,)).fetchall()
+    emp = _empresas(c, [r["domain"] for r in rows])
+    rows = _detalhar(c, rows)
+    for r in rows:
+        r["empresas"] = emp.get(r["domain"], [])
+    return _filtrar_paginar(rows, **filtros)
+
+
 def _em_lista(nome: str, conjunto: set[str]) -> bool:
     p = nome.split(".")
     return any(".".join(p[i:]) in conjunto for i in range(len(p) - 1))
@@ -282,7 +291,8 @@ def _em_lista(nome: str, conjunto: set[str]) -> bool:
 def sem_lista(c, **filtros) -> dict:
     """Domínios já analisados que não estão em NENHUMA lista (bloqueio ou liberação, nem por domínio
     pai). Não vão p/ o Technitium: só p/ consulta, pedir nova análise ou pôr numa lista."""
-    em = {r["domain"] for r in c.execute("SELECT domain FROM category_lists UNION SELECT domain FROM allow_list_domains")}
+    em = {r["domain"] for r in c.execute("SELECT domain FROM category_lists UNION SELECT domain FROM allow_list_domains "
+                                         "UNION SELECT domain FROM whitelist_domains")}
     rows = [r for r in c.execute(DETALHE_SQL + "d.kind = 'public' AND d.classification IS NOT NULL AND NOT d.llm_pending")
             if not _em_lista(r["domain"], em)]
     for r in rows:

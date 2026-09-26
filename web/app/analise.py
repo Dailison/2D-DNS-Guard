@@ -441,6 +441,40 @@ def dominio_liberar(nome):
     return _voltar(nome, tid)
 
 
+@analise_bp.post("/dominio/<path:nome>/liberar-empresa")
+def dominio_liberar_empresa(nome):
+    """Libera o domínio SÓ para uma empresa: lista de liberação "Exceções · <Empresa>" (criada na 1ª vez e
+    ligada à política da empresa e das exceções de unidade) + exceção imediata nos grupos dela."""
+    from app import politicas as pol
+    tid = request.form.get("tid", type=int)
+    dominio_reg = (request.form.get("dominio") or nome).strip().lower().rstrip(".")
+    tenant = next((t for t in _tenants() if t["id"] == tid), None)
+    if not tenant:
+        flash("Escolha a empresa no topo da página para liberar só para ela.", "erro")
+        return _voltar(nome, tid)
+    try:
+        nome_lista = f"Exceções · {tenant['name']}"
+        existe = next((x for x in api.get("/liberacao") if x["name"] == nome_lista), None)
+        slug = existe["slug"] if existe else api.post("/liberacao", {"name": nome_lista, "by": _quem(),
+                                                                      "description": "liberações só desta empresa"})["slug"]
+        api.post(f"/liberacao/{quote(slug, safe='')}/dominios", {"domains": [dominio_reg], "by": _quem()})
+        por = pol.por_escopo()
+        escopos = [f"tenant:{tid}"] + [k for k in por if k.startswith(f"unit:{tid}:")]
+        for esc in escopos:
+            p = por.get(esc) or (por.get("default") if esc == f"tenant:{tid}" else None) or {}
+            if slug not in (p.get("services") or []):
+                api.put(f"/policies/{quote(esc, safe='')}", {"lists": p.get("lists") or [], "services": sorted({*(p.get("services") or []), slug}),
+                                                             "services_blocked": p.get("services_blocked") or [], "by": _quem()})
+        pol.sincronizar()
+        grupos = dnslib.excecao_direta({dominio_reg: dnslib.grupos_da_empresa(tenant["name"])}, _quem(), "exceção só da empresa")
+        _registrar_decisao(tid, dominio_reg, "allowed")
+        current_app.logger.info("DNS: %s liberou %s só para %s (lista %s)", _quem(), dominio_reg, tenant["name"], slug)
+        flash(f"{dominio_reg} liberado só para {tenant['name']} (lista “{nome_lista}”)." + dnslib.msg_liberado(grupos), "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"Falha ao liberar para a empresa: {e}", "erro")
+    return _voltar(nome, tid)
+
+
 @analise_bp.post("/dominio/<path:nome>/decisao-global")
 def dominio_decisao_global(nome):
     """Desfaz a decisão global: empresas sem decisão própria voltam para a fila."""

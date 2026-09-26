@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, db, enrich, listas, listas_ia, online, ti, webintel, whois
+from . import catalog, db, enrich, listas, listas_ia, online, ti, webintel, whitelist, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -473,6 +473,7 @@ def reanalyze_stale(days: int) -> int:
     with db.conn() as c:
         return c.execute(
             "UPDATE domains SET needs_analysis=true WHERE NOT needs_analysis AND NOT locked "
+            "AND revisado_at IS NULL "   # Sites Revisados: só com pedido (feeds de ameaça seguem pelo caminho próprio)
             "AND analyzed_at < now() - make_interval(days => %s)", (days,)).rowcount
 
 
@@ -556,6 +557,8 @@ def run_forever(stop=lambda: False) -> None:
                     listas.expirar_ameacas(c)
                 with db.conn() as c:
                     listas_ia.aplicar(c)
+                with db.conn() as c:
+                    whitelist.aplicar(c)
             if time.monotonic() - last_stale > 3600:
                 m = reanalyze_stale(cfg.reanalyze_days)
                 if m:

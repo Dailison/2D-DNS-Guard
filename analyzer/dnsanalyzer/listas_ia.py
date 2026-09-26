@@ -16,7 +16,7 @@ import time
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from . import db
+from . import db, eventos
 from .config import settings
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
 
@@ -180,6 +180,12 @@ DUVIDA_BY = "IA com dúvida"        # foi para Para revisar com a sugestão
 PARA_REVISAR = "para_revisar"
 
 
+def _fonte(r: dict) -> str:
+    f = r.get("lista_fonte") or ""
+    conf = f" {r['lista_conf'] * 100:.0f}%" if r.get("lista_conf") is not None else ""
+    return ("IA online" + conf if f.startswith("online") else "IA local" + conf if f == FONTE_LOCAL else f)
+
+
 def _coerente(cat: str, cls: str | None, categoria: str | None) -> bool:
     return not (cat == "ameaca" and cls != "MALICIOSO") and \
         not (cat in _EXIGE_NAO_TRABALHO and cls == "TRABALHO") and \
@@ -215,6 +221,7 @@ def aplicar(c, limite: int = 3000) -> dict:
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                   (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})"))
         out["revisar"].append((r["name"], cat))
+        eventos.lista("fase5", r["name"], cat, "nenhuma fase teve certeza" + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"])
 
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
@@ -245,6 +252,7 @@ def aplicar(c, limite: int = 3000) -> dict:
             if tirar:
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
                 out["resolvidos"].append(r["name"])
+                eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"])
             continue
         if not cat:
             continue
@@ -257,6 +265,8 @@ def aplicar(c, limite: int = 3000) -> dict:
                     c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
                               "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
                 out["direto"].append((r["name"], cat))
+                eventos.lista("lista_add", r["name"], cat, _fonte(r)
+                              + (f" · saiu de {', '.join(x for x in moveis if x in em)}" if any(x in em for x in moveis) else ""), r["id"])
             tirar = [x for x in moveis if x in em and x != cat]
             if tirar:
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))

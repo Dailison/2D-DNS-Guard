@@ -135,6 +135,45 @@ def _evento(d: dict, cls: str, lista: str, conf: float, servico: str, meta: dict
         log.debug("falha ao gravar evento: %s", e)
 
 
+_KIND = {"catalog": "catálogo interno", "site": "página do site", "websearch": "busca na web (fase 3)",
+         "whois": "WHOIS/RDAP (fase 2)", "wikidata": "Wikidata", "cert": "certificado TLS", "popularity": "popularidade (Tranco)",
+         "platform": "plataforma/hospedagem", "ti": "listas de ameaça", "age": "idade do domínio", "tld": "TLD",
+         "lexical": "análise do nome", "logs": "comportamento nos logs DNS", "tunnel": "túnel DNS", "internal": "interno"}
+_FASE = {"llm": "fase 1 (IA local)", "web": "fase 3 (busca na web + IA local)", "online": "fase 4 (IA online)",
+         "catalog": "catálogo", "rules": "regras", "internal": "interno", "manual": "manual"}
+
+
+def contexto_completo(d: dict, limite: int = 7000) -> str:
+    """Tudo o que as fases 1-3 juntaram do domínio (p/ a IA online decidir melhor): resultado atual da IA
+    local, razões, TODAS as evidências (WHOIS, busca na web, página, catálogo, popularidade…) e o histórico."""
+    with db.conn() as c:
+        r = c.execute("SELECT name, classification, category, topic, confidence, corp_action, corp_reason, classified_by, "
+                      "reasons, evidence, popularity_rank, whois_at, web_search_at FROM domains WHERE id = %s", (d["id"],)).fetchone()
+        hist = c.execute("SELECT source, classification, topic, confidence, created_at FROM classification_history "
+                         "WHERE domain_id = %s ORDER BY created_at DESC LIMIT 6", (d["id"],)).fetchall()
+    if not r:
+        return _contexto(d)
+    L = [f"Domínio: {r['name']}",
+         f"Resultado atual da IA local ({_FASE.get(r['classified_by'], r['classified_by'] or '—')}): "
+         f"{r['classification'] or '—'} · categoria {r['category'] or '—'} · serviço: {r['topic'] or '—'}"
+         + (f" · confiança {r['confidence']:.2f}" if r["confidence"] is not None else ""),
+         f"Recomendação p/ empresas: {r['corp_action'] or '—'}" + (f" — {r['corp_reason']}" if r["corp_reason"] else ""),
+         "Fases já feitas: 1 (IA local)" + (" · 2 (WHOIS)" if r["whois_at"] else "") + (" · 3 (busca na web)" if r["web_search_at"] else "")]
+    razoes = [f"- [{x.get('by') or '?'}] {x.get('text', '')}" for x in (r["reasons"] or []) if x.get("text")]
+    if razoes:
+        L += ["Razões:"] + razoes[:10]
+    ev = [e for e in (r["evidence"] or []) if e.get("kind") not in ("identity", "negative") and e.get("text")]
+    if ev:
+        L.append("Evidências coletadas (fases 1 a 3):")
+        L += [f"- {_KIND.get(e['kind'], e['kind'])}: {e['text'][:900]}" for e in ev]
+    if hist:
+        L.append("Histórico de classificações (mais recente primeiro):")
+        L += [f"- {h['created_at']:%d/%m %H:%M} {_FASE.get(h['source'], h['source'] or '?')}: {h['classification'] or '—'}"
+              + (f" · {h['topic']}" if h["topic"] else "") for h in hist]
+    texto = "\n".join(L)
+    return texto if len(texto) <= limite else texto[:limite] + "\n[…]"
+
+
 def habilitado() -> bool:
     cfg = settings()
     return bool(cfg.gemini_api_key) and cfg.online_enabled and bool(cfg.gemini_modelos)
@@ -157,7 +196,7 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
         sug = (f"\nSugestão da IA local (modelo pequeno, pode errar): lista '{d['lista_ia']}'"
                + (f" (confiança {d['lista_conf']:.2f})" if d.get("lista_conf") is not None else "")
                + (f" — {d['lista_motivo']}" if d.get("lista_motivo") else "") + ". Confirme ou corrija.")
-    pergunta = _contexto(d) + sug + "\n\nClassifique este domínio."
+    pergunta = contexto_completo(d) + sug + "\n\nClassifique este domínio."
     corpo: dict = {"generationConfig": {"temperature": 0}}
     if modelo.startswith("gemma"):   # Gemma pela API: sem instrução de sistema nem modo JSON (JSON extraído do texto)
         corpo["contents"] = [{"role": "user", "parts": [{"text": sistema + "\n\n" + pergunta}]}]

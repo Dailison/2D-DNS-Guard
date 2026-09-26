@@ -14,6 +14,11 @@
   .feed .ic{width:1.2rem;text-align:center;flex:0 0 auto}
   .feed .d{color:var(--mut);font-size:.82rem}
   .feed a{font-weight:600;text-decoration:none}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem} @media (max-width:900px){.cols{grid-template-columns:1fr}}
+  .cols>div{min-width:0} .colt{font-size:.95rem;margin:.2rem 0 .3rem} .colt .mut{font-size:.75rem;font-weight:400}
+  .cols .feed{max-height:70vh;overflow:auto}
+  .lst{display:inline-block;font-size:.72rem;font-weight:700;padding:.05rem .45rem;border-radius:6px;background:#fee2e2;color:#991b1b}
+  .lst.sai{background:#dcfce7;color:#166534} .lst.dec{background:#ffedd5;color:#9a3412}
   .fase{display:inline-block;font-size:.68rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;margin-right:.4rem;background:#e2e8f0;color:#334155;white-space:nowrap}
   .fase.f1{background:#dbeafe;color:#1e40af} .fase.f2{background:#ede9fe;color:#5b21b6} .fase.f3{background:#fef3c7;color:#92400e}
   .fase.f4{background:#dcfce7;color:#166534} .fase.fL{background:#e0f2fe;color:#075985} .fase.fB{background:#fee2e2;color:#991b1b}
@@ -40,7 +45,12 @@
     <span><span class="mut" id="upd" style="font-size:.8rem"></span>
       <button class="btn mini" id="pausa" style="padding:.25rem .6rem;font-size:.8rem;margin-left:.5rem">Pausar</button></span>
   </div>
-  <ul class="feed" id="feed"><li class="mut">Carregando…</li></ul>
+  <div class="cols">
+    <div><h3 class="colt">🔬 Classificação <span class="mut">· fases 1 a 4</span></h3>
+      <ul class="feed" id="feed"><li class="mut">Carregando…</li></ul></div>
+    <div><h3 class="colt">⚖️ Decisão <span class="mut">· o que entrou/saiu das listas, foi para Decisões ou foi decidido pela equipe</span></h3>
+      <ul class="feed" id="feedDec"><li class="mut">Carregando…</li></ul></div>
+  </div>
   <p class="hint">Fluxo de cada site novo: <b>1</b> IA local (Qwen3) → <b>2</b> WHOIS + IA local → <b>3</b> busca na web + IA local → <b>4</b> IA online (Gemini/Gemma, valida a lista) → <b>5</b> Decisões (manual). "Listas" = a IA local escolhendo a lista de cada site; "Regras" = catálogo/listas de ameaça (instantâneo).</p>
 </div>
 
@@ -50,7 +60,11 @@
   var URL_DOM = "{{ url_for('analise.dominio', nome='__N__', t=tid) }}";
   var LBL = {TRABALHO:'Trabalho', NAO_TRABALHO:'Não trabalho', SUSPEITO:'Suspeito', MALICIOSO:'Malicioso', DESCONHECIDO:'Desconhecido'};
   var lastId = 0, paused = false, cur = null, curBase = 0, first = true;
-  var feed = document.getElementById('feed');
+  var feed = document.getElementById('feed'), feedDec = document.getElementById('feedDec');
+  var LROT = {{ LISTAS_ROT|tojson }};
+  var DEC = {lista_add: 1, lista_rem: 1, fase5: 1, decisao: 1, auto_block: 1, lista_ia: 1};
+  function rot(cats){ return (cats || '').split(',').filter(Boolean).map(function(c){ return LROT[c] || c; }).join(', ') || 'nenhuma lista'; }
+  function partes(ev){ var d = ev.detail || '', i = d.indexOf('|'); return i < 0 ? ['', d] : [d.slice(0, i), d.slice(i + 1)]; }
 
   function el(tag, cls, txt){ var e = document.createElement(tag); if(cls) e.className = cls; if(txt != null) e.textContent = txt; return e; }
   function hora(iso){ var d = new Date(iso); return d.toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo'}); }
@@ -110,6 +124,16 @@
       body.appendChild(badge(ev.classification));
       if (ev.seconds != null) body.appendChild(el('span', 'd', ' ' + Math.round(ev.seconds) + 's'));
       if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail.replace(/^fase 4 · /, ''))); }
+    } else if (k === 'lista_add' || k === 'lista_rem' || k === 'fase5' || k === 'decisao') {
+      var p = partes(ev);
+      ic.textContent = {lista_add: '⛔', lista_rem: '✅', fase5: '🧑‍💻', decisao: '✋'}[k];
+      body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' '));
+      if (k === 'lista_add') { body.appendChild(document.createTextNode('entrou em ')); body.appendChild(el('span', 'lst', rot(p[0]))); }
+      else if (k === 'lista_rem') { body.appendChild(document.createTextNode('saiu de ')); body.appendChild(el('span', 'lst sai', rot(p[0]))); }
+      else if (k === 'fase5') { body.appendChild(document.createTextNode('foi para ')); body.appendChild(el('span', 'lst dec', 'Decisões'));
+        if (p[0]) body.appendChild(el('span', 'd', ' · sugestão: ' + rot(p[0]))); }
+      else { body.appendChild(el('span', 'lst ' + (/manteve liberado|nenhuma lista|tirou/.test(p[1]) ? 'sai' : ''), 'decisão manual')); }
+      if (p[1]) { body.appendChild(el('br')); body.appendChild(el('span', 'd', p[1])); }
     } else if (k === 'lista_ia') {
       ic.textContent = '🗂️'; body.appendChild(el('span', 'd', (ev.detail || '').replace(/^listas pela IA/, 'Listas pela IA')));
     } else if (k === 'llm_extra') {
@@ -157,11 +181,15 @@
       .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d){
         if (d.error) throw new Error(d.error);
-        if (first) { feed.innerHTML = ''; }
+        if (first) { feed.innerHTML = ''; feedDec.innerHTML = ''; }
         var evs = (d.events || []).slice().reverse();   // mais antigo primeiro, p/ inserir no topo em ordem
-        evs.forEach(function(ev){ var li = row(ev); if (!first) li.className = 'novo'; feed.insertBefore(li, feed.firstChild); lastId = Math.max(lastId, ev.id); });
-        if (first && !evs.length) feed.appendChild(el('li', 'mut', 'Sem atividade registrada ainda.'));
-        while (feed.children.length > 200) feed.removeChild(feed.lastChild);
+        evs.forEach(function(ev){
+          var li = row(ev), alvo = DEC[ev.kind] ? feedDec : feed;
+          if (alvo.firstChild && alvo.firstChild.classList && alvo.firstChild.classList.contains('mut')) alvo.removeChild(alvo.firstChild);
+          if (!first) li.className = 'novo'; alvo.insertBefore(li, alvo.firstChild); lastId = Math.max(lastId, ev.id); });
+        [feed, feedDec].forEach(function(f){
+          if (first && !f.children.length) f.appendChild(el('li', 'mut', 'Sem atividade registrada ainda.'));
+          while (f.children.length > 200) f.removeChild(f.lastChild); });
         first = false; status(d);
         document.getElementById('upd').textContent = 'atualizado ' + new Date().toLocaleTimeString('pt-BR');
       })

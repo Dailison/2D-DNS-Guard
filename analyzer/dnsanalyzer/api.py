@@ -714,9 +714,18 @@ def source_update(sid: int, body: SourcePatch):
 def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
     """Feed "IA ao vivo": eventos novos (id > after_id), o que está em análise agora e o ritmo."""
     with db.conn() as c:
-        events = c.execute(
-            "SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
-            "WHERE id > %s ORDER BY id DESC LIMIT %s", (after_id, limit)).fetchall()
+        from . import eventos
+        if after_id:
+            events = c.execute(
+                "SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
+                "WHERE id > %s ORDER BY id DESC LIMIT %s", (after_id, max(limit, 300))).fetchall()
+        else:   # carga inicial: as últimas de CADA coluna (classificação e decisão)
+            events = c.execute(
+                "(SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
+                " WHERE kind <> ALL(%(d)s) ORDER BY id DESC LIMIT %(n)s) UNION ALL "
+                "(SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
+                " WHERE kind = ANY(%(d)s) ORDER BY id DESC LIMIT %(n)s) ORDER BY id DESC",
+                {"d": list(eventos.DECISAO), "n": limit}).fetchall()
         # o que está em análise agora e em que fase (1-3 = claimed_at; listas; 4 = IA online)
         cur = c.execute(
             "SELECT name, total_queries, fase, extract(epoch from now() - t)::int AS elapsed FROM ("
@@ -739,7 +748,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
         from . import listas_ia, online
         queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": online.status(c)["fila"],
                  "online_on": online.habilitado(),
-                 "revisar": c.execute("SELECT count(*) AS n FROM category_lists WHERE category='para_revisar'").fetchone()["n"]}
+                 "revisar": c.execute(listas.FASE5_SQL).fetchone()["n"]}
         hour = c.execute("SELECT count(*) AS done, round(avg(seconds)::numeric, 1) AS avg_seconds FROM ai_events "
                          "WHERE kind='llm_done' AND created_at > now() - interval '1 hour'").fetchone()
     ok, msg = OllamaClient().available()
@@ -1116,13 +1125,14 @@ def lista_sugestoes(categoria: str, limit: int = Query(500, le=5000)):
 @app.get("/listas/{categoria}/detalhes", dependencies=[Depends(auth)])
 def lista_detalhes(categoria: str, q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
                    revisao: Optional[str] = None, sug: Optional[str] = None, rec: Optional[str] = None, tid: Optional[int] = None,
+                   fase5: bool = False,
                    ordem: str = "recentes", offset: int = Query(0, ge=0),
                    limit: int = Query(100, le=1000)):
     """Itens da lista com a classificação da IA, a revisão manual (quem/quando) e facetas p/ filtrar."""
     if categoria not in listas.CATEGORIAS:
         raise HTTPException(404, "categoria sem lista")
     with db.conn() as c:
-        return listas.detalhes(c, categoria, tid=tid, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, rec=rec, ordem=ordem,
+        return listas.detalhes(c, categoria, tid=tid, fase5=fase5, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, rec=rec, ordem=ordem,
                                offset=offset, limit=limit)
 
 
@@ -1156,7 +1166,16 @@ def listas_mover(body: MoverIn):
                       "ON CONFLICT DO NOTHING", (cat, body.by or None, doms))
         n = 0 if body.de in body.para else c.execute(
             "DELETE FROM category_lists WHERE category=%s AND domain = ANY(%s)", (body.de, doms)).rowcount
+    for d in doms:
+        _decisao(d, ",".join(body.para) or body.de,
+                 (f"pôs em {', '.join(body.para)}" if body.para else "manteve liberado") + f" (saiu de {body.de})", body.by)
     return {"ok": True, "movidos": len(doms), "removidos": n}
+
+
+def _decisao(dominio: str, cat: str, texto: str, by: str = "") -> None:
+    """Decisão manual na coluna "Decisão" do IA ao vivo."""
+    from . import eventos
+    eventos.lista("decisao", dominio, cat, (f"{by}: " if by else "manual: ") + texto)
 
 
 class AprovarIn(BaseModel):
@@ -1190,6 +1209,11 @@ def listas_aprovar(body: AprovarIn):
             else:
                 out["tirados"].append(d)
             c.execute("DELETE FROM category_lists WHERE category = %s AND domain = %s", (body.de, d))
+    for alvo, ds in out["movidos"].items():
+        for d in ds:
+            _decisao(d, alvo, f"aprovou a sugestão da IA: {alvo} (saiu de {body.de})", body.by)
+    for d in out["tirados"]:
+        _decisao(d, body.de, f"aprovou a sugestão da IA: nenhuma lista (saiu de {body.de})", body.by)
     return {"ok": True, **out}
 
 
@@ -1300,6 +1324,7 @@ def lista_add(categoria: str, body: ListaIn):
     with db.conn() as c:
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                   (categoria, d, body.by or None))
+    _decisao(d, categoria, f"pôs em {categoria}", body.by)
     return {"ok": True}
 
 
@@ -1324,6 +1349,9 @@ def listas_lote(body: ListasLoteIn):
     with db.conn() as c, c.cursor() as cur:
         cur.executemany("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                         [(cat, d, body.by or None) for cat in body.cats for d in doms])
+    if len(doms) <= 200:   # (migrações em massa não enchem o feed)
+        for d in doms:
+            _decisao(d, ",".join(body.cats), f"pôs em {', '.join(body.cats)}", body.by)
     return {"ok": True, "dominios": len(doms)}
 
 
@@ -1336,6 +1364,9 @@ def listas_remover(body: ListasLoteIn):
             n = c.execute("DELETE FROM category_lists WHERE domain = ANY(%s) AND category = ANY(%s)", (doms, body.cats)).rowcount
         else:
             n = c.execute("DELETE FROM category_lists WHERE domain = ANY(%s)", (doms,)).rowcount
+    if n:
+        for d in doms[:200]:
+            _decisao(d, ",".join(body.cats), "tirou " + (f"de {', '.join(body.cats)}" if body.cats else "de todas as listas"), body.by)
     return {"ok": True, "removidos": n}
 
 
@@ -1344,6 +1375,8 @@ def lista_rem(categoria: str, domain: str):
     with db.conn() as c:
         n = c.execute("DELETE FROM category_lists WHERE category=%s AND domain=%s",
                       (categoria, domain.strip().lower().rstrip("."))).rowcount
+    if n:
+        _decisao(domain.strip().lower().rstrip("."), categoria, f"tirou de {categoria}")
     return {"ok": True, "removidos": n}
 
 

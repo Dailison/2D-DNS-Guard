@@ -96,6 +96,8 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
         c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
                   "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
         feitos.append(r)
+        from . import eventos
+        eventos.lista("lista_add", r["name"], r["category"], "bloqueio automático (recomendação da IA: bloquear)", r["id"])
     if feitos:
         log.info("bloqueio automático: %d site(s) nas listas por categoria: %s", len(feitos),
                  ", ".join(f"{r['name']} ({r['category']})" for r in feitos[:20]))
@@ -109,7 +111,7 @@ _ORIGEM_NAO_MANUAL = (AUTO_BY, "IA automática", "IA com dúvida", "IA sem certe
 DETALHE_SQL = (
     "SELECT d.name AS domain, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
     " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "
-    " d.lista_ia, d.lista_conf, d.lista_motivo, d.lista_servico, d.lista_fonte, d.lista_at, "
+    " d.lista_ia, d.lista_conf, d.lista_motivo, d.lista_servico, d.lista_fonte, d.lista_at, d.online_at, d.lista_duvida, "
     " g.status AS g_status, g.reviewed_by AS g_by, g.reviewed_at AS g_at, "
     " t.n_decisoes, t.n_ajustes, t.ult_status, t.ult_por, t.ult_em "
     "FROM domains d LEFT JOIN global_reviews g ON g.domain_id = d.id "
@@ -197,7 +199,16 @@ def _empresas(c, nomes: list[str]) -> dict[str, list[dict]]:
     return out
 
 
-def detalhes(c, cat: str, tid: int | None = None, **filtros) -> dict:
+# fase 5 = a IA online (fase 4) já avaliou depois da última sugestão local e seguiu sem certeza
+FASE5_SQL = ("SELECT count(*) AS n FROM category_lists l JOIN domains d ON d.name = l.domain "
+             "WHERE l.category = 'para_revisar' AND d.online_at IS NOT NULL AND NOT d.lista_duvida")
+
+
+def _na_fase5(r: dict) -> bool:
+    return bool(r.get("online_at")) and not r.get("lista_duvida")
+
+
+def detalhes(c, cat: str, tid: int | None = None, fase5: bool = False, **filtros) -> dict:
     """Itens de uma lista de bloqueio com a classificação da IA, o estado da revisão manual e as
     empresas que acessaram (tid = só os acessados por aquela empresa)."""
     rows = c.execute("SELECT domain, added_by, added_at FROM category_lists WHERE category=%s", (cat,)).fetchall()
@@ -205,9 +216,14 @@ def detalhes(c, cat: str, tid: int | None = None, **filtros) -> dict:
     if tid:
         rows = [r for r in rows if any(e["id"] == tid for e in emp.get(r["domain"], []))]
     rows = _detalhar(c, rows)
+    aguardando = 0
+    if fase5:   # Decisões: só o que já passou pela fase 4 (o resto ainda está com a IA)
+        antes = len(rows)
+        rows = [r for r in rows if _na_fase5(r)]
+        aguardando = antes - len(rows)
     for r in rows:
         r["empresas"] = emp.get(r["domain"], [])
-    return _filtrar_paginar(rows, **filtros)
+    return {**_filtrar_paginar(rows, **filtros), "aguardando_ia": aguardando}
 
 
 def _em_lista(nome: str, conjunto: set[str]) -> bool:

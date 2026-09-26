@@ -227,3 +227,45 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
     assert ("jogos", "playrix.com") in em, "coerência pela classificação da IA online"
     assert ("para_revisar", "v-sobra.com") not in em and "v-sobra.com" in ap["resolvidos"], "nenhuma com certeza: sai de Decisões"
     assert ("streaming", "v-talvez.com") in em and ("para_revisar", "v-talvez.com") not in em, "sem certeza: fica onde a IA pôs"
+
+
+def test_eventos_da_coluna_decisao(env, monkeypatch):
+    from dnsanalyzer import db, llm
+    monkeypatch.setattr(llm.OllamaClient, "available", lambda self: (True, "ok"))
+    with db.conn() as c:
+        kinds = {r["kind"] for r in c.execute("SELECT kind FROM ai_events")}
+        ev = {(r["kind"], r["name"]): r["detail"] for r in c.execute("SELECT kind, name, detail FROM ai_events")}
+    assert {"lista_add", "fase5", "decisao"} <= kinds, kinds
+    assert ev[("lista_add", "roblox.com")].startswith("jogos|IA local")
+    assert ev[("fase5", "talvez-jogo.com")].startswith("jogos|nenhuma fase teve certeza")
+    assert any(k == "decisao" and d.startswith("jogos|op: aprovou a sugestão") for (k, _), d in ev.items())
+    with db.conn() as c:   # muita classificação depois: a carga inicial ainda traz a coluna "Decisão"
+        for i in range(80):
+            c.execute("INSERT INTO ai_events (kind, name) VALUES ('llm_done', %s)", (f"x{i}.com",))
+    j = env.get("/ai/events", headers=H, params={"limit": 30}).json()
+    ks = [e["kind"] for e in j["events"]]
+    assert ks.count("llm_done") == 30 and any(k in ("lista_add", "fase5", "decisao") for k in ks)
+
+
+def test_decisoes_so_fase5_e_contexto_completo(env):
+    import json as _j
+
+    from dnsanalyzer import db, online
+    j = env.get("/listas/para_revisar/detalhes", headers=H, params={"fase5": True, "limit": 500}).json()
+    nomes = {r["domain"] for r in j["items"]}
+    assert "duv2.com" in nomes, "a IA online avaliou e ficou sem certeza: fase 5"
+    assert "talvez-jogo.com" not in nomes and "duvida-sobra.com" not in nomes, "sem passar pela fase 4: fora de Decisões"
+    assert j["aguardando_ia"] >= 1
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, classification, category, topic, confidence, corp_action, corp_reason, "
+                      "classified_by, reasons, evidence, whois_at, web_search_at, analyzed_at) VALUES ('ctx.com.br', 'DESCONHECIDO', "
+                      "'desconhecido', 'não reconhecido', 0.4, 'REVISAR', 'sem informação', 'web', %s, %s, now(), now(), now()) RETURNING id",
+                      (_j.dumps([{"by": "ia", "text": "não reconheço"}]),
+                       _j.dumps([{"id": "E0", "kind": "identity", "text": "nome"},
+                                 {"id": "E3", "kind": "whois", "text": "WHOIS/RDAP: titular PESSOA JURÍDICA 'Ctx Ltda' (CNPJ 1)"},
+                                 {"id": "E4", "kind": "websearch", "text": "busca: Ctx Ltda — distribuidora de parafusos " + "x" * 1200}]))).fetchone()["id"]
+        c.execute("INSERT INTO classification_history (domain_id, classification, topic, source) VALUES (%s, 'DESCONHECIDO', 'x', 'llm')", (i,))
+    t = online.contexto_completo({"id": i, "name": "ctx.com.br"})
+    assert "fase 3 (busca na web + IA local)" in t and "2 (WHOIS)" in t and "3 (busca na web)" in t
+    assert "WHOIS/RDAP (fase 2): WHOIS/RDAP: titular PESSOA JURÍDICA 'Ctx Ltda'" in t and "distribuidora de parafusos" in t
+    assert "Histórico de classificações" in t and "fase 1 (IA local): DESCONHECIDO" in t and "nome" not in t.split("Evidências")[1][:40]

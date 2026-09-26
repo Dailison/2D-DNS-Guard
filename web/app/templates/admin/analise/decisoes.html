@@ -18,7 +18,8 @@
   {% endif %}
 </div>
 <div class="card">
-  <h2>{{ det.total }} site(s) aguardando decisão{% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem;font-weight:400">de {{ det.total_geral }}{% if not todos %} acessados por {{ tenant.name if tenant else 'esta empresa' }}{% endif %}</span>{% endif %}</h2>
+  <h2>{{ det.total }} site(s) aguardando decisão{% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem;font-weight:400">de {{ det.total_geral }}</span>{% endif %}
+    {% if det.aguardando_ia %}<span class="mut" style="font-size:.8rem;font-weight:400"> · mais {{ det.aguardando_ia }} ainda com a IA (fases 1 a 4) — só aparecem aqui se a IA online não tiver certeza</span>{% endif %}</h2>
   {% with modo = 'decisoes' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>
 {% endblock %}

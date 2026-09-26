@@ -539,17 +539,10 @@ def run_forever(stop=lambda: False) -> None:
                 log.info("fase A (regras): %d domínio(s)", n)
             if time.monotonic() - last_auto > 300:   # bloqueio automático -> listas por categoria
                 last_auto = time.monotonic()
+                with db.conn() as c:   # (um evento por domínio na coluna "Decisão" do IA ao vivo)
+                    listas.bloquear_auto(c)
                 with db.conn() as c:
-                    feitos = listas.bloquear_auto(c)
-                if feitos:
-                    event("auto_block", detail=f"{len(feitos)} site(s) nas listas de bloqueio: " + ", ".join(
-                        f"{r['name']} ({r['category']})" for r in feitos[:12]) + (" …" if len(feitos) > 12 else ""))
-                with db.conn() as c:
-                    ap = listas_ia.aplicar(c)
-                if ap["direto"] or ap["revisar"] or ap["resolvidos"] or ap["online"]:
-                    event("lista_ia", detail=f"listas pela IA: {len(ap['direto'])} direto, {len(ap['online'])} p/ a IA online, "
-                          f"{len(ap['revisar'])} p/ Para revisar, {len(ap['resolvidos'])} resolvidos pela IA online: " + ", ".join(
-                              f"{n} ({c_})" for n, c_ in ap["direto"][:10]) + (" …" if len(ap["direto"]) > 10 else ""))
+                    listas_ia.aplicar(c)
             if time.monotonic() - last_stale > 3600:
                 m = reanalyze_stale(cfg.reanalyze_days)
                 if m:

@@ -171,7 +171,7 @@ def painel():
     if ctx["tid"] is not None:
         try:
             s = api.get(f"/tenants/{ctx['tid']}/summary", days=ctx["dias"])
-            fila = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, ordem="consultas", limit=10)
+            fila = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, fase5=True, ordem="consultas", limit=10)
         except AnalyzerError as e:
             flash(f"Falha ao carregar o painel: {e}", "erro")
         if s:
@@ -194,7 +194,7 @@ def decisoes():
     det = _DET_VAZIO
     if ctx["tid"] is not None:
         try:
-            det = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, **_det_params(fd))
+            det = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, fase5=True, **_det_params(fd))
         except AnalyzerError as e:
             flash(f"Falha ao carregar as decisões: {e}", "erro")
     fases = {}

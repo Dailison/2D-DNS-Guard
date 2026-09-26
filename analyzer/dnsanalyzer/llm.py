@@ -160,7 +160,7 @@ class OllamaClient:
         self.url = url or cfg.ollama_url
         self.extra = bool(url)
         self.model = cfg.ollama_model
-        self.timeout = cfg.llm_timeout
+        self.timeout = cfg.llm_extra_timeout if self.extra else cfg.llm_timeout
         self.num_ctx = cfg.llm_num_ctx
         # threads de CPU só fazem sentido no Ollama da VM; no reforço (GPU) o Ollama de lá decide
         self.num_thread = None if self.extra else (cfg.llm_num_thread or max((os.cpu_count() or 4) - 2, 1))

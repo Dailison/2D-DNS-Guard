@@ -62,6 +62,7 @@ class Settings:
     llm_workers: int
     ollama_extra_urls: list[str]
     llm_extra_workers: int
+    llm_extra_timeout: int
     llm_max_attempts: int
     llm_skip_hosting_subdomains: bool
 
@@ -131,6 +132,8 @@ def load_settings() -> Settings:
         # A IA da VM segue sozinha quando eles estão desligados.
         ollama_extra_urls=[u.rstrip("/") for u in _list("OLLAMA_EXTRA_URLS")],
         llm_extra_workers=max(_int("LLM_EXTRA_WORKERS", 2), 1),
+        # GPU responde em segundos: pedido que some (queda do PC/VPN) não pode segurar o domínio 10 min
+        llm_extra_timeout=_int("LLM_EXTRA_TIMEOUT_SECONDS", 90),
         llm_max_attempts=_int("LLM_MAX_ATTEMPTS", 3),
         llm_skip_hosting_subdomains=_bool(os.environ.get("LLM_SKIP_HOSTING_SUBDOMAINS"), False),
         rdap_enabled=_bool(os.environ.get("RDAP_ENABLED"), True),

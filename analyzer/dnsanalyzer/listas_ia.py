@@ -39,9 +39,10 @@ LISTAS_IA = {
     "noticias": "portais de notícias, revistas, fofoca e entretenimento",
     "pirataria": "torrents, downloads piratas, cracks, IPTV pirata, filmes e séries piratas, conversores de vídeo",
     "ia_chatbots": "assistentes de IA, chatbots e geradores de texto ou imagem (ChatGPT, Claude, Gemini, Copilot, Perplexity)",
-    "nuvem_remoto": "armazenamento e compartilhamento de arquivos pessoal (Dropbox, Google Drive, Mega, WeTransfer) e "
-                    "acesso remoto (AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop). Microsoft 365, SharePoint "
-                    "e OneDrive da empresa e Google Workspace são nenhuma",
+    "nuvem_remoto": "SÓ armazenamento/compartilhamento de ARQUIVOS pessoal (Dropbox, Google Drive, Mega, WeTransfer) e "
+                    "acesso remoto a computadores (AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop). Nuvem PARA SISTEMAS "
+                    "(AWS, Azure, Google Cloud, APIs, login/autenticação, hospedagem), Microsoft 365, SharePoint, OneDrive "
+                    "da empresa e Google Workspace são nenhuma",
 }
 NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
@@ -184,7 +185,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     Sem certeza -> Para revisar (com a sugestão). Site já numa lista (pessoa/migração) fica onde está."""
     cfg = settings()
     rows = c.execute(
-        "SELECT d.id, d.name, d.classification, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
+        "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed') AS g_allowed, "
         " EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id AND (td.review_status = 'allowed' "
         "         OR td.override_classification = 'TRABALHO')) AS t_allowed, "
@@ -205,7 +206,8 @@ def aplicar(c, limite: int = 3000) -> dict:
         if not cat or cat in em or (em - {PARA_REVISAR}):
             continue
         coerente = not (cat == "ameaca" and r["classification"] != "MALICIOSO") and \
-            not (cat in _EXIGE_NAO_TRABALHO and r["classification"] == "TRABALHO")
+            not (cat in _EXIGE_NAO_TRABALHO and r["classification"] == "TRABALHO") and \
+            not (r["category"] == "infraestrutura" and cat != "doh_dns")   # infra de sistemas: só com revisão
         humano_contra = cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
         if certo and coerente and not humano_contra:
             por = f"{AUTO_BY} ({cat})"

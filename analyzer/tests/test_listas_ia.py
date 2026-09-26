@@ -44,7 +44,8 @@ IA = {"chatgpt.com": ("TRABALHO", "ia_chatbots", 1.0), "roblox.com": ("NAO_TRABA
       "talvez-jogo.com": ("NAO_TRABALHO", "jogos", 0.6), "erp.com.br": ("TRABALHO", "nenhuma", 1.0),
       "loja-trab.com": ("TRABALHO", "jogos", 1.0), "whatsapp.com": ("TRABALHO", "mensageiros", 1.0),
       "tiktok.com": ("NAO_TRABALHO", "redes_sociais", 1.0), "sobra.com": ("NAO_TRABALHO", "pirataria", 0.95),
-      "duvida-sobra.com": ("NAO_TRABALHO", "streaming", 0.5), "ja-listado.com": ("NAO_TRABALHO", "compras", 1.0)}
+      "duvida-sobra.com": ("NAO_TRABALHO", "streaming", 0.5), "ja-listado.com": ("NAO_TRABALHO", "compras", 1.0),
+      "cognito.aws.com": ("TRABALHO", "nuvem_remoto", 1.0)}
 
 
 def _dados(c):
@@ -52,7 +53,8 @@ def _dados(c):
     ids = {}
     for n, (cls, _, _) in IA.items():
         ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
-                           "VALUES (%s, %s, 'outros', now(), 10) RETURNING id", (n, cls)).fetchone()["id"]
+                           "VALUES (%s, %s, %s, now(), 10) RETURNING id",
+                           (n, cls, "infraestrutura" if n.startswith("cognito") else "outros")).fetchone()["id"]
     c.execute("INSERT INTO domains (name, classification, analyzed_at) VALUES ('nao-sei.com', 'DESCONHECIDO', now())")
     # whatsapp: alguém decidiu "manter liberado" e a empresa A aplica Mensageiros -> não entra sozinho
     c.execute("INSERT INTO tenant_domains (tenant_id, domain_id, first_seen, last_seen, review_status, reviewed_by, reviewed_at) "
@@ -89,10 +91,11 @@ def test_fila_classifica_e_aplica(env, monkeypatch):
     assert ("pirataria", "sobra.com") in em and ("para_revisar", "sobra.com") not in em, "sobra da migração movida"
     assert em[("para_revisar", "duvida-sobra.com")] == "migração dos grupos antigos"
     assert ("compras", "ja-listado.com") not in em, "já numa lista: fica onde está"
+    assert ("para_revisar", "cognito.aws.com") in em and ("nuvem_remoto", "cognito.aws.com") not in em, "infra: revisão"
     assert not any(d == "erp.com.br" for _, d in em)
     assert g.get("roblox.com") == "IA automática (jogos)", "jogos é aplicada: decidido"
     assert "chatgpt.com" not in g, "ninguém aplica IA/Chatbots: não vira decisão"
-    assert st["fila"] == 0 and st["com_lista"] == 9
+    assert st["fila"] == 0 and st["com_lista"] == 10
     with db.conn() as c:
         assert listas_ia.aplicar(c) == {"direto": [], "revisar": [], "resolvidos": []}, "não reaplica"
 
@@ -116,8 +119,8 @@ def test_detalhes_mostram_sugestao_e_aprovar(env):
 def test_etapa4(env):
     from dnsanalyzer import db, listas_ia
     p = env.get("/etapa4/pendentes", headers=H).json()
-    assert {x["domain"] for x in p} == {"loja-trab.com", "whatsapp.com"}
-    assert "Domínio: whatsapp.com" in p[0]["contexto"] or "Domínio: loja-trab.com" in p[0]["contexto"]
+    assert {x["domain"] for x in p} == {"loja-trab.com", "whatsapp.com", "cognito.aws.com"}
+    assert all(x["contexto"].startswith("Domínio: " + x["domain"]) for x in p)
     assert env.post("/etapa4/decisao", headers=H, json={"domain": "loja-trab.com", "lista": "nenhuma", "confianca": 1.0,
                                                          "motivo": "loja de peças", "fonte": "claude"}).json()["ok"]
     assert env.post("/etapa4/decisao", headers=H, json={"domain": "x.com", "lista": "jogos", "confianca": 1}).status_code == 404

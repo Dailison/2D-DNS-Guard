@@ -48,7 +48,9 @@
         <option value="cliente" {{ 'selected' if vista == 'cliente' }}>Por computador (quem acessou)</option>
         <option value="detalhado" {{ 'selected' if vista == 'detalhado' }}>Detalhado (cada acesso)</option>
       </select></div>
-    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Filtrar</button></div>
+    <div style="flex:0;display:flex;align-items:flex-end;gap:.6rem">
+      <label class="chk" style="margin:0 0 .45rem;font-weight:400;white-space:nowrap" title="zonas locais do Technitium (ex.: 2d.local), nomes sem ponto e consultas reversas (PTR)"><input type="checkbox" name="locais" value="1" {{ 'checked' if locais }} onchange="this.form.submit()"> <span>mostrar nomes locais</span></label>
+      <button class="primary">Filtrar</button></div>
   </form>
   <p class="mut" style="font-size:.85rem;margin:.6rem 0 0"><b>Empresa</b> vem do <a href="{{ url_for('analise.empresas') }}">cadastro de empresas</a> (todas as unidades/redes dela). <b>Faixa / parte do IP</b> aceita CIDR (<code>10.70.0.0/16</code>) ou um pedaço do IP (<code>10.100</code> traz todos os IPs que contêm isso). <b>Resposta</b> = como o Technitium respondeu (<code>Blocked</code> = bloqueado pelo filtro, <code>Cached</code>, <code>Recursive</code>…). Reduza o período para buscas mais fundas. Horários no fuso de São Paulo (GMT-3).</p>
   <p class="mut" style="font-size:.85rem;margin:.3rem 0 0"><b>Classificação IA</b> = a do analisador para o site (o ajuste manual da empresa, marcado com ✎, prevalece); juntando empresas numa linha, vale a pior. <b>Ameaças</b> = Malicioso + Suspeito. Para descobrir <b>qual computador</b> acessou um site malicioso: Classificação IA = Malicioso e vista <b>Por computador</b>.</p>

@@ -560,6 +560,8 @@ def run_forever(stop=lambda: False) -> None:
                 with db.conn() as c:
                     whitelist.aplicar(c)
             if time.monotonic() - last_stale > 3600:
+                with db.conn() as c:   # domínios que não existem (NXDOMAIN) saem da IA e de Decisões
+                    listas.marcar_inexistentes(c)
                 m = reanalyze_stale(cfg.reanalyze_days)
                 if m:
                     log.info("%d domínio(s) antigos marcados para reanálise", m)

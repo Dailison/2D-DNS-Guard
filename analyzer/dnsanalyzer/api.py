@@ -928,7 +928,8 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
                  cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
                  dominio: Optional[str] = None, blocked: bool = False,
                  cls: list[str] = Query(default=[]), categoria: Optional[str] = None,
-                 por_cliente: bool = False, limit: int = Query(1000, le=5000)):
+                 por_cliente: bool = False, sem_locais: bool = False, excluir: list[str] = Query(default=[]),
+                 limit: int = Query(1000, le=5000)):
     """Logs DNS agrupados por nome consultado (a partir de query_agg, por hora), com os
     mesmos filtros da tela Logs DNS. Atraso = o da coleta (~5-7 min).
     Cada linha traz a classificação efetiva (ajuste da empresa > IA; juntando empresas, a pior).
@@ -951,6 +952,12 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
         where.append("host(cl.ip) LIKE %(ipl)s"); p["ipl"] = f"%{ip_like.strip()}%"
     if dominio:
         where.append("f.name LIKE %(dom)s"); p["dom"] = f"%{dominio.strip().lower()}%"
+    if sem_locais:   # nomes locais (zonas locais do Technitium, INTERNAL_SUFFIXES, sem ponto, reversos) fora
+        where.append("d.kind NOT IN ('internal', 'reverse')")
+        suf = [x.strip().lower().strip(".") for x in excluir if x and x.strip()]
+        if suf:
+            where.append("NOT (f.name = ANY(%(suf)s) OR f.name LIKE ANY(%(sufl)s))")
+            p["suf"], p["sufl"] = suf, ["%." + x for x in suf]
     if blocked:
         where.append("q.blocked > 0")
     cls = [x.strip().upper() for x in cls if x and x.strip()]

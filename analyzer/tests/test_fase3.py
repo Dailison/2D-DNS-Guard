@@ -290,3 +290,23 @@ def test_historico_do_dominio(api):
     f4 = next(x for x in h["linha_do_tempo"] if x["titulo"] == "Fase 4 · IA online")
     assert "1ª opinião (lite)" in f4["nota"]
     assert api.get("/domains/nunca-visto.com/historico", headers=H).status_code == 404
+
+
+def test_dominios_inexistentes_saem_do_fluxo(api):
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
+        cl = c.execute("SELECT id FROM clients WHERE tenant_id=%s LIMIT 1", (t,)).fetchone()["id"]
+        ids = {}
+        for n, q, nx, ti in (("naoexiste-teste.com", 10, 10, ""), ("existe-teste.com", 10, 1, ""), ("dga-teste.com", 10, 10, "urlhaus")):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, ti_signature, llm_pending) VALUES (%s, 'DESCONHECIDO', %s, true) RETURNING id",
+                               (n, ti)).fetchone()["id"]
+            f = c.execute("INSERT INTO fqdns (name, domain_id) VALUES (%s, %s) RETURNING id", ("x." + n, ids[n])).fetchone()["id"]
+            c.execute("INSERT INTO query_agg (tenant_id, client_id, domain_id, fqdn_id, bucket, queries, blocked, nxdomain, first_seen, last_seen) "
+                      "VALUES (%s,%s,%s,%s,%s,%s,0,%s,%s,%s)", (t, cl, ids[n], f, AGORA, q, nx, AGORA, AGORA))
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'naoexiste-teste.com', 'IA com dúvida (x)')")
+        r = listas.marcar_inexistentes(c)
+        k = {row["name"]: (row["kind"], row["llm_pending"]) for row in c.execute("SELECT name, kind, llm_pending FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
+        em = c.execute("SELECT 1 FROM category_lists WHERE domain='naoexiste-teste.com'").fetchone()
+    assert r["inexistentes"] == ["naoexiste-teste.com"] and not em
+    assert k == {"naoexiste-teste.com": ("inexistente", False), "existe-teste.com": ("public", True), "dga-teste.com": ("public", True)}

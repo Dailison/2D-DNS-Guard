@@ -175,3 +175,12 @@ def test_excecao_imediata(app, tech, monkeypatch):
     g = {x["name"]: x for x in tech.cfg["groups"]}
     assert g["Empresa: A"]["allowed"] == ["manual.com"] and "x.com" not in g["default"].get("allowed", []), "manual fica"
     assert registrados == {} and len(tech.gravados) > n
+
+
+def test_nome_local():
+    from app import technitium as dnslib
+    z = ["2d.local", "empresa.corp"]
+    for n in ("srv01", "wpad", "dc.2d.local", "2d.local", "x.empresa.corp", "10.1.168.192.in-addr.arpa", "impressora.local."):
+        assert dnslib.nome_local(n, z), n
+    for n in ("google.com", "corp.com", "empresa.corp.com.br", "app.delivery"):
+        assert not dnslib.nome_local(n, z), n

@@ -318,3 +318,19 @@ def test_servicos_so_para_liberar(api):
     assert not {"tiktok", "roblox", "bet365", "whatsapp", "netflix"} & set(ls)
     assert all(x["category"] is None for x in ls.values())
     assert "mlstatic.com" in [d["domain"] for d in api.get("/liberacao/mercado-livre", headers=H).json()]
+
+
+def test_logs_sem_nomes_locais(api):
+    from dnsanalyzer import db
+    with db.conn() as c:
+        t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
+        cl = c.execute("SELECT id FROM clients WHERE tenant_id=%s LIMIT 1", (t,)).fetchone()["id"]
+        for n, kind in (("srv.2d.local", "internal"), ("pc.empresa.corp", "public")):
+            i = c.execute("INSERT INTO domains (name, kind) VALUES (%s, %s) RETURNING id", (n, kind)).fetchone()["id"]
+            f = c.execute("INSERT INTO fqdns (name, domain_id) VALUES (%s, %s) RETURNING id", (n, i)).fetchone()["id"]
+            c.execute("INSERT INTO query_agg (tenant_id, client_id, domain_id, fqdn_id, bucket, queries, blocked, nxdomain, first_seen, last_seen) "
+                      "VALUES (%s,%s,%s,%s,%s,3,0,0,%s,%s)", (t, cl, i, f, AGORA, AGORA, AGORA))
+    todos = {r["dominio"] for r in _grouped(api)}
+    assert {"srv.2d.local", "pc.empresa.corp"} <= todos
+    sem = {r["dominio"] for r in _grouped(api, sem_locais="true", excluir=["empresa.corp"])}
+    assert "srv.2d.local" not in sem and "pc.empresa.corp" not in sem and "x.ruim.com" in sem

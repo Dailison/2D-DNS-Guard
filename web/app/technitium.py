@@ -419,7 +419,7 @@ def resolver_empresa(ip_str, mapa):
 
 def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
                    ip_exato=None, ip_like=None, resposta=None, rcode=None,
-                   limite=300, scan_max=6000, por_pagina=500, orcamento_s=25):
+                   limite=300, scan_max=6000, por_pagina=500, orcamento_s=25, sem_locais=False):
     """Consulta os query logs do Technitium (período/IP/tipo-de-resposta/rcode
     empurrados para a API); resolve a empresa e filtra por `redes` (CIDR),
     `dominio` (substring, %dominio%) e `ip_like` (parte do IP, ex.: '10.100') no
@@ -439,6 +439,7 @@ def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
         base["rcode"] = rcode.strip()
     dom_like = (dominio or "").strip().lower()
     ip_sub = (ip_like or "").strip()
+    zonas = zonas_locais() if sem_locais else []
     import time
     t0 = time.monotonic()
     linhas, scanned, page = [], 0, 1
@@ -454,6 +455,8 @@ def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
             scanned += 1
             cip = e.get("clientIpAddress", "")
             if dom_like and dom_like not in (e.get("qname") or "").lower():
+                continue
+            if sem_locais and nome_local(e.get("qname"), zonas):
                 continue
             if ip_sub and ip_sub not in cip:
                 continue
@@ -477,6 +480,32 @@ def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
             break
         page += 1
     return linhas, scanned, (len(linhas) >= limite or scanned >= scan_max)
+
+
+# ------------------------------------------------ nomes locais (fora dos Logs por padrão)
+_ZONAS = {"at": 0.0, "zonas": []}
+
+
+def zonas_locais() -> list[str]:
+    """Zonas hospedadas no Technitium (ex.: 2d.local, barretos.local — forwarders p/ os DCs), guardadas
+    por 10 min. Falha = lista vazia (os Logs seguem, só sem esse filtro)."""
+    import time
+    if time.monotonic() - _ZONAS["at"] > 600:
+        try:
+            r = _api_get("zones/list")
+            _ZONAS["zonas"] = sorted({(z.get("name") or "").lower().strip(".") for z in r.get("zones", []) if z.get("name")})
+        except Exception:  # noqa: BLE001
+            _ZONAS["zonas"] = _ZONAS["zonas"] or []
+        _ZONAS["at"] = time.monotonic()
+    return _ZONAS["zonas"]
+
+
+def nome_local(qname: str, zonas) -> bool:
+    """Nome local: sem ponto (nome de máquina/wpad), reverso (PTR), .local ou de uma zona local do Technitium."""
+    n = (qname or "").lower().rstrip(".")
+    if not n or "." not in n or n.endswith((".arpa", ".local")):
+        return True
+    return any(n == z or n.endswith("." + z) for z in zonas)
 
 
 # ------------------------------------------------ políticas por empresa -> grupos internos

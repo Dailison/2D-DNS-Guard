@@ -206,7 +206,7 @@ def _classificar_linhas(linhas: list[dict], info: dict) -> bool:
 
 
 def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, resposta, redes, ip_like,
-                               mapa, grupos, lista_empresas, cls_f="", categoria="", vista="agrupado"):
+                               mapa, grupos, lista_empresas, cls_f="", categoria="", vista="agrupado", locais=False):
     def utc(v):
         iso = dnslib.local_para_utc_iso(v)
         return iso + "+00:00" if iso and len(iso) == 19 else iso
@@ -218,7 +218,8 @@ def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, r
                     cidr=[str(n) for n in redes] if (redes is not None and not empresa) else None,
                     dominio=dominio or None, blocked="true" if resposta == "Blocked" else None,
                     cls=_cls_lista(cls_f) or None, categoria=categoria or None,
-                    por_cliente="true" if vista == "cliente" else None, limit=LOGS_LIMITE)
+                    por_cliente="true" if vista == "cliente" else None, limit=LOGS_LIMITE,
+                    sem_locais=None if locais else "true", excluir=None if locais else dnslib.zonas_locais())
         cap, coletado = d.get("cap"), d.get("coletado_ate")
         union = None
         if any(r["bloqueadas"] for r in d["rows"]):
@@ -240,7 +241,7 @@ def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, r
         grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
         cidr=cidr, ip=ip, dominio=dominio, resposta=resposta, respostas=dnslib.RESPONSE_TYPES,
         inicio=inicio, fim=fim, scanned=None, cap=cap, voltar=request.full_path,
-        fonte_analisador=True, total_acessos=total,
+        fonte_analisador=True, total_acessos=total, locais=locais,
         coletado_ate=dnslib.utc_para_local(coletado) if coletado else None, **_ctx_cls(cls_f, categoria))
 
 
@@ -275,6 +276,7 @@ def logs_dns():
     if cls_f not in dict(CLS_FILTROS):
         cls_f = ""
     categoria = (request.args.get("categoria") or "").strip()       # categoria do site (IA)
+    locais = bool(request.args.get("locais"))   # mostrar nomes locais (zonas .local, reversos, sem ponto)? padrão: não
     if not request.args:  # primeira carga (sem filtros): dia atual, início ao fim (São Paulo)
         hoje = dnslib.agora_local().date()
         inicio = f"{hoje}T00:00"
@@ -305,7 +307,7 @@ def logs_dns():
                 resposta = ""
             return _logs_agrupados_analisador(
                 inicio, fim, empresa, grupo, cidr, ip, dominio, resposta, redes, ip_like, mapa, grupos,
-                lista_empresas, cls_f, categoria, vista)
+                lista_empresas, cls_f, categoria, vista, locais)
         # Máx. 1000 logs por busca: cada página do Technitium custa segundos (SQLite com
         # milhões de linhas). Sem filtro feito aqui = 1 chamada; com filtro de domínio/
         # empresa/faixa (a API não faz) varre até 5000 p/ achar os 1000 resultados.
@@ -317,7 +319,7 @@ def logs_dns():
             mapa, redes=redes, ip_like=ip_like,
             inicio=dnslib.local_para_utc_iso(inicio), fim=dnslib.local_para_utc_iso(fim),
             dominio=dominio or None, ip_exato=ip or None,
-            resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=smax)
+            resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=smax, sem_locais=not locais)
         # empresa/unidade pelo cadastro (o "empresa" do Technitium é o grupo interno)
         info = emp.resolver(l.get("ip") for l in linhas)
         for l in linhas:
@@ -372,7 +374,7 @@ def logs_dns():
     except Exception as e:  # noqa: BLE001
         flash(f"Não foi possível consultar os logs: {e}", "erro")
     return render_template(
-        "admin/logs_dns.html", linhas=linhas, agrupado=agrupado, agrupar=agrupar, vista=vista,
+        "admin/logs_dns.html", linhas=linhas, agrupado=agrupado, agrupar=agrupar, vista=vista, locais=locais,
         grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
         cidr=cidr, ip=ip, dominio=dominio, resposta=resposta,
         respostas=dnslib.RESPONSE_TYPES,

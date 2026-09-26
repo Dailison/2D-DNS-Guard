@@ -111,6 +111,31 @@ def expirar_ameacas(c, dias: int = 7) -> list[dict]:
     return rows
 
 
+def marcar_inexistentes(c) -> dict:
+    """Domínio que não existe (≥ 95% das consultas com NXDOMAIN em 7 dias, ≥ 3 consultas; erro de digitação,
+    equipamento mal configurado, nome local vazado): kind = 'inexistente' — sai da fila da IA e de Decisões.
+    Em feed de ameaça fica no fluxo (DGA de malware também dá NXDOMAIN; tem o alerta dga_burst). Se passar a
+    resolver (último dia com < 50% de NXDOMAIN), volta a 'public' e é analisado de novo."""
+    from . import eventos
+    novos = c.execute(
+        "UPDATE domains d SET kind = 'inexistente', llm_pending = false, lista_duvida = false, needs_analysis = false "
+        "WHERE d.kind = 'public' AND coalesce(d.ti_signature, '') = '' AND d.id IN (SELECT domain_id FROM query_agg "
+        " WHERE bucket >= now() - interval '7 days' GROUP BY domain_id HAVING sum(queries) >= 3 "
+        " AND sum(nxdomain) >= 0.95 * sum(queries)) RETURNING d.id, d.name").fetchall()
+    if novos:
+        contexto(c, "inexistente (NXDOMAIN)", "o domínio não existe: ≥ 95% das consultas com NXDOMAIN em 7 dias")
+        c.execute("DELETE FROM category_lists WHERE category = 'para_revisar' AND domain = ANY(%s)", ([r["name"] for r in novos],))
+        eventos.registrar("decisao", None, detail="|" + f"{len(novos)} domínio(s) inexistentes (NXDOMAIN) fora da IA e de Decisões: "
+                          + ", ".join(r["name"] for r in novos[:15]) + (" …" if len(novos) > 15 else ""))
+    voltaram = c.execute(
+        "UPDATE domains d SET kind = 'public', needs_analysis = true WHERE d.kind = 'inexistente' AND d.id IN ("
+        " SELECT domain_id FROM query_agg WHERE bucket >= now() - interval '1 day' GROUP BY domain_id "
+        " HAVING sum(queries) - sum(nxdomain) >= 3 AND sum(nxdomain) < 0.5 * sum(queries)) RETURNING d.name").fetchall()
+    if novos or voltaram:
+        log.info("inexistentes: %d marcados, %d voltaram a resolver", len(novos), len(voltaram))
+    return {"inexistentes": [r["name"] for r in novos], "voltaram": [r["name"] for r in voltaram]}
+
+
 def candidatos(c, cats: list[str] | None = None, limite: int = 300) -> list[dict]:
     cats = cats if cats is not None else categorias_auto()
     return c.execute(CANDIDATOS_SQL, {"cats": cats, "lim": limite}).fetchall() if cats else []

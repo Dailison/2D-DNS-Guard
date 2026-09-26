@@ -306,3 +306,27 @@ def test_whois_que_falha_sempre_nao_trava(env, monkeypatch):
         if len(res) < 3:
             assert r["adiado"] and r["whois_at"] is None, "adiado ~10 min (o worker pega outro)"
     assert res == ["deferred", "deferred", "done"] and r["whois_tries"] == 3 and r["whois_at"] is not None, "3ª falha: segue sem WHOIS"
+
+
+def test_repergunta_tem_segunda_opiniao(env, monkeypatch):
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import config, db, listas_ia, online
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, lista_duvida, online_resp) "
+                  "VALUES ('telesco.pe', 'TRABALHO', 'comunicacao', now(), 999, true, %s)",
+                  (Jsonb({"lista": "nenhuma", "confianca": 0.95}),))
+    vistos = []
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)
+
+    def falso(d, cats, buscar, modelo):
+        vistos.append((d["name"], modelo))
+        lista = "nenhuma" if "lite" in modelo else "mensageiros"
+        return {"lista": lista, "confianca": 0.95, "classificacao": "TRABALHO", "reconhecido": True}, {"model": modelo}
+    monkeypatch.setattr(online, "perguntar", falso)
+    assert online.fase(["comunicacao"]) == "done"
+    assert [m for n, m in vistos if n == "telesco.pe"] == ["gemini-3.5-flash-lite", "gemma-4-31b-it"]
+    with db.conn() as c:
+        listas_ia.aplicar(c)
+        assert c.execute("SELECT 1 FROM category_lists WHERE category='mensageiros' AND domain='telesco.pe'").fetchone()

@@ -258,7 +258,8 @@ def _reservar(c) -> dict | None:
     return c.execute(
         "UPDATE domains SET online_claimed_at = now() WHERE id = (SELECT d.id FROM domains d WHERE " + _FILA +
         " ORDER BY " + _EM_DECISOES + " DESC, d.lista_duvida DESC, d.total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED) "
-        "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_conf, lista_motivo").fetchone()
+        "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_conf, lista_motivo, "
+        "online_resp").fetchone()
 
 
 def _certo(obj: dict) -> bool:
@@ -310,11 +311,15 @@ def fase(categorias: list[str]) -> str:
                 d["_busca"] = webintel.search(c, d["name"], fetch=True, wait=True)
         except Exception as e:  # noqa: BLE001 — sem busca a IA online segue com o que tem
             log.info("busca da fase 4 indisponível p/ %s: %s", d["name"], e)
+    # já respondida antes (pergunta de novo): a sugestão original da IA local foi sobrescrita, então não dá
+    # p/ ver discordância — a segunda opinião (modelo maior) é obrigatória
+    revalidar = bool(d.get("online_resp")) and not (d.get("online_resp") or {}).get("erro")
     vol, reforco, busca = niveis()
     obj = meta = None
     for nivel, buscar in ((vol, False), (reforco, False), (busca if pode_buscar else [], True)):
         # próximo nível (modelo maior) se não há resposta, se ela não tem certeza ou se DISCORDA da IA local
-        if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")):
+        if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")) \
+                and not (revalidar and not meta.get("nivel_reforco")):
             break
         if obj is not None and meta.get("nivel_reforco") and nivel is not busca:
             break

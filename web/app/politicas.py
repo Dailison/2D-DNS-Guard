@@ -26,7 +26,12 @@ def sincronizar() -> dict:
     redes fora do cadastro ficam no default)."""
     from app import empresas as emp
     empresas = [e for e in emp.lista() if not e.get("auto_created")]
-    r = dnslib.sincronizar_politicas(empresas, lista())
+    try:
+        from app.auth import admin_atual
+        por = admin_atual().email
+    except Exception:  # noqa: BLE001 — fora de uma requisição (script)
+        por = "console"
+    r = dnslib.sincronizar_politicas(empresas, lista(), por=por)
     current_app.logger.info("políticas -> Technitium: criados %s, apagados %s, %d rede(s)",
                             r["criados"], r["apagados"], r["redes"])
     return r

@@ -114,8 +114,37 @@ def _get_config():
     return json.loads(cfg) if isinstance(cfg, str) else (cfg or {})
 
 
-def _set_config(cfg):
+def _canon(cfg) -> str:
+    return json.dumps(cfg, sort_keys=True)
+
+
+def _set_config(cfg, por="console", motivo="", anterior=None):
+    """Grava o config do Advanced Blocking. ANTES guarda no analisador o config anterior (o lido; sem
+    `anterior`, lê agora) — sem backup, não grava (é a gravação de maior raio de estrago do sistema)."""
+    from app import analyzer_client as api
+    anterior = anterior if anterior is not None else _get_config()
+    try:
+        api.post("/console/technitium-backups", {"config": anterior, "por": por or "console", "motivo": motivo or ""})
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"não foi possível guardar o backup do Technitium ({e}); nada foi gravado") from e
     _api_post("apps/config/set", {"name": APP_NAME, "config": json.dumps(cfg)})
+
+
+def _read_modify_write(fn, por="console", motivo=""):
+    """Lê o config, aplica fn(cfg) -> (resultado, gravar) e grava — relendo antes: se outra pessoa mudou o
+    config nesse meio tempo, refaz a operação a partir do config novo (até 3 vezes; na 4ª, erro)."""
+    for tentativa in range(4):
+        cfg = _get_config()
+        base = _canon(cfg)
+        resultado, gravar = fn(cfg)
+        if not gravar:
+            return resultado
+        if _canon(_get_config()) != base:
+            if tentativa == 3:
+                raise RuntimeError("o config do Technitium foi alterado por outra pessoa durante a gravação; tente de novo")
+            continue
+        _set_config(cfg, por, motivo, anterior=json.loads(base))
+        return resultado
 
 
 def norm_ip(v):
@@ -152,36 +181,37 @@ def liberar(ip_raw, por="admin"):
     if not ipn:
         return None, "IP ou CIDR inválido (ex.: 10.100.10.20 ou 10.100.10.0/24)."
     grp = _grupo()
-    cfg = _get_config()
-    ngmap = cfg.setdefault("networkGroupMap", {})
-    anterior = None
-    for k in list(ngmap):
-        if norm_ip(k) == ipn:
-            if ngmap[k] != grp:
-                anterior = ngmap[k]
-            del ngmap[k]
-    ngmap[ipn] = grp
-    _set_config(cfg)
+
+    def muda(cfg):
+        ngmap = cfg.setdefault("networkGroupMap", {})
+        anterior = None
+        for k in list(ngmap):
+            if norm_ip(k) == ipn:
+                if ngmap[k] != grp:
+                    anterior = ngmap[k]
+                del ngmap[k]
+        ngmap[ipn] = grp
+        return anterior, True
+    anterior = _read_modify_write(muda, por, f"liberar {ipn}")
     return ipn, (f"liberado (antes filtrava em '{anterior}')" if anterior else "liberado")
 
 
-def revogar(ip_raw):
+def revogar(ip_raw, por="admin"):
     """Remove o IP do grupo de isenção (volta a filtrar pela rede). Retorna ip_norm ou None."""
     ipn = norm_ip(ip_raw)
     if not ipn:
         return None
     grp = _grupo()
-    cfg = _get_config()
-    ngmap = cfg.get("networkGroupMap", {})
-    removed = False
-    for k in list(ngmap):
-        if norm_ip(k) == ipn and ngmap[k] == grp:
-            del ngmap[k]
-            removed = True
-    if removed:
-        _set_config(cfg)
-        return ipn
-    return None
+
+    def muda(cfg):
+        ngmap = cfg.get("networkGroupMap", {})
+        removed = False
+        for k in list(ngmap):
+            if norm_ip(k) == ipn and ngmap[k] == grp:
+                del ngmap[k]
+                removed = True
+        return removed, removed
+    return ipn if _read_modify_write(muda, por, f"revogar {ipn}") else None
 
 
 # ---- Bloqueios por grupo (domínios da lista `blocked` de cada grupo) ----
@@ -483,13 +513,42 @@ def _aplica_politica(g, lists, services, bloqueados=()):
     g["allowListUrls"] = outras + [url_liberacao(s) for s in sorted(set(services))]
 
 
-def sincronizar_politicas(empresas, politicas, aplicar=True):
+def _valida_sincronizacao(antes: dict, depois: dict, lib: str) -> None:
+    """Recusa gravar (RuntimeError) um resultado que apagaria o que não é da sincronização."""
+    ga = {g.get("name") for g in antes.get("groups", [])}
+    gd = {g.get("name") for g in depois.get("groups", [])}
+    if lib in ga and lib not in gd:
+        raise RuntimeError(f"a sincronização apagaria o grupo de isenção '{lib}'; nada foi gravado")
+    sumiram = sorted(n for n in ga - gd if n and not n.startswith(PREFIXO_GRUPO))
+    if sumiram:
+        raise RuntimeError(f"a sincronização apagaria grupos que não são de empresa ({', '.join(sumiram)}); nada foi gravado")
+    na, nd = antes.get("networkGroupMap") or {}, depois.get("networkGroupMap") or {}
+    if len(na) >= 5 and len(nd) < 0.8 * len(na):
+        raise RuntimeError(f"a sincronização deixaria o mapa de redes com {len(nd)} de {len(na)} entradas; nada foi gravado")
+    mudou = sorted(k for k, v in na.items() if v == lib and nd.get(k) != lib)
+    if mudou:
+        raise RuntimeError(f"a sincronização mexeria em redes isentas ({', '.join(mudou[:5])}); nada foi gravado")
+
+
+def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", motivo="sincronizar políticas"):
     """Deixa o Technitium igual às políticas: cria/atualiza/apaga os grupos "Empresa: …", aponta
     as redes das empresas para eles e aplica a política default no grupo default. Não mexe no
-    grupo Liberados nem em redes/IPs mapeados para ele. Retorna um resumo do que mudou."""
-    cfg = _get_config()
-    grupos, mapa, default = plano_politicas(empresas, politicas)
+    grupo Liberados nem em redes/IPs mapeados para ele. Valida o resultado antes de gravar (ver
+    _valida_sincronizacao), guarda backup e não sobrescreve alteração de outra pessoa
+    (_read_modify_write). Retorna um resumo do que mudou."""
     lib = current_app.config.get("TECHNITIUM_LIBERADOS_GROUP", "Liberados")
+
+    def muda(cfg):
+        antes = json.loads(_canon(cfg))
+        r = _sincroniza(cfg, empresas, politicas, lib)
+        _valida_sincronizacao(antes, cfg, lib)
+        return r, aplicar
+    return _read_modify_write(muda, por, motivo)
+
+
+def _sincroniza(cfg, empresas, politicas, lib):
+    """Aplica as políticas no config (em memória)."""
+    grupos, mapa, default = plano_politicas(empresas, politicas)
     existentes = {g.get("name"): g for g in cfg.get("groups", [])}
     criados, atualizados, apagados = [], [], []
     for nome, p in grupos.items():
@@ -523,7 +582,5 @@ def sincronizar_politicas(empresas, politicas, aplicar=True):
         if n.startswith(PREFIXO_GRUPO) and n not in grupos:
             cfg["groups"].remove(g)
             apagados.append(n)
-    if aplicar:
-        _set_config(cfg)
     return {"criados": criados, "atualizados": atualizados, "apagados": apagados, "redes": len(mapa),
             "default": default, "cfg": cfg}

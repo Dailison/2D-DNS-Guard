@@ -100,7 +100,7 @@ def liberados_editar():
 @login_required
 def liberados_revogar():
     try:
-        ip = dnslib.revogar(request.form.get("ip"))
+        ip = dnslib.revogar(request.form.get("ip"), por=admin_atual().email)
         if ip:
             api.delete(f"/console/liberados-meta?ip={quote(ip, safe='')}")
             flash(f"{ip} removido (volta a filtrar).", "ok")

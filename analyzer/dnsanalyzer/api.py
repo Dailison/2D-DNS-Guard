@@ -1224,6 +1224,41 @@ def listas_ia_status():
         return listas_ia.status(c)
 
 
+# ------------------------------------------------------------------ backups do config do Technitium (console)
+class TechBackupIn(BaseModel):
+    config: dict
+    por: str = ""
+    motivo: str = ""
+
+
+@app.post("/console/technitium-backups", dependencies=[Depends(auth)])
+def tech_backup_grava(body: TechBackupIn):
+    """O console grava aqui o config que leu, antes de gravar no Technitium (mantém os 100 mais recentes)."""
+    with db.conn() as c:
+        r = c.execute("INSERT INTO technitium_config_backups (taken_by, motivo, config) VALUES (%s, %s, %s) RETURNING id",
+                      (body.por[:120] or None, body.motivo[:300] or None, Jsonb(body.config))).fetchone()
+        c.execute("DELETE FROM technitium_config_backups WHERE id NOT IN "
+                  "(SELECT id FROM technitium_config_backups ORDER BY id DESC LIMIT 100)")
+    return {"ok": True, "id": r["id"]}
+
+
+@app.get("/console/technitium-backups", dependencies=[Depends(auth)])
+def tech_backup_lista(limit: int = Query(30, le=100)):
+    with db.conn() as c:
+        return c.execute("SELECT id, taken_at, taken_by, motivo FROM technitium_config_backups ORDER BY id DESC LIMIT %s",
+                         (limit,)).fetchall()
+
+
+@app.get("/console/technitium-backups/{bid}", dependencies=[Depends(auth)])
+def tech_backup_um(bid: int):
+    with db.conn() as c:
+        r = c.execute("SELECT id, taken_at, taken_by, motivo, config FROM technitium_config_backups WHERE id = %s",
+                      (bid,)).fetchone()
+    if not r:
+        raise HTTPException(404, "backup não encontrado")
+    return r
+
+
 # ------------------------------------------------------------------ fase 3 (IA online)
 @app.get("/online/status", dependencies=[Depends(auth)])
 def online_status():

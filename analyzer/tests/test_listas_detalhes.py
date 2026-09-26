@@ -130,3 +130,15 @@ def test_mover_e_reanalisar(api):
     assert api.post("/listas-mover", headers=H, json={"domains": ["a.com"], "de": "para_revisar", "para": ["zz"]}).status_code == 422
     r = api.post("/domains-reanalyze", headers=H, json={"domains": ["erp.com.br", "travado.com", "nada.com"]}).json()
     assert r["enviados"] == 1 and r["ignorados"] == 2
+
+
+def test_backups_do_technitium(api):
+    for i in range(103):
+        r = api.post("/console/technitium-backups", headers=H, json={"config": {"groups": [{"name": f"g{i}"}]},
+                                                                     "por": "op@2d", "motivo": f"teste {i}"}).json()
+        assert r["ok"]
+    lista = api.get("/console/technitium-backups", headers=H, params={"limit": 100}).json()
+    assert len(lista) == 100 and lista[0]["motivo"] == "teste 102" and "config" not in lista[0], "mantém os 100 mais recentes"
+    um = api.get(f"/console/technitium-backups/{lista[0]['id']}", headers=H).json()
+    assert um["config"] == {"groups": [{"name": "g102"}]} and um["taken_by"] == "op@2d"
+    assert api.get("/console/technitium-backups/999999", headers=H).status_code == 404

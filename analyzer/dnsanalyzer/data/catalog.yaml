@@ -197,6 +197,12 @@ entries:
   - {suffix: leagueoflegends.com,  classification: NAO_TRABALHO, topic: "Jogos", work: 2}
   - {suffix: bet365.com,           classification: NAO_TRABALHO, topic: "Apostas", work: 0}
   - {suffix: betano.com,           classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  # .bet.br: domínio restrito do registro.br, exclusivo de casas de apostas autorizadas pela
+  # SPA/Ministério da Fazenda (Lei 14.790/2023) — todo *.bet.br é aposta por definição
+  - {suffix: bet.br,               classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: bet,                  classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: casino,               classification: NAO_TRABALHO, topic: "Apostas", work: 0}
+  - {suffix: poker,                classification: NAO_TRABALHO, topic: "Apostas", work: 0}
 
   # ---------------- Ecossistema Kwai/Kuaishou e ByteDance/TikTok (infra dos apps)
   - {suffix: kslawin.com,          classification: NAO_TRABALHO, topic: "Rede social (Kwai)", work: 3}

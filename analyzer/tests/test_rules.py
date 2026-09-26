@@ -78,3 +78,13 @@ def test_hash_ignores_volatile_counts():
     assert a.evidence_hash == b.evidence_hash
     c = evaluate(dossier("site.com", ti_hits=[hit("hagezi_tif", "medium", 60, name="site.com")]))
     assert c.evidence_hash != a.evidence_hash
+
+
+def test_bet_br_e_tlds_de_apostas_pelo_catalogo():
+    from dnsanalyzer.features import analyze_name
+    for nome in ("brazino777.bet.br", "betano.bet.br", "qualquer.bet", "sorte.casino"):
+        reg = analyze_name(nome, []).registrable
+        r = evaluate({"name": reg, "kind": "public", "tld": reg.rsplit(".", 1)[-1], "features": {}, "ti_hits": [],
+                      "logs": {}, "catalog": __import__("dnsanalyzer.catalog", fromlist=["x"]).match(reg)})
+        assert r.final and r.classification == "NAO_TRABALHO" and r.category == "apostas", (nome, reg, r.category)
+    assert __import__("dnsanalyzer.catalog", fromlist=["x"]).match("betfair.com.br") is None

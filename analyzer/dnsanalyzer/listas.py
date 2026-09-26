@@ -20,7 +20,7 @@ CATEGORIAS_RISCO = ("jogos", "apostas", "adulto", "vpn_proxy", "ameaca")   # blo
 CATEGORIAS_CURADAS = ("redes_sociais", "mensageiros", "streaming", "publicidade", "compras", "noticias")
 CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado — ver CATEGORIAS_CURADAS)
 # só manual: o que foi bloqueado à mão e não cabe numa categoria (migração dos grupos antigos)
-CATEGORIAS_MANUAIS = ("outros_bloqueios",)
+CATEGORIAS_MANUAIS = ("outros_bloqueios", "para_revisar")   # para_revisar: sobras da migração, ninguém aplica
 CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_CURADAS + CATEGORIAS_MANUAIS
 AUTO_BY = "bloqueio automático"
 

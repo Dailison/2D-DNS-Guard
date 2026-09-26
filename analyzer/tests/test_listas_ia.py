@@ -87,7 +87,7 @@ def test_fila_classifica_e_aplica(env, monkeypatch):
     assert ("redes_sociais", "tiktok.com") in em
     assert em[("para_revisar", "talvez-jogo.com")] == "IA com dúvida (jogos)", "confiança baixa"
     assert ("para_revisar", "loja-trab.com") in em, "jogos + TRABALHO = incoerente"
-    assert ("para_revisar", "whatsapp.com") in em and ("mensageiros", "whatsapp.com") not in em, "decisão humana"
+    assert ("para_revisar", "whatsapp.com") not in em and ("mensageiros", "whatsapp.com") not in em, "decisão humana: não volta"
     assert ("pirataria", "sobra.com") in em and ("para_revisar", "sobra.com") not in em, "sobra da migração movida"
     assert em[("para_revisar", "duvida-sobra.com")] == "migração dos grupos antigos"
     assert ("compras", "ja-listado.com") not in em, "já numa lista manual (Infraestrutura): fica onde está"
@@ -112,7 +112,7 @@ def test_detalhes_mostram_sugestao_e_aprovar(env):
                                                     "de": "para_revisar", "by": "op"}).json()
     assert r["movidos"] == {"jogos": ["talvez-jogo.com"], "streaming": ["duvida-sobra.com"]} and r["sem_sugestao"] == ["x.com"]
     nomes = {x["domain"] for x in env.get("/listas/para_revisar/detalhes", headers=H).json()["items"]}
-    assert "talvez-jogo.com" not in nomes and "whatsapp.com" in nomes
+    assert "talvez-jogo.com" not in nomes and "whatsapp.com" not in nomes
     r = env.post("/listas-aprovar", headers=H, json={"domains": ["ja-listado.com"], "de": "infra_bloqueio"}).json()
     assert r["movidos"] == {"compras": ["ja-listado.com"]}
 

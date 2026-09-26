@@ -193,7 +193,8 @@ def aplicar(c, limite: int = 3000) -> dict:
     fase 4 (lista_duvida); a resposta da IA online com certeza e coerente (pela classificação DELA) põe o
     site na lista — e corrige o que a IA local tinha posto sozinha; sem certeza -> Decisões (fase 5),
     a menos que o site já esteja numa lista. Sem IA online: a certeza da IA local basta (como antes).
-    Site posto numa lista por pessoa/migração fica onde está; decisão humana contra -> Decisões."""
+    Site posto numa lista por pessoa/migração fica onde está; com decisão humana "manter liberado" (numa
+    lista que bloqueia alguém), a IA não mexe: decidido uma vez não volta."""
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
@@ -227,12 +228,10 @@ def aplicar(c, limite: int = 3000) -> dict:
         cls = r["cls_online"] if online and r["cls_online"] else r["classification"]
         humano_contra = bool(cat) and cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
 
+        if humano_contra:
+            continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
         if not online and online_ok:   # IA local: espera a validação da IA online
             if not cat or cat in em or fixas:
-                continue
-            if humano_contra:
-                if PARA_REVISAR not in em:
-                    para_decisoes(r, cat)
                 continue
             c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
             out["online"].append((r["name"], cat))
@@ -249,7 +248,7 @@ def aplicar(c, limite: int = 3000) -> dict:
             continue
         if not cat:
             continue
-        if certo and _coerente(cat, cls, r["category"]) and not humano_contra:
+        if certo and _coerente(cat, cls, r["category"]):
             if cat not in em:
                 por = f"{AUTO_BY} ({cat})"
                 c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",

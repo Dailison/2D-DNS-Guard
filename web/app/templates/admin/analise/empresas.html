@@ -10,6 +10,10 @@
   .un input{width:95px;padding:.15rem .35rem;font-size:.8rem}
   .un button{padding:.1rem .35rem;font-size:.75rem}
   .mini{padding:.25rem .5rem;font-size:.8rem}
+  .lchip{display:inline-block;font-size:.72rem;padding:.05rem .45rem;border-radius:999px;background:#fee2e2;color:#7f1d1d;margin:0 .2rem .2rem 0;white-space:nowrap}
+  html[data-theme="dark"] .lchip{background:#4c1d1d;color:#fecaca}
+  #dlgPol .grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.25rem .8rem;margin:.3rem 0 .6rem}
+  #dlgPol label.chk{margin:0;font-weight:400}
 </style>
 
 {% if sem %}
@@ -49,7 +53,7 @@
   <h2>Empresas cadastradas ({{ cadastradas|length }})</h2>
   <p class="mut" style="font-size:.85rem;margin-top:0">Cada consulta DNS é atribuída pela <b>rede mais específica</b> que contém o IP. O roteador de cada site na malha WireGuard (<code>10.100.100.N</code>) conta como da empresa dona de <code>10.N.0.0/16</code>. Mudar uma rede de empresa realoca o histórico daqueles IPs.</p>
   <table class="emp">
-    <thead><tr><th style="min-width:210px">Empresa</th><th>Unidades (nome · CIDR)</th><th class="num">PCs</th><th>Último acesso</th><th></th></tr></thead>
+    <thead><tr><th style="min-width:210px">Empresa</th><th>Unidades (nome · CIDR)</th><th>Listas de bloqueio</th><th class="num">PCs</th><th>Último acesso</th><th></th></tr></thead>
     <tbody>
     {% for t in cadastradas %}
       <tr>
@@ -78,6 +82,14 @@
             <input type="text" name="cidr" placeholder="10.23.0.0/16" class="mini" style="width:140px" required>
             <button class="btn mini">+ unidade</button>
           </form>
+        </td>
+        {% set p = pol.get(t.id) or {} %}
+        <td style="max-width:300px">
+          {% if p.lists %}{% for c in p.lists %}<span class="lchip">{{ dict(cats).get(c, c) }}</span>{% endfor %}
+          {% else %}<span class="mut" style="font-size:.8rem">{{ 'nenhuma (não bloqueia nada)' if p.definida else 'padrão das redes sem cadastro' }}</span>{% endif %}
+          {% if p.services %}<div style="font-size:.75rem;color:#16a34a;margin-top:.15rem">libera: {% for s in p.services %}{{ dict(pacotes).get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+          {% if p.unidades %}<div style="font-size:.75rem;color:var(--mut);margin-top:.15rem">exceção: {{ p.unidades.keys()|join(', ') }}</div>{% endif %}
+          <div><button type="button" class="btn mini" style="margin-top:.25rem" data-pol='{{ {"tid": t.id, "nome": t.name, "unidades": t.networks|map(attribute="unit")|select|unique|list, "pol": p}|tojson }}' onclick="abrirPolitica(this)">Listas…</button></div>
         </td>
         <td class="num">{{ t.clients }}</td>
         <td class="mut" style="white-space:nowrap">{{ t.last_seen|dt_sp }}</td>
@@ -128,4 +140,69 @@ II 10.52.0.0/16"></textarea>
     </form>
   </div>
 </div>
+
+<dialog id="dlgPol" class="dlg" style="max-width:640px;width:calc(100vw - 32px)">
+  <h2 style="margin:0 0 .2rem">Listas de bloqueio — <span id="pNome"></span></h2>
+  <div class="row" style="align-items:flex-end;margin:.3rem 0 .4rem">
+    <div><label>Aplicar a</label><select id="pEscopo"></select></div>
+    <label class="chk" id="pHerdarBox" style="margin:0 0 .45rem;display:none"><input type="checkbox" id="pHerdar"> <span>usar as listas da empresa</span></label>
+  </div>
+  <div id="pCampos">
+    <label style="margin:.2rem 0 0">Bloquear as listas</label>
+    <div class="grade" id="pListas">
+      {% for c, rot in cats %}<label class="chk"><input type="checkbox" value="{{ c }}"> <span>{{ rot }}{{ ' ⚡' if c in cats_risco }}</span></label>{% endfor %}
+    </div>
+    <label style="margin:.2rem 0 0">Liberar como exceção <span class="mut" style="font-weight:400;font-size:.8rem">(vence qualquer lista)</span></label>
+    <div class="grade" id="pServ">
+      {% for k, rot in pacotes %}<label class="chk"><input type="checkbox" value="{{ k }}"> <span>{{ rot }}</span></label>{% endfor %}
+    </div>
+  </div>
+  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = a IA põe os sites sozinha. Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 1 h; as exceções, na hora.</p>
+  <div style="display:flex;gap:.5rem;justify-content:flex-end">
+    <button type="button" onclick="document.getElementById('dlgPol').close()">Cancelar</button>
+    <button type="button" class="primary" id="pSalvar">Salvar e aplicar</button>
+  </div>
+</dialog>
+<script>
+(function () {
+  const dlg = document.getElementById("dlgPol"), esc = document.getElementById("pEscopo");
+  const herdar = document.getElementById("pHerdar"), herdarBox = document.getElementById("pHerdarBox");
+  const URL = {{ url_for('admin.empresa_politica', tid=0)|tojson }};
+  let atual = null;
+  function marca(p) {
+    dlg.querySelectorAll("#pListas input").forEach(i => i.checked = (p.lists || []).includes(i.value));
+    dlg.querySelectorAll("#pServ input").forEach(i => i.checked = (p.services || []).includes(i.value));
+  }
+  function mostra() {
+    const u = esc.value, pu = (atual.pol.unidades || {})[u];
+    herdarBox.style.display = u ? "" : "none";
+    herdar.checked = u ? !pu : false;
+    document.getElementById("pCampos").style.opacity = herdar.checked ? .45 : 1;
+    marca(u && pu ? pu : atual.pol);
+  }
+  window.abrirPolitica = function (btn) {
+    atual = JSON.parse(btn.dataset.pol);
+    document.getElementById("pNome").textContent = atual.nome;
+    esc.textContent = "";
+    const o = document.createElement("option"); o.value = ""; o.textContent = "a empresa inteira"; esc.appendChild(o);
+    (atual.unidades || []).forEach(u => { const x = document.createElement("option"); x.value = u; x.textContent = "só a unidade " + u + ((atual.pol.unidades || {})[u] ? " (exceção)" : ""); esc.appendChild(x); });
+    mostra(); dlg.showModal();
+  };
+  esc.addEventListener("change", mostra);
+  herdar.addEventListener("change", () => { document.getElementById("pCampos").style.opacity = herdar.checked ? .45 : 1; if (herdar.checked) marca(atual.pol); });
+  document.getElementById("pSalvar").addEventListener("click", async (ev) => {
+    const b = ev.target; b.disabled = true;
+    const body = {unidade: esc.value, herdar: herdar.checked,
+      lists: [...dlg.querySelectorAll("#pListas input:checked")].map(i => i.value),
+      services: [...dlg.querySelectorAll("#pServ input:checked")].map(i => i.value)};
+    try {
+      const r = await fetch(URL.replace("/0/", "/" + atual.tid + "/"), {method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(body)});
+      const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+    } catch (e) { alert("Falha ao salvar (sessão expirou?)"); }
+    b.disabled = false;
+  });
+})();
+</script>
 {% endblock %}
+

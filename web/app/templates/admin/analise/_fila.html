@@ -3,7 +3,7 @@
   <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">{% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
   <span class="mut" style="font-size:.85rem"><b id="filaN">0</b> selecionado(s)</span>
   <button type="button" class="mini blk" onclick="filaAcao('bloquear')">Bloquear selecionados…</button>
-  <button type="button" class="mini blk" onclick="filaAcao('todas')" title="bloqueia os selecionados em todas as listas, sem perguntar quais">Bloquear selecionados em todas</button>
+  <button type="button" class="mini blk" onclick="filaAcao('todas')" title="põe cada selecionado na lista da categoria sugerida pela IA">Selecionados na lista sugerida</button>
   <button type="button" class="mini ok" onclick="filaAcao('liberar')">Manter liberados</button>
 </form>
 <div class="tbl"><table>
@@ -23,8 +23,8 @@
       <td class="num">{{ d.total_queries }}</td><td class="num">{{ d.clients_count }}</td>
       <td class="mut" style="white-space:nowrap">{{ d.first_seen|dt_sp }}</td>
       <td style="white-space:nowrap">
-        <button type="button" class="mini blk" data-itens='{{ itens|tojson }}' onclick="abrirBloqueio(this)">Bloquear…</button>
-        <button type="button" class="mini blk" data-itens='{{ itens|tojson }}' onclick="bloquearTodas(this)" title="bloquear em todas as listas">⛔ Todas</button>
+        <button type="button" class="mini blk" data-itens='{{ itens|tojson }}' data-cat="{{ d.category or '' }}" onclick="abrirBloqueio(this)">Bloquear…</button>
+        <button type="button" class="mini blk sug" data-itens='{{ itens|tojson }}' data-cat="{{ d.category or '' }}" onclick="bloquearTodas(this)" title="pôr na lista da categoria sugerida pela IA">⛔ Sugerida</button>
         <form method="post" action="{{ url_for('analise.decisoes_lote') }}" style="display:inline" data-ajax>
           <input type="hidden" name="acao" value="liberar"><input type="hidden" name="voltar" value="{{ request.full_path }}">{% if todos %}<input type="hidden" name="visao" value="todos">{% endif %}
           {% for it in itens %}<input type="hidden" name="itens" value="{{ it }}">{% endfor %}
@@ -43,8 +43,11 @@ function filaTodos(cb) { document.querySelectorAll(".selFila").forEach(function 
 function filaAcao(acao) {
   const itens = [].concat.apply([], filaSel().map(function (c) { return JSON.parse(c.dataset.itens); }));
   if (!itens.length) { alert("Selecione pelo menos um domínio."); return; }
-  if (acao === "bloquear") { abrirBloqueio(itens); return; }
-  if (acao === "todas") { bloquearTodas(itens); return; }
+  const cats = filaSel().map(function (c) { return (c.closest("tr").querySelector("button.sug") || {dataset: {}}).dataset.cat || ""; });
+  if (acao === "bloquear") { window._blqCats = Array.from(new Set(cats)); abrirBloqueio(itens); return; }
+  if (acao === "todas") {
+    bloquearTodas(filaSel().map(function (c, i) { return [cats[i], JSON.parse(c.dataset.itens)]; })); return;
+  }
   if (!confirm("Manter liberados " + filaSel().length + " domínio(s)? Eles saem da fila.")) return;
   const f = document.getElementById("filaLote");
   f.querySelectorAll('input[name="itens"]').forEach(function (i) { i.remove(); });

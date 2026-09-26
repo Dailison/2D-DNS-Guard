@@ -190,6 +190,28 @@
         <div class="flash erro" style="margin:.4rem 0">⚠ Este domínio é <b>infraestrutura protegida</b> (catálogo). Bloqueá-lo pode quebrar sistemas de trabalho (login, atualizações, Office…).</div>
       {% endif %}
 
+      {% set nas = blq.listas|selectattr('entrada', 'equalto', blq.nome)|map(attribute='cat')|list %}
+      <form id="fListas" style="margin:.4rem 0 .6rem" onsubmit="return false">
+        <label style="margin:0">Listas de bloqueio de <code>{{ blq.nome }}</code></label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.2rem .8rem;margin:.3rem 0 .5rem">
+          {% for c, rot in blq.categorias %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" value="{{ c }}" {{ 'checked' if c in nas }}> <span>{{ rot }}{{ ' ⚡' if c in blq.risco }}{% if c == dm.category %} <span class="tag" style="font-size:.68rem">sugerida</span>{% endif %}</span></label>{% endfor %}
+        </div>
+        <button type="button" class="danger" id="bListas">Salvar listas</button>
+        <span class="mut" style="font-size:.8rem;margin-left:.5rem">vale para todas as empresas que aplicam cada lista (no DNS em até 1 h); nenhuma marcada = manter liberado</span>
+      </form>
+      <script>
+      document.getElementById("bListas").addEventListener("click", async (ev) => {
+        const b = ev.target; b.disabled = true;
+        try {
+          const r = await fetch({{ url_for('admin.dominio_listas')|tojson }}, {method: "POST", credentials: "same-origin",
+            headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
+            body: JSON.stringify({dominio: {{ blq.nome|tojson }}, lists: [...document.querySelectorAll("#fListas input:checked")].map(i => i.value)})});
+          const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+        } catch (e) { alert("Falha ao salvar (sessão expirou?)"); }
+        b.disabled = false;
+      });
+      </script>
+      {% if blq.estado %}<p class="mut" style="font-size:.8rem;margin:.2rem 0">Entradas antigas nas listas próprias dos grupos (anteriores às listas por categoria):</p>{% endif %}
       <div class="row" style="align-items:flex-end;gap:.6rem">
         {% if blq.estado %}
         <form method="post" action="{{ url_for('analise.dominio_liberar', nome=dm.name) }}"
@@ -206,7 +228,7 @@
           </div>
         </form>
         {% endif %}
-        {% if not blq.bloqueado_empresa or blq.estado|length < blq.todos|length %}
+        {% if config.get('BLOQUEIO_POR_GRUPO') %}{# bloquear agora = pôr numa lista (acima) #}
         <form method="post" action="{{ url_for('analise.dominio_bloquear', nome=dm.name) }}"
               onsubmit="return confirm('{{ '⚠ INFRAESTRUTURA PROTEGIDA! ' if blq.protegido }}Bloquear {{ blq.nome }} (e todos os subdomínios) no escopo escolhido? Vale para TODAS as empresas de cada grupo.')">
           <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">

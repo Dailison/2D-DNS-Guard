@@ -127,7 +127,10 @@ def bloqueios():
 @admin_bp.get("/grupos")
 @login_required
 def grupos():
-    """Grupos de bloqueio: quais redes/empresas usam cada grupo (networkGroupMap)."""
+    """Tela antiga: grupos agora são internos (um por empresa, mantidos pelas políticas).
+    Quem aplica o quê fica em Empresas e em Listas de bloqueio. ?antigo=1 ainda mostra."""
+    if not request.args.get("antigo"):
+        return redirect(url_for("analise.empresas"))
     if not current_app.config.get("TECHNITIUM_ENABLED"):
         return _sem_technitium()
     from app import empresas as emp
@@ -232,34 +235,21 @@ def _sem_grupo(empresas: list[dict], ngm: dict) -> list[dict]:
 @admin_bp.get("/dominios")
 @login_required
 def dominios():
-    """Domínios: o que cada grupo bloqueia (listas do Advanced Blocking)."""
-    if not current_app.config.get("TECHNITIUM_ENABLED"):
-        return _sem_technitium()
-    nomes, doms = [], []
-    try:
-        nomes = dnslib.grupos_bloqueio()
-    except Exception as e:  # noqa: BLE001
-        flash(f"Não foi possível consultar o Technitium: {e}", "erro")
-    grupo = (request.args.get("grupo") or (nomes[0] if nomes else "")).strip()
-    q = (request.args.get("q") or "").strip()
-    qg = (request.args.get("qg") or "").strip()
-    total, limite = 0, 1000
-    if grupo:
-        try:
-            doms = dnslib.bloqueados(grupo, q or None) or []
-            total = len(doms)
-            doms = doms[:limite]  # cap p/ não travar a tela (listas com dezenas de milhares)
-        except Exception as e:  # noqa: BLE001
-            flash(f"Falha ao listar bloqueios: {e}", "erro")
-    globais, globais_total, globais_cap = [], 0, False
-    if qg:
-        try:
-            globais, globais_total, globais_cap = dnslib.buscar_em_todos(qg)
-        except Exception as e:  # noqa: BLE001
-            flash(f"Falha na busca global: {e}", "erro")
-    return render_template("admin/dominios.html", grupos=nomes, grupo=grupo, q=q, doms=doms, total=total,
-                           limite=limite, qg=qg, globais=globais, globais_total=globais_total,
-                           globais_cap=globais_cap)
+    """Domínios: em quais listas de bloqueio cada domínio está (busca em todas + editor)."""
+    q = (request.args.get("q") or request.args.get("qg") or "").strip().lower()
+    achados, cap = {}, False
+    if q and current_app.config.get("ANALYZER_ENABLED"):
+        for c, _ in dnslib.CATEGORIAS_LISTA:
+            try:
+                for r in api.get(f"/listas/{quote(c, safe='')}", q=q, limit=500):
+                    achados.setdefault(r["domain"], []).append(c)
+            except AnalyzerError as e:
+                flash(f"Falha ao buscar na lista {c}: {e}", "erro")
+                break
+        cap = len(achados) > 500
+    linhas = sorted(achados.items())[:500]
+    return render_template("admin/dominios.html", q=q, linhas=linhas, cap=cap, categorias=dnslib.CATEGORIAS_LISTA,
+                           cats_risco=sorted(dnslib.CATEGORIAS_RISCO))
 
 
 @admin_bp.post("/bloqueios/add")
@@ -461,6 +451,14 @@ def bloqueios_rem_todos():
     voltar = (request.form.get("voltar") or "").strip()
     try:
         rem, gruposaf = dnslib.rem_dominios_todos(doms)
+        try:   # listas de bloqueio por categoria (+ decisão 'manter liberado')
+            nl = api.post("/listas-remover", {"domains": doms}).get("removidos", 0)
+            if nl:
+                rem, gruposaf = rem + nl, gruposaf + nl
+                for d in doms:
+                    _decisao_global(d, "allowed")
+        except AnalyzerError:
+            pass
         if rem == 0:
             flash("Nenhum domínio removido.", "erro")
         else:
@@ -788,12 +786,27 @@ def listas_categoria():
         itens = api.get(f"/listas/{quote(cat, safe='')}", q=q or None, limit=2000)
     except AnalyzerError as e:
         flash(f"Falha ao carregar as listas: {e}", "erro")
+    from app import empresas as emp
+    from app import politicas as pol
+    sugestoes, empresas_pol, default_tem = [], [], False
     try:
-        ass = dnslib.assinantes() if current_app.config.get("TECHNITIUM_ENABLED") else {}
-    except Exception as e:  # noqa: BLE001
-        flash(f"Não foi possível consultar o Technitium: {e}", "erro")
+        if cat in ("redes_sociais", "streaming", "publicidade", "compras", "noticias"):
+            sugestoes = api.get(f"/listas/{quote(cat, safe='')}/sugestoes", limit=300)
+        por = pol.por_escopo()
+        default_tem = cat in ((por.get("default") or {}).get("lists") or [])
+        for e in emp.lista():
+            if e.get("auto_created"):
+                continue
+            p = por.get(f"tenant:{e['id']}") or {}
+            unid = [s.split(":", 2)[2] for s, v in por.items()
+                    if s.startswith(f"unit:{e['id']}:") and cat in (v.get("lists") or [])]
+            empresas_pol.append({"id": e["id"], "nome": e["name"], "tem": cat in (p.get("lists") or []), "unidades": unid})
+    except AnalyzerError as e:
+        flash(f"Falha ao carregar políticas/sugestões: {e}", "erro")
+    empresas_pol.sort(key=lambda x: x["nome"].lower())
     return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, itens=itens,
-                           assinantes=ass, categorias=dnslib.CATEGORIAS_LISTA)
+                           categorias=dnslib.CATEGORIAS_LISTA, sugestoes=sugestoes, empresas_pol=empresas_pol,
+                           default_tem=default_tem)
 
 
 def _tirar_da_lista(cat: str, dominio: str) -> None:
@@ -906,5 +919,89 @@ def grupos_api_pacotes():
         current_app.logger.info("DNS: %s: grupo %s libera %s", admin_atual().email, grupo, lib)
         return _json(True, f"{grupo}: libera " + (", ".join(dnslib.PACOTES[k][0] for k in lib) if lib else "nenhum serviço"),
                      pacotes=lib)
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
+# ------------------------------------------------- Políticas: empresa <-> listas (modais)
+@admin_bp.post("/empresas/<int:tid>/politica")
+@login_required
+def empresa_politica(tid):
+    """Modal da empresa: listas + serviços liberados da empresa inteira ou de uma unidade
+    (exceção). herdar=true numa unidade = volta a valer a da empresa."""
+    from app import politicas as pol
+    d = request.get_json(silent=True) or {}
+    unidade = (d.get("unidade") or "").strip()
+    scope = f"unit:{tid}:{unidade}" if unidade else f"tenant:{tid}"
+    try:
+        if unidade and d.get("herdar"):
+            api.delete(f"/policies/{quote(scope, safe='')}")
+        else:
+            api.put(f"/policies/{quote(scope, safe='')}", {"lists": d.get("lists") or [], "services": d.get("services") or [],
+                                                           "by": admin_atual().email})
+        r = pol.sincronizar()
+        current_app.logger.info("DNS: %s: política %s = %s / %s", admin_atual().email, scope, d.get("lists"), d.get("services"))
+        return _json(True, "Salvo e aplicado no DNS (listas valem em até 1 h; exceções na hora).", redes=r["redes"])
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
+@admin_bp.post("/listas-categoria/empresas")
+@login_required
+def lista_empresas():
+    """Modal da lista: quais empresas (e o default) aplicam esta lista."""
+    from app import empresas as emp
+    from app import politicas as pol
+    d = request.get_json(silent=True) or {}
+    cat = (d.get("cat") or "").strip()
+    if cat not in dict(dnslib.CATEGORIAS_LISTA):
+        return _json(False, "lista inválida")
+    quer = {int(x) for x in d.get("tenants") or []}
+    try:
+        atual = pol.por_escopo()
+        mudou = 0
+        alvos = [(f"tenant:{e['id']}", e["id"] in quer) for e in emp.lista() if not e.get("auto_created")]
+        alvos.append(("default", bool(d.get("default"))))
+        for scope, liga in alvos:
+            p = atual.get(scope) or {}
+            ls = set(p.get("lists") or [])
+            novo = ls | {cat} if liga else ls - {cat}
+            if novo != ls and (p or liga):
+                api.put(f"/policies/{quote(scope, safe='')}", {"lists": sorted(novo), "services": p.get("services") or [],
+                                                               "by": admin_atual().email})
+                mudou += 1
+        r = pol.sincronizar() if mudou else {"redes": None}
+        current_app.logger.info("DNS: %s: lista %s -> empresas %s (default=%s)", admin_atual().email, cat, sorted(quer), d.get("default"))
+        return _json(True, f"{mudou} política(s) alterada(s) e aplicadas no DNS." if mudou else "Nada mudou.")
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
+@admin_bp.post("/dominios/listas")
+@login_required
+def dominio_listas():
+    """Em quais listas o domínio fica (Domínios / Decisões / página do domínio). Nenhuma lista =
+    decisão 'manter liberado'; alguma = decisão 'bloquear' (sai da fila)."""
+    d = request.get_json(silent=True) or {}
+    doms = [x.strip().lower().rstrip(".") for x in (d.get("dominios") or [d.get("dominio") or ""]) if x and x.strip()]
+    quer = [c for c in d.get("lists") or [] if c in dict(dnslib.CATEGORIAS_LISTA)]
+    if not doms:
+        return _json(False, "informe o domínio")
+    try:
+        todas = [c for c, _ in dnslib.CATEGORIAS_LISTA]
+        fora = [c for c in todas if c not in quer]
+        if d.get("so_adicionar"):
+            fora = []
+        if fora:
+            api.post("/listas-remover", {"domains": doms, "cats": fora})
+        if quer:
+            api.post("/listas-lote", {"domains": doms, "cats": quer, "by": admin_atual().email})
+        for x in doms:
+            _decisao_global(x, "blocked" if quer else "allowed")
+        rot = dict(dnslib.CATEGORIAS_LISTA)
+        current_app.logger.info("DNS: %s: %s -> listas %s", admin_atual().email, doms, quer)
+        alvo = doms[0] if len(doms) == 1 else f"{len(doms)} domínios"
+        return _json(True, f"{alvo}: " + (", ".join(rot[c] for c in quer) if quer else "fora de todas as listas (manter liberado)")
+                     + ". O DNS atualiza em até 1 h.")
     except Exception as e:  # noqa: BLE001
         return _json(False, f"Falha: {e}")

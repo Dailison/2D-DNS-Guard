@@ -270,7 +270,7 @@ def grupo_da_rede(cidr, ngm):
 CATEGORIAS_LISTA = [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("adulto", "Conteúdo adulto"),
                     ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
                     ("streaming", "Vídeo e streaming"), ("publicidade", "Publicidade e rastreamento"),
-                    ("compras", "Compras"), ("noticias", "Notícias")]
+                    ("compras", "Compras"), ("noticias", "Notícias"), ("outros_bloqueios", "Outros bloqueios")]
 CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "adulto", "apostas", "jogos"}   # bloqueio automático
 
 # Serviços que uma política pode LIBERAR como exceção (vai p/ o "allowed" do grupo, que vence
@@ -936,3 +936,90 @@ def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
             break
         page += 1
     return linhas, scanned, (len(linhas) >= limite or scanned >= scan_max)
+
+
+# ------------------------------------------------ políticas por empresa -> grupos internos
+# O usuário vincula LISTAS às empresas (e, se precisar, a uma unidade); o Technitium só aceita
+# UM grupo por rede, então o console mantém sozinho um grupo por política: "Empresa: <nome>"
+# (ou "Empresa: <nome> · <unidade>"). Ninguém edita esses grupos à mão.
+PREFIXO_GRUPO = "Empresa: "
+
+
+def nome_grupo(empresa: str, unidade: str | None = None) -> str:
+    return PREFIXO_GRUPO + empresa + (f" · {unidade}" if unidade else "")
+
+
+def plano_politicas(empresas, politicas):
+    """-> (grupos {nome: {"lists", "services"}}, mapa {cidr: grupo}, default {"lists","services"}).
+    Rede de empresa sem política (nem da unidade nem da empresa) fica sem mapeamento: vale o default."""
+    pol = {p["scope"]: p for p in politicas}
+    grupos, mapa = {}, {}
+    for e in empresas:
+        pe = pol.get(f"tenant:{e['id']}")
+        for n in e.get("networks") or []:
+            cidr = norm_ip(n.get("cidr"))
+            if not cidr:
+                continue
+            unidade = n.get("unit") or ""
+            pu = pol.get(f"unit:{e['id']}:{unidade}") if unidade else None
+            p, nome = (pu, nome_grupo(e["name"], unidade)) if pu else (pe, nome_grupo(e["name"]))
+            if not p:
+                continue
+            grupos[nome] = {"lists": sorted(p.get("lists") or []), "services": sorted(p.get("services") or [])}
+            mapa[cidr] = nome
+    d = pol.get("default") or {}
+    return grupos, mapa, {"lists": sorted(d.get("lists") or []), "services": sorted(d.get("services") or [])}
+
+
+def _aplica_politica(g, lists, services):
+    outras = [u for u in (g.get("blockListUrls") or []) if not _LISTA_RE.search(str(u))]
+    g["blockListUrls"] = outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(lists)]
+    todos = {d for _, doms in PACOTES.values() for d in doms}
+    manuais = [x for x in g.get("allowed") or [] if x.lower() not in todos]
+    g["allowed"] = sorted(set(manuais) | {d for k in services if k in PACOTES for d in PACOTES[k][1]})
+
+
+def sincronizar_politicas(empresas, politicas, aplicar=True):
+    """Deixa o Technitium igual às políticas: cria/atualiza/apaga os grupos "Empresa: …", aponta
+    as redes das empresas para eles e aplica a política default no grupo default. Não mexe no
+    grupo Liberados nem em redes/IPs mapeados para ele. Retorna um resumo do que mudou."""
+    cfg = _get_config()
+    grupos, mapa, default = plano_politicas(empresas, politicas)
+    lib = current_app.config.get("TECHNITIUM_LIBERADOS_GROUP", "Liberados")
+    existentes = {g.get("name"): g for g in cfg.get("groups", [])}
+    criados, atualizados, apagados = [], [], []
+    for nome, p in grupos.items():
+        g = existentes.get(nome)
+        if g is None:
+            g = {"name": nome, "enableBlocking": True, "allowTxtBlockingReport": True, "blockAsNxDomain": False,
+                 "blockingAddresses": (existentes.get("default") or {}).get("blockingAddresses", ["0.0.0.0", "::"]),
+                 "allowed": [], "blocked": [], "allowListUrls": [], "blockListUrls": [],
+                 "allowedRegex": [], "blockedRegex": [], "regexAllowListUrls": [], "regexBlockListUrls": [],
+                 "adblockListUrls": []}
+            cfg.setdefault("groups", []).append(g)
+            criados.append(nome)
+        else:
+            atualizados.append(nome)
+        g["enableBlocking"] = True
+        _aplica_politica(g, p["lists"], p["services"])
+    if "default" in existentes:
+        _aplica_politica(existentes["default"], default["lists"], default["services"])
+    ngm = cfg.setdefault("networkGroupMap", {})
+    for k in list(ngm):
+        v = ngm[k]
+        if v == lib:
+            continue                      # isenções (Liberados) ficam como estão
+        if norm_ip(k) in mapa or (str(v).startswith(PREFIXO_GRUPO) and v not in grupos):
+            del ngm[k]                    # será reapontado (ou o grupo da empresa deixou de existir)
+    for cidr, nome in mapa.items():
+        if ngm.get(cidr) != lib:
+            ngm[cidr] = nome
+    for g in list(cfg.get("groups", [])):
+        n = g.get("name") or ""
+        if n.startswith(PREFIXO_GRUPO) and n not in grupos:
+            cfg["groups"].remove(g)
+            apagados.append(n)
+    if aplicar:
+        _set_config(cfg)
+    return {"criados": criados, "atualizados": atualizados, "apagados": apagados, "redes": len(mapa),
+            "default": default, "cfg": cfg}

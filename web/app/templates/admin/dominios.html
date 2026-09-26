@@ -1,168 +1,75 @@
 {% extends "base.html" %}
 {% block title %}Domínios{% endblock %}
 {% block content %}
-<h1>Domínios <span class="mut" style="font-size:.8rem">· o que cada grupo bloqueia (Technitium)</span></h1>
+{% set rot = dict(categorias) %}
+<style>
+  .lchip{display:inline-block;font-size:.74rem;padding:.05rem .5rem;border-radius:999px;background:#fee2e2;color:#7f1d1d;margin:0 .2rem .2rem 0;white-space:nowrap}
+  html[data-theme="dark"] .lchip{background:#4c1d1d;color:#fecaca}
+  #dlgDom .grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.25rem .8rem;margin:.4rem 0 .7rem}
+  #dlgDom label.chk{margin:0;font-weight:400}
+  dialog.dlg{border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;background:var(--card);color:var(--txt)} dialog.dlg::backdrop{background:rgba(15,23,42,.45)}
+</style>
+<h1>Domínios <span class="mut" style="font-size:.8rem">· em quais listas de bloqueio cada domínio está</span></h1>
 <div class="card">
-  <form method="get" class="row" style="align-items:flex-end">
-    <div><label>Grupo</label>
-      <select name="grupo" onchange="this.form.submit()">
-        {% for g in grupos %}<option value="{{ g }}" {{ 'selected' if grupo==g }}>{{ g }}</option>{% endfor %}
-      </select></div>
-    <div class="mut" style="font-size:.85rem">Selecione o grupo para ver e editar os domínios que ele bloqueia. Quem usa cada grupo fica em <a href="{{ url_for('admin.grupos', grupo=grupo) }}">Grupos</a>. Jogos, apostas, adulto, VPN/proxy e ameaças ficam nas <a href="{{ url_for('admin.listas_categoria') }}"><b>listas por categoria</b></a> (bloqueio automático).</div>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Buscar em todas as listas <span class="mut" style="font-size:.8rem">· e remover de todos os grupos de uma vez</span></h2>
-  <form method="get" class="row" style="align-items:flex-end">
-    <div style="flex:1"><label>Domínio (contém) em qualquer grupo</label><input type="text" name="qg" value="{{ qg }}" placeholder="ex.: msftconnecttest.com"></div>
-    <div style="flex:0"><button class="primary">Buscar em todas</button></div>
-  </form>
-  {% if qg %}
-    <p class="mut" style="font-size:.85rem;margin:.6rem 0 .4rem">
-      {{ globais_total }} domínio(s) encontrados{% if globais_cap %} — mostrando os primeiros {{ globais|length }}; refine a busca{% endif %}.
-    </p>
-    {% if globais %}
-    <form id="gbulk" method="post" action="{{ url_for('admin.bloqueios_rem_todos') }}" onsubmit="return gconfirm()">
-      <input type="hidden" name="qg" value="{{ qg }}">
+  <div class="row" style="align-items:flex-end;gap:1rem">
+    <form method="get" class="row" style="align-items:flex-end;flex:1;margin:0">
+      <div style="flex:1"><label>Buscar em todas as listas (contém)</label><input type="text" name="q" value="{{ q }}" placeholder="ex.: tiktok, bet, .xyz"></div>
+      <div style="flex:0"><button class="primary">Buscar</button></div>
     </form>
-    <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
-      <label class="chk" style="margin:0"><input type="checkbox" id="gall" onclick="gtoggle(this)"> Selecionar todos</label>
-      <span class="mut" style="font-size:.85rem"><b id="gcount">0</b> selecionado(s)</span>
-      <button form="gbulk" class="danger" id="gbtn" disabled style="margin-left:auto">Remover selecionados de TODAS as listas</button>
+    <div class="row" style="align-items:flex-end;flex:1;margin:0">
+      <div style="flex:1"><label>Editar as listas de um domínio (inclusive novo)</label><input type="text" id="novoDom" placeholder="ex.: site-qualquer.com"></div>
+      <div style="flex:0"><button type="button" class="primary" onclick="abrirDom(document.getElementById('novoDom').value, [])">Editar</button></div>
     </div>
-    <table>
-      <thead><tr><th style="width:1.4rem"></th><th>Domínio</th><th>Bloqueado em (clique no ✕ p/ tirar só daquele)</th><th></th></tr></thead>
-      <tbody>
-      {% for d, grs in globais %}
-        <tr>
-          <td><input type="checkbox" form="gbulk" name="dominios" value="{{ d }}" class="gchk" onclick="gupd()"></td>
-          <td><code>{{ d }}</code></td>
-          <td>
-            {% for gr in grs %}
-              <form method="post" action="{{ url_for('admin.bloqueios_rem') }}" style="display:inline-block;margin:0 .25rem .25rem 0"
-                    onsubmit="return confirm('Remover {{ d }} SÓ do grupo {{ gr }}?')">
-                <input type="hidden" name="grupo" value="{{ gr }}"><input type="hidden" name="dominio" value="{{ d }}"><input type="hidden" name="qg" value="{{ qg }}">
-                <button class="btn" style="padding:.15rem .5rem;font-size:.8rem;box-shadow:none;background:#eef1f6;color:var(--navy)">{{ gr }} ✕</button>
-              </form>
-            {% endfor %}
-          </td>
-          <td style="text-align:right;white-space:nowrap">
-            <form method="post" action="{{ url_for('admin.bloqueios_rem_todos') }}" style="display:inline"
-                  onsubmit="return confirm('Remover {{ d }} de TODAS as listas ({{ grs|length }})?')">
-              <input type="hidden" name="dominios" value="{{ d }}"><input type="hidden" name="qg" value="{{ qg }}">
-              <button class="danger">Remover de todas</button>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    <script>
-      function gChecks(){ return Array.prototype.slice.call(document.querySelectorAll('.gchk')); }
-      function gupd(){
-        var chks=gChecks(), sel=chks.filter(function(x){return x.checked;}).length;
-        var c=document.getElementById('gcount'); if(c) c.textContent=sel;
-        var b=document.getElementById('gbtn'); if(b) b.disabled=(sel===0);
-        var a=document.getElementById('gall'); if(a){ a.checked=sel>0&&sel===chks.length; a.indeterminate=sel>0&&sel<chks.length; }
-      }
-      function gtoggle(cb){ gChecks().forEach(function(x){x.checked=cb.checked;}); gupd(); }
-      function gconfirm(){
-        var sel=gChecks().filter(function(x){return x.checked;}).length;
-        if(!sel) return false;
-        return confirm('Remover '+sel+' domínio(s) selecionado(s) de TODAS as listas? Não pode ser desfeito.');
-      }
-    </script>
-    {% endif %}
-  {% endif %}
+  </div>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">O domínio bloqueia também todos os subdomínios. Quem aplica cada lista fica em <a href="{{ url_for('admin.listas_categoria') }}">Listas de bloqueio</a> e em <a href="{{ url_for('analise.empresas') }}">Empresas</a>. As listas valem no DNS em até 1 h.</p>
 </div>
-
-{% if grupo %}
+{% if q %}
 <div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
-    <h2 style="margin:.2rem 0 .8rem">Adicionar bloqueios em <b>{{ grupo }}</b></h2>
-    {% if doms %}
-    <form method="post" action="{{ url_for('admin.bloqueios_limpar') }}" onsubmit="return confirm('Limpar TODA a lista de bloqueios de {{ grupo }} ({{ doms|length }} domínios)? Não afeta as redes atribuídas nem outros grupos.')">
-      <input type="hidden" name="grupo" value="{{ grupo }}">
-      <button class="danger">Limpar lista</button>
-    </form>
-    {% endif %}
-  </div>
-  <form method="post" action="{{ url_for('admin.bloqueios_add') }}" enctype="multipart/form-data">
-    <input type="hidden" name="grupo" value="{{ grupo }}">
-    <label>Domínios (um por linha)</label>
-    <textarea name="dominios" rows="4" style="width:100%;font-family:monospace" placeholder="exemplo.com&#10;outrosite.com.br&#10;# aceita formato hosts (0.0.0.0 dominio) e comentários"></textarea>
-    <div class="row" style="align-items:flex-end;margin-top:.5rem">
-      <div><label>…ou importar de um arquivo .txt</label><input type="file" name="arquivo" accept=".txt,text/plain"></div>
-      <div><label>…ou trazer de outro grupo (soma à lista)</label>
-        <select name="de_grupo">
-          <option value="">—</option>
-          {% for g in grupos %}{% if g != grupo %}<option value="{{ g }}">{{ g }}</option>{% endif %}{% endfor %}
-        </select></div>
-      <div style="flex:0"><button class="primary">Adicionar</button></div>
-    </div>
-  </form>
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">Bloquear <code>exemplo.com</code> cobre também os subdomínios. Duplicados são ignorados. Você pode combinar texto, arquivo e um grupo de origem numa mesma adição. Aceita lista simples, formato hosts (<code>0.0.0.0 dominio</code>) e adblock (<code>||dominio^</code>).</p>
-</div>
-
-<div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;margin-bottom:.6rem">
-    <h2 style="margin:0">{{ total }} domínio(s){% if q %} (filtro: “{{ q }}”){% endif %}</h2>
-    <form method="get"><input type="hidden" name="grupo" value="{{ grupo }}"><input type="text" name="q" value="{{ q }}" placeholder="buscar domínio"></form>
-  </div>
-  {% if total > limite %}
-  <p class="mut" style="font-size:.85rem;margin:.2rem 0 .6rem;background:#fef9c3;color:#854d0e;padding:.5rem .7rem;border-radius:8px">
-    Mostrando os primeiros <b>{{ limite }}</b> de <b>{{ total }}</b>. Use a busca acima para achar/remover domínios específicos, ou <b>Limpar lista</b> para esvaziar o grupo inteiro.
-  </p>
-  {% endif %}
-  {% if doms %}
-  {# form de remoção em massa: fica fora da tabela; os checkboxes se associam via atributo form= #}
-  <form id="bulkrem" method="post" action="{{ url_for('admin.bloqueios_rem_varios') }}" onsubmit="return confirmBulk()">
-    <input type="hidden" name="grupo" value="{{ grupo }}">
-    <input type="hidden" name="q" value="{{ q }}">
-  </form>
-  <div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.5rem">
-    <label class="chk" style="margin:0"><input type="checkbox" id="chkall" onclick="toggleAll(this)"> Selecionar todos{% if q %} (filtrados){% endif %}</label>
-    <span class="mut" style="font-size:.85rem"><b id="selcount">0</b> de {{ doms|length }} selecionado(s)</span>
-    <button form="bulkrem" class="danger" id="bulkbtn" disabled style="margin-left:auto">Remover selecionados</button>
-  </div>
-  {% endif %}
+  <h2>{{ linhas|length }} domínio(s) com “{{ q }}”{% if cap %} <span class="mut" style="font-size:.8rem">· mostrando os primeiros 500; refine a busca</span>{% endif %}</h2>
   <table>
-    <thead><tr><th style="width:1.4rem"></th><th>Domínio bloqueado</th><th></th></tr></thead>
+    <thead><tr><th>Domínio</th><th>Listas</th><th></th></tr></thead>
     <tbody>
-    {% for d in doms %}
-      <tr>
-        <td><input type="checkbox" form="bulkrem" name="dominios" value="{{ d }}" class="rowchk" onclick="updateCount()"></td>
-        <td><code>{{ d }}</code></td>
-        <td style="text-align:right">
-          <form method="post" action="{{ url_for('admin.bloqueios_rem') }}" style="display:inline" onsubmit="return confirm('Desbloquear {{ d }} em {{ grupo }}?')">
-            <input type="hidden" name="grupo" value="{{ grupo }}"><input type="hidden" name="q" value="{{ q }}">
-            <input type="hidden" name="dominio" value="{{ d }}">
-            <button class="danger">Remover</button>
-          </form>
-        </td>
-      </tr>
+    {% for d, cs in linhas %}
+      <tr><td><a href="{{ url_for('analise.dominio', nome=d, t=0) }}">{{ d }}</a></td>
+        <td>{% for c in cs %}<span class="lchip">{{ rot.get(c, c) }}</span>{% endfor %}</td>
+        <td style="text-align:right"><button type="button" class="btn" style="padding:.2rem .6rem;font-size:.8rem" data-d="{{ d }}" data-cs='{{ cs|tojson }}' onclick="abrirDom(this.dataset.d, JSON.parse(this.dataset.cs))">Editar listas</button></td></tr>
     {% else %}
-      <tr><td colspan="3" class="mut">Nenhum domínio{% if q %} no filtro{% endif %}.</td></tr>
+      <tr><td colspan="3" class="mut">Nenhum domínio com “{{ q }}” nas listas.</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
-<script>
-  function rowChecks(){ return Array.prototype.slice.call(document.querySelectorAll('.rowchk')); }
-  function updateCount(){
-    var chks = rowChecks(), sel = chks.filter(function(x){ return x.checked; }).length;
-    var cnt = document.getElementById('selcount'); if (cnt) cnt.textContent = sel;
-    var btn = document.getElementById('bulkbtn'); if (btn) btn.disabled = (sel === 0);
-    var all = document.getElementById('chkall');
-    if (all){ all.checked = sel > 0 && sel === chks.length; all.indeterminate = sel > 0 && sel < chks.length; }
-  }
-  function toggleAll(cb){ rowChecks().forEach(function(x){ x.checked = cb.checked; }); updateCount(); }
-  function confirmBulk(){
-    var sel = rowChecks().filter(function(x){ return x.checked; }).length;
-    if (!sel){ return false; }
-    return confirm('Desbloquear ' + sel + ' domínio(s) selecionado(s) em {{ grupo }}? Esta ação não pode ser desfeita.');
-  }
-</script>
 {% endif %}
+<dialog id="dlgDom" class="dlg" style="max-width:600px;width:calc(100vw - 32px)">
+  <h2 style="margin:0 0 .2rem">Listas de <code id="dNome"></code></h2>
+  <div class="grade">
+    {% for c, r in categorias %}<label class="chk"><input type="checkbox" value="{{ c }}"> <span>{{ r }}{{ ' ⚡' if c in cats_risco }}</span></label>{% endfor %}
+  </div>
+  <p class="mut" style="font-size:.8rem;margin:0 0 .6rem">Nenhuma marcada = fora de todas as listas (registrado como “manter liberado”; o bloqueio automático não põe de volta).</p>
+  <div style="display:flex;gap:.5rem;justify-content:flex-end">
+    <button type="button" onclick="document.getElementById('dlgDom').close()">Cancelar</button>
+    <button type="button" class="primary" id="dSalvar">Salvar</button>
+  </div>
+</dialog>
+<script>
+(function () {
+  const dlg = document.getElementById("dlgDom"); let dom = "";
+  window.abrirDom = function (d, cs) {
+    dom = (d || "").trim().toLowerCase().replace(/\.$/, ""); if (!dom) { alert("Informe o domínio."); return; }
+    document.getElementById("dNome").textContent = dom;
+    dlg.querySelectorAll(".grade input").forEach(i => i.checked = (cs || []).includes(i.value));
+    dlg.showModal();
+  };
+  document.getElementById("dSalvar").addEventListener("click", async (ev) => {
+    const b = ev.target; b.disabled = true;
+    try {
+      const r = await fetch({{ url_for('admin.dominio_listas')|tojson }}, {method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
+        body: JSON.stringify({dominio: dom, lists: [...dlg.querySelectorAll(".grade input:checked")].map(i => i.value)})});
+      const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+    } catch (e) { alert("Falha ao salvar (sessão expirou?)"); }
+    b.disabled = false;
+  });
+})();
+</script>
 {% endblock %}

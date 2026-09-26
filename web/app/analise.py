@@ -176,16 +176,8 @@ def _agrupar_fila(fila: list[dict]) -> list[dict]:
 
 
 def _grp_ctx(tenants: list[dict]) -> dict | None:
-    """Dados do diálogo "Bloquear em quais listas?": grupos ativos (com as empresas
-    que usam cada um) e os grupos de cada empresa (pré-seleção)."""
-    idx, _ = _indice_status(None)
-    if idx is None:
-        return None
-    ngm = idx["ngm"]
-    comp = _compartilham(idx["ativos"], ngm, None)
-    esp = grupos_especificos()
-    return {"grupos": [{"nome": g, "empresas": comp.get(g, []), "especifico": g in esp} for g in idx["ativos"]],
-            "por_tenant": {t["id"]: sorted(_grupos_empresa(t, ngm)) for t in tenants}}
+    """Dados do diálogo "Pôr em quais listas?": as listas de bloqueio por categoria."""
+    return {"listas": dnslib.CATEGORIAS_LISTA, "risco": sorted(dnslib.CATEGORIAS_RISCO)}
 
 
 def _site_cats() -> dict[str, dict]:
@@ -299,28 +291,45 @@ def decisoes_lote():
         t, _, n = it.partition("|")
         if n.strip():
             itens.append((int(t) if t.isdigit() else 0, n.strip()))
+    if not itens and acao == "sugerida":
+        itens = [(0, "")]   # os itens vêm em "sug" (categoria|tid|domínio)
     if not itens:
         flash("Nenhum domínio selecionado.", "erro")
         return _fim(voltar)
     todos = request.form.get("visao") == "todos"   # decidido na visão "Todos os clientes"
     try:
+        rot = dict(dnslib.CATEGORIAS_LISTA)
         if acao == "bloquear":
-            ativos = set(dnslib.grupos_ativos(dnslib._get_config()))
-            grupos = [g for g in request.form.getlist("grupos") if g in ativos]
-            if not grupos:
+            listas = [c for c in request.form.getlist("listas") if c in rot]
+            if not listas:
                 flash("Escolha pelo menos uma lista de bloqueio.", "erro")
                 return _fim(voltar)
-            res = dnslib.bloquear_varios_em(grupos, [n for _, n in itens])
+            nomes = list(dict.fromkeys(n for _, n in itens))
+            api.post("/listas-lote", {"cats": listas, "domains": nomes, "by": _quem()})
             for t, n in itens:
                 _registrar_decisao(t, n, "blocked")
             if todos:
-                for n in dict.fromkeys(n for _, n in itens):
+                for n in nomes:
                     _registrar_global(n, "blocked")
-            novos = sum(len(r["adicionados"]) for r in res.values())
-            current_app.logger.info("DNS: %s BLOQUEOU %s em %s (decisão em lote)", _quem(),
-                                    [n for _, n in itens], grupos)
-            flash(f"{len(itens)} domínio(s) bloqueado(s) em: {', '.join(grupos)} ({novos} entrada(s) nova(s)"
-                  + (", o resto já estava bloqueado" if novos < len(itens) * len(grupos) else "") + ").", "ok")
+            current_app.logger.info("DNS: %s pôs %s nas listas %s (decisão em lote)", _quem(), nomes, listas)
+            flash(f"{len(nomes)} domínio(s) nas listas: {', '.join(rot[c] for c in listas)} (vale no DNS em até 1 h).", "ok")
+        elif acao == "sugerida":
+            por_cat: dict[str, list] = {}
+            for s in request.form.getlist("sug"):
+                cat, _, it = s.partition("|")
+                t, _, n = it.partition("|")
+                if cat in rot and n.strip():
+                    por_cat.setdefault(cat, []).append((int(t) if t.isdigit() else 0, n.strip()))
+            for cat, its in por_cat.items():
+                nomes = list(dict.fromkeys(n for _, n in its))
+                api.post("/listas-lote", {"cats": [cat], "domains": nomes, "by": _quem()})
+                for t, n in its:
+                    _registrar_decisao(t, n, "blocked")
+                if todos:
+                    for n in nomes:
+                        _registrar_global(n, "blocked")
+            current_app.logger.info("DNS: %s pôs nas listas sugeridas: %s", _quem(), {c: [n for _, n in v] for c, v in por_cat.items()})
+            flash("Nas listas sugeridas: " + "; ".join(f"{rot[c]} ({len(v)})" for c, v in por_cat.items()) + " — vale no DNS em até 1 h.", "ok")
         elif acao == "liberar":
             for t, n in itens:
                 _registrar_decisao(t, n, "allowed")
@@ -423,6 +432,7 @@ def _bloqueio_ctx(nome_reg: str, tenant: dict | None, evidencias: list) -> dict 
             pass
         return {
             "nome": nome_reg, "estado": estado, "grupos_empresa": g_emp, "listas": listas,
+            "categorias": dnslib.CATEGORIAS_LISTA, "risco": sorted(dnslib.CATEGORIAS_RISCO),
             "compartilham": _compartilham(g_emp.keys(), ngm, (tenant or {}).get("name")),
             "todos": dnslib.grupos_ativos(cfg),
             "especificos": sorted(grupos_especificos()),
@@ -528,8 +538,13 @@ def dominio_liberar(nome):
     tid = request.form.get("tid", type=int)
     dominio_reg = request.form.get("dominio", "")
     try:
-        grupos = _escopo_grupos(request.form.get("escopo", ""), tid, dominio_reg, "liberar")
-        removidas, restam = dnslib.liberar_em(grupos, dominio_reg)
+        escopo = request.form.get("escopo", "")
+        grupos = _escopo_grupos(escopo, tid, dominio_reg, "liberar")
+        removidas, restam = dnslib.liberar_em(grupos, dominio_reg) if grupos else ({}, {})
+        if escopo == "todos":   # listas de bloqueio por categoria valem p/ todas as empresas que as aplicam
+            n = api.post("/listas-remover", {"domains": [dominio_reg]}).get("removidos", 0)
+            if n:
+                removidas = dict(removidas, **{"listas de bloqueio": [f"{n} lista(s)"]})
         current_app.logger.info("DNS: %s LIBEROU %s em %s", _quem(), dominio_reg, removidas)
         if removidas:
             flash(f"{dominio_reg} liberado. Entradas removidas: "
@@ -687,7 +702,18 @@ def clientes():  # nome antigo
 
 @analise_bp.get("/empresas")
 def empresas():
-    return render_template("admin/analise/empresas.html", aba="empresas", **_ctx())
+    from app import politicas as pol
+    ctx = _ctx()
+    resumo, default = {}, {}
+    try:
+        por = pol.por_escopo()
+        resumo = pol.resumo_empresas([t for t in ctx["tenants"] if not t.get("auto_created")], por)
+        default = por.get("default") or {}
+    except AnalyzerError as e:
+        flash(f"Não foi possível carregar as políticas: {e}", "erro")
+    return render_template("admin/analise/empresas.html", aba="empresas", pol=resumo, pol_default=default,
+                           cats=dnslib.CATEGORIAS_LISTA, cats_risco=sorted(dnslib.CATEGORIAS_RISCO),
+                           pacotes=[(k, v[0]) for k, v in dnslib.PACOTES.items()], **ctx)
 
 
 @analise_bp.post("/empresas")

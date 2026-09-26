@@ -1,20 +1,26 @@
 {% extends "base.html" %}
-{% block title %}Listas por categoria{% endblock %}
+{% block title %}Listas de bloqueio{% endblock %}
 {% block content %}
-<h1>Listas por categoria <span class="mut" style="font-size:.8rem">· bloqueio automático + listas assinadas pelos grupos (Technitium)</span></h1>
+<h1>Listas de bloqueio <span class="mut" style="font-size:.8rem">· domínios por categoria · cada empresa aplica as listas que quiser</span></h1>
 {% set rot = dict(categorias) %}
-{% set tot = {} %}{% for x in resumo.categorias %}{% set _ = tot.update({x.categoria: x.total}) %}{% endfor %}
+{% set tot = {} %}{% set tipo = {} %}{% for x in resumo.categorias %}{% set _ = tot.update({x.categoria: x.total}) %}{% set _ = tipo.update({x.categoria: x.tipo}) %}{% endfor %}
 <div class="card">
   <div style="display:flex;flex-wrap:wrap;gap:.4rem">
     {% for c, r in categorias %}
-    <a href="{{ url_for('admin.listas_categoria', cat=c) }}" style="text-decoration:none;padding:.45rem .8rem;border:1px solid {{ 'var(--b)' if c == cat else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if c == cat }}">{{ r }} <span class="mut">({{ tot.get(c, 0) }})</span></a>
+    <a href="{{ url_for('admin.listas_categoria', cat=c) }}" style="text-decoration:none;padding:.45rem .8rem;border:1px solid {{ 'var(--b)' if c == cat else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if c == cat }}">{{ r }}{{ ' ⚡' if tipo.get(c) == 'auto' }} <span class="mut">({{ tot.get(c, 0) }})</span></a>
     {% endfor %}
   </div>
-  <p class="mut" style="font-size:.85rem;margin:.7rem 0 0">
-    <b>Bloqueio automático:</b> {% if resumo.auto %}ligado para {% for c in resumo.auto %}{{ rot.get(c, c) }}{{ ', ' if not loop.last }}{% endfor %} — {{ resumo.auto_24h }} site(s) nas últimas 24 h{% else %}desligado{% endif %}.
-    Entram sozinhos os sites dessas categorias com recomendação <b>Bloquear</b> que ninguém decidiu e que nenhuma empresa ajustou para Trabalho.<br>
-    <b>{{ rot.get(cat, cat) }}</b> é assinada por: {% if assinantes.get(cat) %}<b>{{ assinantes[cat]|join(', ') }}</b>{% else %}<b>nenhum grupo</b> (não bloqueia ninguém){% endif %} — mude em <a href="{{ url_for('admin.grupos') }}">Grupos</a>. O Technitium baixa as listas de novo a cada 1 h.
-  </p>
+  {% set emp_com = empresas_pol|selectattr('tem')|list %}
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-top:.8rem">
+    <p class="mut" style="font-size:.85rem;margin:0;flex:1;min-width:280px">
+      <b>{{ rot.get(cat, cat) }}</b> —
+      {% if tipo.get(cat) == 'auto' %}⚡ a IA põe aqui sozinha os sites desta categoria com recomendação <b>Bloquear</b> ({{ resumo.auto_24h }} site(s) nas últimas 24 h em todas as listas automáticas); dá para adicionar e tirar à mão.
+      {% elif tipo.get(cat) == 'curada' %}lista <b>curada</b>: só entra o que uma pessoa confirma. A IA sugere abaixo.
+      {% else %}lista manual (o que foi bloqueado à mão e não cabe numa categoria).{% endif %}
+      <br>Aplicada em: {% if emp_com %}<b>{{ emp_com|map(attribute='nome')|join(', ') }}</b>{% else %}<b>nenhuma empresa</b>{% endif %}{% if default_tem %} + <b>redes sem cadastro</b>{% endif %}. O DNS baixa as listas de novo a cada 1 h.
+    </p>
+    <button type="button" class="primary" onclick="document.getElementById('dlgEmp').showModal()">Empresas…</button>
+  </div>
 </div>
 
 <div class="card">
@@ -55,4 +61,51 @@
     </tbody>
   </table>
 </div>
+{% if sugestoes %}
+<div class="card">
+  <h2>Sugestões da IA para {{ rot.get(cat, cat) }} <span class="mut" style="font-size:.8rem">· {{ sugestoes|length }} site(s) classificados nesta categoria que ainda não estão na lista</span></h2>
+  <table>
+    <thead><tr><th>Domínio</th><th class="num">Consultas</th><th>Motivo</th><th></th></tr></thead>
+    <tbody>
+    {% for x in sugestoes %}
+      <tr><td><a href="{{ url_for('analise.dominio', nome=x.domain, t=0) }}">{{ x.domain }}</a></td>
+        <td class="num">{{ x.total_queries }}</td><td class="mut" style="font-size:.82rem">{{ x.corp_reason or '—' }}</td>
+        <td style="white-space:nowrap"><form method="post" action="{{ url_for('admin.listas_categoria_add') }}" style="display:inline">
+          <input type="hidden" name="cat" value="{{ cat }}"><input type="hidden" name="dominio" value="{{ x.domain }}">
+          <button class="danger" style="padding:.15rem .5rem;font-size:.78rem">+ pôr na lista</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+<dialog id="dlgEmp" class="dlg" style="max-width:560px;width:calc(100vw - 32px)">
+  <h2 style="margin:0 0 .3rem">Quem aplica a lista {{ rot.get(cat, cat) }}</h2>
+  <div style="max-height:55vh;overflow:auto;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:.3rem 0">
+    <label class="chk" style="margin:.2rem 0;font-weight:600"><input type="checkbox" id="eDefault" {{ 'checked' if default_tem }}> <span>Redes sem cadastro (padrão)</span></label>
+    {% for e in empresas_pol %}
+    <label class="chk" style="margin:.2rem 0;font-weight:400"><input type="checkbox" class="eTid" value="{{ e.id }}" {{ 'checked' if e.tem }}> <span>{{ e.nome }}{% if e.unidades %} <span class="mut" style="font-size:.78rem">(também na exceção de: {{ e.unidades|join(', ') }})</span>{% endif %}</span></label>
+    {% endfor %}
+  </div>
+  <div style="display:flex;gap:.5rem;justify-content:space-between;margin-top:.7rem;flex-wrap:wrap">
+    <div style="display:flex;gap:.3rem"><button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid').forEach(c=>c.checked=true)">Marcar todas</button>
+      <button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid').forEach(c=>c.checked=false)">Desmarcar todas</button></div>
+    <div style="display:flex;gap:.5rem"><button type="button" onclick="document.getElementById('dlgEmp').close()">Cancelar</button>
+      <button type="button" class="primary" id="eSalvar">Salvar e aplicar</button></div>
+  </div>
+</dialog>
+<style>dialog.dlg{border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;background:var(--card);color:var(--txt)} dialog.dlg::backdrop{background:rgba(15,23,42,.45)} .mini{padding:.25rem .5rem;font-size:.8rem}</style>
+<script>
+document.getElementById("eSalvar").addEventListener("click", async (ev) => {
+  const b = ev.target; b.disabled = true;
+  const body = {cat: {{ cat|tojson }}, default: document.getElementById("eDefault").checked,
+                tenants: [...document.querySelectorAll("#dlgEmp .eTid:checked")].map(c => +c.value)};
+  try {
+    const r = await fetch({{ url_for('admin.lista_empresas')|tojson }}, {method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(body)});
+    const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+  } catch (e) { alert("Falha ao salvar (sessão expirou?)"); }
+  b.disabled = false;
+});
+</script>
 {% endblock %}
+

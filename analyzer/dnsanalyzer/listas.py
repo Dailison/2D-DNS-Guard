@@ -105,7 +105,7 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
 # ------------------------------------------------------------------ detalhes p/ o console
 # O que a IA achou de cada domínio + se alguém já revisou à mão. "manual" = classificação travada,
 # decisão (global ou de empresa), ajuste de empresa ou entrada posta na lista por um operador.
-_ORIGEM_NAO_MANUAL = (AUTO_BY, "IA automática", "IA com dúvida", "migração", "serviço ", "catálogo", "classificação da IA")
+_ORIGEM_NAO_MANUAL = (AUTO_BY, "IA automática", "IA com dúvida", "IA sem certeza", "migração", "serviço ", "catálogo", "classificação da IA")
 DETALHE_SQL = (
     "SELECT d.name AS domain, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
     " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "
@@ -188,10 +188,26 @@ def _filtrar_paginar(rows: list[dict], q=None, cls=None, cat_ia=None, revisao=No
     return {"total": len(sel), "total_geral": len(rows), "items": sel[offset:offset + limit], "facetas": fac}
 
 
-def detalhes(c, cat: str, **filtros) -> dict:
-    """Itens de uma lista de bloqueio com a classificação da IA e o estado da revisão manual."""
+def _empresas(c, nomes: list[str]) -> dict[str, list[dict]]:
+    """{domínio: [{id, name}]} das empresas que acessaram (mais consultas primeiro)."""
+    out: dict[str, list[dict]] = {}
+    for r in c.execute("SELECT d.name AS dom, t.id, t.name FROM tenant_domains td JOIN domains d ON d.id = td.domain_id "
+                       "JOIN tenants t ON t.id = td.tenant_id WHERE d.name = ANY(%s) ORDER BY td.total_queries DESC", (nomes,)):
+        out.setdefault(r["dom"], []).append({"id": r["id"], "name": r["name"]})
+    return out
+
+
+def detalhes(c, cat: str, tid: int | None = None, **filtros) -> dict:
+    """Itens de uma lista de bloqueio com a classificação da IA, o estado da revisão manual e as
+    empresas que acessaram (tid = só os acessados por aquela empresa)."""
     rows = c.execute("SELECT domain, added_by, added_at FROM category_lists WHERE category=%s", (cat,)).fetchall()
-    return _filtrar_paginar(_detalhar(c, rows), **filtros)
+    emp = _empresas(c, [r["domain"] for r in rows])
+    if tid:
+        rows = [r for r in rows if any(e["id"] == tid for e in emp.get(r["domain"], []))]
+    rows = _detalhar(c, rows)
+    for r in rows:
+        r["empresas"] = emp.get(r["domain"], [])
+    return _filtrar_paginar(rows, **filtros)
 
 
 def _em_lista(nome: str, conjunto: set[str]) -> bool:

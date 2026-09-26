@@ -227,9 +227,9 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     cfg = settings()
     name, did = drow["name"], drow["id"]
     if etapa2:
-        event("search_start", name, did, detail=f"etapa 2 · busca na web · {drow['total_queries']} consultas")
+        event("search_start", name, did, detail=f"fase 3 · busca na web · {drow['total_queries']} consultas")
     if etapa3:
-        event("whois_start", name, did, detail=f"etapa 3 · WHOIS/RDAP · {drow['total_queries']} consultas")
+        event("whois_start", name, did, detail=f"fase 2 · WHOIS/RDAP · {drow['total_queries']} consultas")
     with db.conn() as c:
         try:
             dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=etapa2, with_whois=etapa3)
@@ -245,13 +245,13 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
             c.execute("UPDATE domains SET whois_at=now() WHERE id=%s", (did,))
             if not whois.evidencia(dossier.get("whois")):
                 c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
-                event("whois_done", name, did, drow["classification"], detail="etapa 3: WHOIS sem dados úteis")
+                event("whois_done", name, did, drow["classification"], detail="fase 2: WHOIS sem dados úteis")
                 return "done"
         if etapa2:
             c.execute("UPDATE domains SET web_search_at=now() WHERE id=%s", (did,))
             if not dossier.get("search"):
                 c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
-                event("search_done", name, did, drow["classification"], detail="etapa 2: nenhum resultado na web")
+                event("search_done", name, did, drow["classification"], detail="fase 3: nenhum resultado na web")
                 return "done"
         elif cfg.web_search_before_llm and _buscar_antes(dossier):
             # fora do top 1M e sem Wikidata/certificado: a IA sozinha "não reconhece" em ~98%
@@ -317,7 +317,7 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     scat = next((s["label"] for s in scats if s["code"] == fin.category), fin.category or "")
     event("whois_done" if etapa3 else "search_done" if etapa2 else "llm_done", name, did, fin.classification, fin.risk, fin.work,
           meta.get("seconds"),
-          detail=" · ".join(x for x in (("etapa 3 (WHOIS)" if etapa3 else "etapa 2 (busca na web)" if etapa2 else
+          detail=" · ".join(x for x in (("fase 2 (WHOIS)" if etapa3 else "fase 3 (busca na web)" if etapa2 else
                                          f"com busca na web ({len(dossier['search'])} resultados)"
                                          if dossier.get("search") else ""),
                                         "reforço (GPU)" if meta.get("extra") else "", svc, scat, extra) if x))
@@ -340,17 +340,19 @@ ETAPA1_PENDENTE = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "
 
 
 def _claim_etapa2(c) -> dict | None:
-    """Próximo DESCONHECIDO da IA p/ busca na web — só com a fila da etapa 1 vazia."""
+    """Fase 3: próximo DESCONHECIDO p/ busca na web — só com a fila da fase 1 vazia e DEPOIS do WHOIS
+    (fase 2; a busca aproveita o WHOIS do cache)."""
     if c.execute(ETAPA1_PENDENTE + " LIMIT 1").fetchone():
         return None
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by = 'llm'
                AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
+               AND (whois_at IS NOT NULL OR NOT %(whois)s)
                AND NOT dominio_decidido(id)
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
-           RETURNING *""").fetchone()
+           RETURNING *""", {"whois": settings().whois_enabled}).fetchone()
 
 
 def phase_c(client: OllamaClient, cats: list[dict]) -> str:
@@ -365,8 +367,8 @@ def phase_c(client: OllamaClient, cats: list[dict]) -> str:
 
 
 def _claim_etapa3(c) -> dict | None:
-    """Próximo DESCONHECIDO p/ WHOIS: em paralelo com a etapa 2 (busca na web), mas só com a fila
-    da IA (etapa 1) vazia. .br primeiro (titular com CNPJ no registro.br identifica a empresa)."""
+    """Fase 2: próximo DESCONHECIDO p/ WHOIS (antes da busca na web), só com a fila da IA (fase 1)
+    vazia. .br primeiro (titular com CNPJ no registro.br identifica a empresa)."""
     if c.execute(ETAPA1_PENDENTE + " LIMIT 1").fetchone():
         return None
     return c.execute(

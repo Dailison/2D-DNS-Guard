@@ -35,11 +35,18 @@
   </div>
   {% endif %}
 
-  {% if fila %}
+  {% if fila and fila.total %}
   <div class="card" style="border-left:4px solid #ea580c">
-    <h2>Aguardando decisão <span class="mut" style="font-size:.8rem;font-weight:400">· sites de não trabalho/risco ou não reconhecidos pela IA que estão liberados e ninguém decidiu ainda</span>
-      <a class="mut" style="font-size:.8rem;font-weight:400;float:right" href="{{ url_for('analise.decisoes', t=tid) }}">ver fila completa →</a></h2>
-    {% set embed = true %}{% include "admin/analise/_fila.html" %}
+    <h2>Decisões · fase 5 <span class="mut" style="font-size:.8rem;font-weight:400">· {{ fila.total }} site(s) que a IA não resolveu com confiança (fases 1 a 4)</span>
+      <a class="mut" style="font-size:.8rem;font-weight:400;float:right" href="{{ url_for('analise.decisoes', t=tid) }}">decidir →</a></h2>
+    <table><thead><tr><th>Domínio</th><th>IA</th><th>Sugestão da IA</th><th class="num">Consultas</th></tr></thead><tbody>
+    {% for i in fila['items'] %}
+      <tr><td><a href="{{ url_for('analise.dominio', nome=i.domain, t=tid) }}">{{ i.domain }}</a></td>
+        <td>{{ m.badge(i.classification) if i.classification else '—' }}</td>
+        <td style="font-size:.85rem">{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else ('nenhuma lista' if i.lista_at else '—') }}{% if i.lista_conf is not none %} <span class="mut">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}</td>
+        <td class="num">{{ i.total_queries or 0 }}</td></tr>
+    {% endfor %}
+    </tbody></table>
   </div>
   {% endif %}
 

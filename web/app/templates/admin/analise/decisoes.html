@@ -1,45 +1,24 @@
 {% extends "admin/analise/_base.html" %}
 {% import "admin/analise/_macros.html" as m with context %}
 {% block an %}
-{% set filtrado = ff.categoria or ff.empresa or ff.classe or ff.rec or ff.q %}
 <div class="card">
-  <form method="get" class="row" style="align-items:flex-end">
-    <input type="hidden" name="t" value="{{ tid }}">
-    <div><label>Buscar domínio</label><input type="text" name="q" value="{{ ff.q }}" placeholder="parte do nome"></div>
-    {% if todos %}
-    <div><label>Empresa</label>
-      <select name="empresa" onchange="this.form.submit()"><option value="">— Todas —</option>
-        {% for id, nome, n in opc.empresa %}<option value="{{ id }}" {{ 'selected' if ff.empresa == id }}>{{ nome }} ({{ n }})</option>{% endfor %}
-      </select></div>
-    {% endif %}
-    <div><label>Categoria</label>
-      <select name="categoria" onchange="this.form.submit()"><option value="">— Todas —</option>
-        {% for code, n in opc.categoria|dictsort(by='value', reverse=true) %}
-          <option value="{{ code }}" {{ 'selected' if ff.categoria == code }}>{{ 'Aguardando IA' if code == '_pendente' else scats.get(code, {}).get('label', code) }} ({{ n }})</option>{% endfor %}
-      </select></div>
-    <div><label>Classe</label>
-      <select name="classe" onchange="this.form.submit()"><option value="">— Todas —</option>
-        {% for c in ['NAO_TRABALHO', 'SUSPEITO', 'MALICIOSO', 'DESCONHECIDO'] %}{% if opc.classe.get(c) or ff.classe == c %}
-          <option value="{{ c }}" {{ 'selected' if ff.classe == c }}>{{ CLASS_LABEL.get(c, c) }} ({{ opc.classe.get(c, 0) }})</option>{% endif %}{% endfor %}
-      </select></div>
-    <div><label>Recomendação</label>
-      <select name="rec" onchange="this.form.submit()"><option value="">— Todas —</option>
-        {% for c, l in [('BLOQUEAR','Bloquear'),('REVISAR','Revisar'),('LIBERAR','Liberar'),('_sem','Aguardando IA')] %}{% if opc.rec.get(c) or ff.rec == c %}
-          <option value="{{ c }}" {{ 'selected' if ff.rec == c }}>{{ l }} ({{ opc.rec.get(c, 0) }})</option>{% endif %}{% endfor %}
-      </select></div>
-    <div style="flex:0;display:flex;gap:.4rem"><button class="primary">Filtrar</button>
-      {% if filtrado %}<a class="btn" style="background:#64748b" href="{{ url_for('analise.decisoes', t=tid) }}">Limpar</a>{% endif %}</div>
-  </form>
+  <h2 style="margin-bottom:.3rem">Decisões · fase 5 <span class="mut" style="font-size:.85rem;font-weight:400">· classificação manual pela equipe de TI da 2D</span></h2>
+  <p class="hint" style="margin:.2rem 0 .6rem">Todo site novo passa pela IA sozinho: <b>1</b> IA local → <b>2</b> WHOIS + IA local → <b>3</b> busca na web + IA local → <b>4</b> IA online (Gemini).
+    Com confiança, o site vai direto para a lista certa (ou para nenhuma). Aqui ficam só os que nenhuma fase resolveu com confiança, com a lista que a IA sugere.
+    <b>✓ Aprovar sugestão da IA</b> põe cada site na lista sugerida; <b>⛔ Pôr em lista…</b> escolhe outra; <b>✅ Manter liberado</b> tira daqui sem bloquear. Tudo fica registrado como decisão.</p>
+  {% if fases %}
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem;font-size:.82rem">
+    <span class="tag">1 · IA local: {{ fases.ia or 0 }} na fila</span>
+    <span class="tag">2 · WHOIS: {{ fases.whois or 0 }}</span>
+    <span class="tag">3 · busca na web: {{ fases.busca or 0 }}</span>
+    <span class="tag">listas (IA local): {{ fases.lista or 0 }}</span>
+    <span class="tag">4 · IA online: {{ fases.online or 0 }}{{ '' if fases.online_on else ' (desligada)' }}</span>
+    <a class="tag" href="{{ url_for('analise.ia_ao_vivo') }}" style="text-decoration:none">IA ao vivo →</a>
+  </div>
+  {% endif %}
 </div>
 <div class="card">
-  <h2>Aguardando decisão · {{ fila|length }}{{ '+' if fila|length >= 500 }}{% if filtrado %} <span class="mut" style="font-size:.8rem;font-weight:400">(filtrado)</span>{% endif %}</h2>
-  <p class="hint" style="margin-top:0">
-    Sites que a IA classificou como <b>não trabalho</b>, <b>suspeitos</b> ou <b>maliciosos</b> (no período selecionado: {{ {1:'últimas 24h',7:'7 dias',30:'30 dias',90:'90 dias'}.get(dias, dias ~ ' dias') }}) e que
-    ninguém decidiu ainda — um site por linha (acessado por várias empresas = “Diversas”). <b>Bloquear…</b> pergunta em quais listas do Technitium bloquear (já vêm marcadas as das empresas que acessaram); marque várias linhas para decidir em lote;
-    <b>Manter liberado</b> só registra a decisão — o site fica como está e sai da fila. Suspeitos/maliciosos também avisam a TI pelo webhook
-    (se configurado em Fontes e IA).
-    {% if ocultos %}<br>{{ ocultos }} site(s) da fila já estão bloqueados pelas listas da empresa e não aparecem aqui.{% endif %}
-  </p>
-  {% include "admin/analise/_fila.html" %}
+  <h2>{{ det.total }} site(s) aguardando decisão{% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem;font-weight:400">de {{ det.total_geral }}{% if not todos %} acessados por {{ tenant.name if tenant else 'esta empresa' }}{% endif %}</span>{% endif %}</h2>
+  {% with modo = 'decisoes' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>
 {% endblock %}

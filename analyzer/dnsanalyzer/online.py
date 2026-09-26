@@ -1,5 +1,5 @@
-"""Fase 3: IA online (Gemini, plano gratuito) para o que as fases 1 e 2 (IA local; busca na web +
-WHOIS + IA local) não resolveram com confiança:
+"""Fase 4: IA online (Gemini, plano gratuito) para o que as fases 1-3 (IA local; WHOIS + IA local;
+busca na web + IA local) não resolveram com confiança:
 
 - desconhecidos que já passaram pela busca na web (ou que estão em Para revisar / Outros);
 - dúvidas da etapa "lista" (a IA local sugeriu uma lista sem certeza).
@@ -7,8 +7,8 @@ WHOIS + IA local) não resolveram com confiança:
 Recebe o mesmo contexto curto da etapa "lista" (nome, serviço, página, busca, WHOIS) e, para os
 desconhecidos, pode pesquisar no Google (grounding: 5.000 buscas/mês grátis nos modelos 3.x). A resposta
 vira a sugestão de lista (lista_fonte 'online:gemini'); com certeza, `listas_ia.aplicar` põe na lista;
-sem certeza, vai para Para revisar = fase 4 (manual, equipe de TI). Desconhecido reconhecido com
-certeza ganha a classificação (classified_by 'online').
+sem certeza, vai para Para revisar = fase 5 (Decisões: manual, equipe de TI). Desconhecido reconhecido
+com certeza ganha a classificação (classified_by 'online'); não reconhecido também vai para a fase 5.
 
 Plano gratuito: o Google pode usar o conteúdo enviado (só nomes de domínio públicos e o que já se sabe
 deles). Limites por minuto/dia variam por conta (painel do AI Studio): GEMINI_RPM / GEMINI_RPD, e o
@@ -226,6 +226,10 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
                   "VALUES (%s, %s, %s, %s, %s, 'online', %s, %s)",
                   (d["id"], cls, conf, servico[:80], Jsonb(razoes), meta.get("model"),
                    ("fontes: " + ", ".join(meta.get("fontes") or []))[:500] or None))
+    elif d["classification"] == "DESCONHECIDO" and lista == NENHUMA:
+        # nem a IA online identificou: fase 5 (Decisões). Com lista sugerida, `aplicar` decide.
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
+                  "ON CONFLICT DO NOTHING", (d["name"], "IA sem certeza (desconhecido)"))
     log.info("IA online: %s -> %s / %s (%.2f)%s", d["name"], cls, lista, conf, " [busca]" if meta.get("busca") else "")
 
 

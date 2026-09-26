@@ -128,43 +128,6 @@ def _status(nomes, tenant: dict | None) -> dict[str, list[str]]:
     return {n: dnslib.bloqueado_em(idx, n, grupos) for n in dict.fromkeys(nomes) if n}
 
 
-def _fila_pendente(fila: list[dict], tenants: list[dict]) -> tuple[list[dict], int]:
-    """Tira da fila o que já está bloqueado para a empresa da linha (não há o que decidir).
-    Retorna (fila, quantos ocultos)."""
-    idx, _ = _indice_status(None)
-    if idx is None:
-        return fila, 0
-    por_id = {t["id"]: t for t in tenants}
-    escopo: dict[int, list[str] | None] = {}
-    out = []
-    for f in fila:
-        tid = f["tenant_id"]
-        if tid not in escopo:
-            escopo[tid] = sorted(_grupos_empresa(por_id.get(tid), idx["ngm"])) or None
-        if not dnslib.bloqueado_em(idx, f["name"], escopo[tid]):
-            out.append(f)
-    return out, len(fila) - len(out)
-
-
-def _agrupar_fila(fila: list[dict]) -> list[dict]:
-    """Uma linha por site: junta as empresas que acessaram (soma consultas/PCs, 1º acesso mais antigo).
-    A ordem da API (risco > recomendação > consultas) é mantida pela 1ª ocorrência."""
-    out: dict[str, dict] = {}
-    for f in fila:
-        g = out.get(f["name"])
-        if g is None:
-            g = out[f["name"]] = {**f, "empresas": [], "total_queries": 0, "clients_count": 0}
-        g["empresas"].append({"id": f["tenant_id"], "name": f["tenant_name"]})
-        g["total_queries"] += int(f.get("total_queries") or 0)
-        g["clients_count"] += int(f.get("clients_count") or 0)
-        if f.get("first_seen") and (not g.get("first_seen") or f["first_seen"] < g["first_seen"]):
-            g["first_seen"] = f["first_seen"]
-    for g in out.values():
-        g["empresas"].sort(key=lambda e: e["name"] or "")
-        g["itens"] = [f"{e['id']}|{g['name']}" for e in g["empresas"]]
-    return list(out.values())
-
-
 def _grp_ctx(tenants: list[dict]) -> dict | None:
     """Dados do diálogo "Pôr em quais listas?": as listas de bloqueio por categoria."""
     return {"listas": dnslib.CATEGORIAS_LISTA, "risco": sorted(dnslib.CATEGORIAS_RISCO)}
@@ -208,10 +171,9 @@ def painel():
     if ctx["tid"] is not None:
         try:
             s = api.get(f"/tenants/{ctx['tid']}/summary", days=ctx["dias"])
-            fila = api.get(f"/tenants/{ctx['tid']}/review", days=ctx["dias"], limit=200)
+            fila = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, ordem="consultas", limit=10)
         except AnalyzerError as e:
             flash(f"Falha ao carregar o painel: {e}", "erro")
-        fila = _agrupar_fila(_fila_pendente(fila, ctx["tenants"])[0])[:12]
         if s:
             porcat = _por_categoria(ctx["tid"], ctx["dias"], ctx["tenant"])
             nomes = [d["name"] for k in ("top_nonwork", "top_risk", "top_domains") for d in s.get(k, [])]
@@ -223,51 +185,27 @@ def painel():
 # ------------------------------------------------------------------ fila de decisão
 @analise_bp.get("/decisoes")
 def decisoes():
+    """Fase 5 (manual): o que a IA não resolveu com confiança nas fases 1-4 (IA local; WHOIS; busca na
+    web; IA online). É a lista "Para revisar", com as empresas que acessaram cada site."""
+    from app.dns import _DET_VAZIO, _det_filtros, _det_params, _pag_url
+    from app.dns import _site_cats as _rotulos_cat
     ctx = _ctx()
-    fila, ocultos = [], 0
+    fd = _det_filtros("consultas")
+    det = _DET_VAZIO
     if ctx["tid"] is not None:
         try:
-            fila = api.get(f"/tenants/{ctx['tid']}/review", days=ctx["dias"], limit=1000)
+            det = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, **_det_params(fd))
         except AnalyzerError as e:
-            flash(f"Falha ao carregar a fila: {e}", "erro")
-        fila, ocultos = _fila_pendente(fila, ctx["tenants"])
-    ff = {"categoria": request.args.get("categoria", ""), "empresa": request.args.get("empresa", type=int),
-          "classe": request.args.get("classe", ""), "rec": request.args.get("rec", ""),
-          "q": request.args.get("q", "").strip().lower()}
-    opc = _opcoes_fila(fila)
-    fila = _agrupar_fila([f for f in fila if _passa(f, ff)])
-    return render_template("admin/analise/decisoes.html", fila=fila[:500], ocultos=ocultos, ff=ff, opc=opc,
-                           scats=_site_cats(), grp=_grp_ctx(ctx["tenants"]), aba="decisoes", **ctx)
-
-
-def _passa(f: dict, ff: dict) -> bool:
-    """Filtros da fila (aplicados por empresa ANTES de agrupar: filtrando uma empresa,
-    as ações valem só para ela)."""
-    if ff["categoria"] and (f.get("category") or "_pendente") != ff["categoria"]:
-        return False
-    if ff["empresa"] and f["tenant_id"] != ff["empresa"]:
-        return False
-    if ff["classe"] and f.get("classification") != ff["classe"]:
-        return False
-    if ff["rec"] and (f.get("corp_action") or "_sem") != ff["rec"]:
-        return False
-    return not ff["q"] or ff["q"] in f["name"]
-
-
-def _opcoes_fila(fila: list[dict]) -> dict:
-    """Opções dos filtros com contagem de sites (distintos) na fila atual."""
-    def conta(chave):
-        c: dict = {}
-        for f in fila:
-            c.setdefault(chave(f), set()).add(f["name"])
-        return {k: len(v) for k, v in c.items()}
-    emp = {}
-    for f in fila:
-        emp.setdefault(f["tenant_id"], [f["tenant_name"], set()])[1].add(f["name"])
-    return {"categoria": conta(lambda f: f.get("category") or "_pendente"),
-            "classe": conta(lambda f: f.get("classification")),
-            "rec": conta(lambda f: f.get("corp_action") or "_sem"),
-            "empresa": sorted(((k, v[0], len(v[1])) for k, v in emp.items()), key=lambda x: x[1] or "")}
+            flash(f"Falha ao carregar as decisões: {e}", "erro")
+    fases = {}
+    try:
+        ev = api.get("/ai/events", limit=1)
+        fases = ev.get("queue") or {}
+    except AnalyzerError:
+        pass
+    return render_template("admin/analise/decisoes.html", det=det, fd=fd, cat="para_revisar", fases=fases,
+                           categorias=dnslib.CATEGORIAS_LISTA, scats=_rotulos_cat(), pag_url=_pag_url,
+                           aba="decisoes", **ctx)
 
 
 @analise_bp.post("/decisoes/lote")

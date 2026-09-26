@@ -725,7 +725,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                           "count(*) FILTER (WHERE needs_analysis) AS regras, "
                           "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by='llm' "
                           " AND web_search_at IS NULL AND NOT llm_pending AND kind='public' "
-                          " AND NOT dominio_decidido(id)) AS busca, "
+                          " AND NOT dominio_decidido(id)) AS busca, "   # (a busca espera o WHOIS)
                           "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by IN ('llm','web') "
                           " AND whois_at IS NULL AND NOT llm_pending AND kind='public' "
                           " AND NOT dominio_decidido(id)) AS whois FROM domains").fetchone()
@@ -1108,13 +1108,14 @@ def lista_sugestoes(categoria: str, limit: int = Query(500, le=5000)):
 
 @app.get("/listas/{categoria}/detalhes", dependencies=[Depends(auth)])
 def lista_detalhes(categoria: str, q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
-                   revisao: Optional[str] = None, sug: Optional[str] = None, rec: Optional[str] = None, ordem: str = "recentes", offset: int = Query(0, ge=0),
+                   revisao: Optional[str] = None, sug: Optional[str] = None, rec: Optional[str] = None, tid: Optional[int] = None,
+                   ordem: str = "recentes", offset: int = Query(0, ge=0),
                    limit: int = Query(100, le=1000)):
     """Itens da lista com a classificação da IA, a revisão manual (quem/quando) e facetas p/ filtrar."""
     if categoria not in listas.CATEGORIAS:
         raise HTTPException(404, "categoria sem lista")
     with db.conn() as c:
-        return listas.detalhes(c, categoria, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, rec=rec, ordem=ordem,
+        return listas.detalhes(c, categoria, tid=tid, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, rec=rec, ordem=ordem,
                                offset=offset, limit=limit)
 
 

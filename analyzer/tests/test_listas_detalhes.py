@@ -89,6 +89,16 @@ def test_bloqueio_automatico_nao_conta_como_revisao_manual(api):
     assert [(x["domain"], x["revisao"], x["g_by"]) for x in it] == [("aposta.bet.br", "ia", "bloqueio automático (apostas)")]
 
 
+def test_filtro_por_empresa_e_empresas_que_acessaram(api):
+    from dnsanalyzer import db
+    with db.conn() as c:
+        tid = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
+    j = api.get("/listas/para_revisar/detalhes", headers=H, params={"tid": tid}).json()
+    assert [r["domain"] for r in j["items"]] == ["duvida.com"] and j["items"][0]["empresas"] == [{"id": tid, "name": "Empresa A"}]
+    todos = {r["domain"]: r["empresas"] for r in api.get("/listas/para_revisar/detalhes", headers=H).json()["items"]}
+    assert todos["jogo.com"] == []
+
+
 def test_filtros_e_paginacao(api):
     j = api.get("/listas/para_revisar/detalhes", headers=H, params={"cat_ia": "jogos"}).json()
     assert [r["domain"] for r in j["items"]] == ["jogo.com"]

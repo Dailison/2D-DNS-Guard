@@ -143,7 +143,8 @@ def test_fase3_gemini(env, monkeypatch):
                           "VALUES (%s, %s, 'outros', now(), 50) RETURNING id", (n, cls)).fetchone()["id"]
             listas_ia.salvar(c, i, "jogos", 0.6, "talvez", "x", "local")
         c.execute("INSERT INTO domains (name, classification, category, analyzed_at, web_search_at, total_queries, classified_by) "
-                  "VALUES ('misterio.com.br', 'DESCONHECIDO', 'desconhecido', now(), now(), 99, 'web')")
+                  "VALUES ('misterio.com.br', 'DESCONHECIDO', 'desconhecido', now(), now(), 99, 'web'), "
+                  "('ninguem-sabe.com', 'DESCONHECIDO', 'desconhecido', now(), now(), 1, 'web')")
         ap = listas_ia.aplicar(c)
     assert sorted(n for n, _ in ap["online"]) == ["duv1.com", "duv2.com"] and not ap["revisar"]
     fila = [x["domain"] for x in env.get("/online/pendentes", headers=H).json()]
@@ -151,7 +152,8 @@ def test_fase3_gemini(env, monkeypatch):
     resp = {"duv1.com": {"lista": "jogos", "confianca": 1.0, "classificacao": "NAO_TRABALHO", "reconhecido": True},
             "duv2.com": {"lista": "jogos", "confianca": 0.5, "classificacao": "NAO_TRABALHO", "reconhecido": False},
             "misterio.com.br": {"lista": "compras", "confianca": 0.95, "classificacao": "TRABALHO", "categoria": "compras",
-                                "reconhecido": True, "servico": "Loja de ferramentas", "motivo": "atacado"}}
+                                "reconhecido": True, "servico": "Loja de ferramentas", "motivo": "atacado"},
+            "ninguem-sabe.com": {"lista": "nenhuma", "confianca": 0.3, "classificacao": "DESCONHECIDO", "reconhecido": False}}
     buscou = []
     monkeypatch.setattr(online.COTA, "esperar", lambda: True)
     monkeypatch.setattr(online, "perguntar", lambda d, cats, buscar: (buscou.append((d["name"], buscar)) or resp[d["name"]], {"model": "g"}))
@@ -165,4 +167,5 @@ def test_fase3_gemini(env, monkeypatch):
     assert ("jogos", "duv1.com") in em and ("para_revisar", "duv2.com") in em
     assert ("compras", "misterio.com.br") in em, "Compras conta como trabalho"
     assert m == {"classification": "TRABALHO", "classified_by": "online", "topic": "Loja de ferramentas"}
+    assert ("para_revisar", "ninguem-sabe.com") in em, "nem a IA online sabe: fase 5 (Decisões)"
     assert env.get("/online/pendentes", headers=H).json() == []

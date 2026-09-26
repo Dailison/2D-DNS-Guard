@@ -53,7 +53,8 @@ def _dados(c):
             ("fornecedor.com.br", "TRABALHO", "produtividade", 40, "llm", False),
             ("cdn.fornecedor.com.br", "TRABALHO", "infraestrutura", 1, "llm", False),
             ("liberado.com", "TRABALHO", "comunicacao", 7, "llm", False),
-            ("pendente.com", None, None, 2, None, False)):
+            ("pendente.com", None, None, 2, None, False),
+            ("aposta.bet.br", "NAO_TRABALHO", "apostas", 8, "llm", False)):
         ids[name] = c.execute(
             "INSERT INTO domains (name, classification, category, total_queries, classified_by, locked, analyzed_at, "
             "llm_pending) VALUES (%s,%s,%s,%s,%s,%s,now(),%s) RETURNING id",
@@ -62,6 +63,9 @@ def _dados(c):
               "('para_revisar','jogo.com','migração dos grupos antigos'), ('para_revisar','duvida.com','migração dos grupos antigos'),"
               "('para_revisar','erp.com.br','op@2d'), ('para_revisar','nunca-visto.com','migração dos grupos antigos'),"
               "('outros_bloqueios','fornecedor.com.br','op@2d')")
+    c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('apostas', 'aposta.bet.br', 'bloqueio automático (apostas)')")
+    c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', 'bloqueio automático (apostas)')",
+              (ids["aposta.bet.br"],))
     c.execute("INSERT INTO allow_list_domains (list_slug, domain) VALUES ('instagram', 'liberado.com')")
     c.execute("INSERT INTO tenant_domains (tenant_id, domain_id, first_seen, last_seen, review_status, reviewed_by, reviewed_at) "
               "VALUES (%s, %s, now(), now(), 'blocked', 'ana@2d', now())", (t, ids["duvida.com"]))
@@ -78,6 +82,11 @@ def test_detalhes_da_lista_traz_ia_revisao_e_facetas(api):
     assert "id" not in it["jogo.com"]
     assert j["facetas"]["cat_ia"] == {"jogos": 1, "desconhecido": 1, "produtividade": 1, "_sem": 1}
     assert j["facetas"]["revisao"] == {"ia": 1, "manual": 2, "pendente": 1}
+
+
+def test_bloqueio_automatico_nao_conta_como_revisao_manual(api):
+    it = api.get("/listas/apostas/detalhes", headers=H).json()["items"]
+    assert [(x["domain"], x["revisao"], x["g_by"]) for x in it] == [("aposta.bet.br", "ia", "bloqueio automático (apostas)")]
 
 
 def test_filtros_e_paginacao(api):

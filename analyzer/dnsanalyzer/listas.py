@@ -106,26 +106,27 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
 # decisão (global ou de empresa), ajuste de empresa ou entrada posta na lista por um operador.
 _ORIGEM_NAO_MANUAL = (AUTO_BY, "migração", "serviço ", "catálogo", "classificação da IA")
 DETALHE_SQL = (
-    "SELECT d.name AS domain, d.id, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
+    "SELECT d.name AS domain, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
     " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "
     " g.status AS g_status, g.reviewed_by AS g_by, g.reviewed_at AS g_at, "
     " t.n_decisoes, t.n_ajustes, t.ult_status, t.ult_por, t.ult_em "
     "FROM domains d LEFT JOIN global_reviews g ON g.domain_id = d.id "
-    "LEFT JOIN LATERAL (SELECT count(*) FILTER (WHERE td.review_status IS NOT NULL) AS n_decisoes, "
+    "LEFT JOIN (SELECT td.domain_id, count(*) FILTER (WHERE td.review_status IS NOT NULL) AS n_decisoes, "
     "   count(*) FILTER (WHERE td.override_classification IS NOT NULL) AS n_ajustes, "
     "   (array_agg(td.review_status ORDER BY td.reviewed_at DESC NULLS LAST))[1] AS ult_status, "
     "   (array_agg(td.reviewed_by ORDER BY td.reviewed_at DESC NULLS LAST))[1] AS ult_por, "
     "   max(td.reviewed_at) AS ult_em "
-    "  FROM tenant_domains td WHERE td.domain_id = d.id "
-    "   AND (td.review_status IS NOT NULL OR td.override_classification IS NOT NULL)) t ON true "
-    "WHERE d.name = ANY(%s)")
+    "  FROM tenant_domains td WHERE td.review_status IS NOT NULL OR td.override_classification IS NOT NULL "
+    "  GROUP BY td.domain_id) t ON t.domain_id = d.id "
+    "WHERE ")
 
 
 def _revisao(r: dict, added_by: str | None = None) -> str:
-    if not r.get("id") or not r.get("classification") or r.get("llm_pending"):
+    if not r.get("classification") or r.get("llm_pending"):
         return "pendente"
     manual_lista = bool(added_by) and not any(added_by.startswith(p) for p in _ORIGEM_NAO_MANUAL)
-    if r.get("locked") or r.get("classified_by") == "manual" or r.get("g_status") or r.get("n_decisoes") \
+    global_manual = bool(r.get("g_status")) and not (r.get("g_by") or "").startswith(AUTO_BY)
+    if r.get("locked") or r.get("classified_by") == "manual" or global_manual or r.get("n_decisoes") \
             or r.get("n_ajustes") or manual_lista:
         return "manual"
     return "ia"
@@ -133,7 +134,7 @@ def _revisao(r: dict, added_by: str | None = None) -> str:
 
 def _detalhar(c, rows: list[dict]) -> list[dict]:
     """Junta a cada {domain, added_by?, added_at?} os dados da IA e das revisões."""
-    info = {r["domain"]: r for r in c.execute(DETALHE_SQL, ([x["domain"] for x in rows],)).fetchall()}
+    info = {r["domain"]: r for r in c.execute(DETALHE_SQL + "d.name = ANY(%s)", ([x["domain"] for x in rows],)).fetchall()}
     out = []
     for x in rows:
         r = {**info.get(x["domain"], {}), **x}
@@ -171,8 +172,6 @@ def _filtrar_paginar(rows: list[dict], q=None, cls=None, cat_ia=None, revisao=No
              "recentes": lambda r: -((r.get("added_at") or r.get("analyzed_at")).timestamp()
                                      if (r.get("added_at") or r.get("analyzed_at")) else 0)}.get(ordem)
     sel.sort(key=chave or (lambda r: -(r.get("total_queries") or 0)))
-    for r in sel:
-        r.pop("id", None)
     return {"total": len(sel), "total_geral": len(rows), "items": sel[offset:offset + limit], "facetas": fac}
 
 
@@ -191,7 +190,8 @@ def sem_lista(c, **filtros) -> dict:
     """Domínios já analisados que não estão em NENHUMA lista (bloqueio ou liberação, nem por domínio
     pai). Não vão p/ o Technitium: só p/ consulta, pedir nova análise ou pôr numa lista."""
     em = {r["domain"] for r in c.execute("SELECT domain FROM category_lists UNION SELECT domain FROM allow_list_domains")}
-    nomes = [r["name"] for r in c.execute(
-        "SELECT name FROM domains WHERE kind = 'public' AND classification IS NOT NULL AND NOT llm_pending")]
-    rows = [{"domain": n} for n in nomes if not _em_lista(n, em)]
-    return _filtrar_paginar(_detalhar(c, rows), **filtros)
+    rows = [r for r in c.execute(DETALHE_SQL + "d.kind = 'public' AND d.classification IS NOT NULL AND NOT d.llm_pending")
+            if not _em_lista(r["domain"], em)]
+    for r in rows:
+        r["revisao"] = _revisao(r)
+    return _filtrar_paginar(rows, **filtros)

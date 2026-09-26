@@ -24,42 +24,17 @@
 </div>
 
 <div class="card">
-  <div class="row" style="align-items:flex-end;gap:1rem">
-    <form method="get" class="row" style="align-items:flex-end;flex:1;margin:0">
-      <input type="hidden" name="cat" value="{{ cat }}">
-      <div style="flex:1"><label>Buscar na lista {{ rot.get(cat, cat) }}</label><input type="text" name="q" value="{{ q }}" placeholder="parte do domínio"></div>
-      <div style="flex:0"><button class="primary">Buscar</button></div>
-    </form>
-    <form method="post" action="{{ url_for('admin.listas_categoria_add') }}" class="row" style="align-items:flex-end;flex:1;margin:0">
-      <input type="hidden" name="cat" value="{{ cat }}">
-      <div style="flex:1"><label>Adicionar à lista {{ rot.get(cat, cat) }}</label><input type="text" name="dominio" placeholder="ex.: site-de-apostas.com" required></div>
-      <div style="flex:0"><button class="danger">Adicionar</button></div>
-    </form>
-  </div>
+  <form method="post" action="{{ url_for('admin.listas_categoria_add') }}" class="row" style="align-items:flex-end;margin:0">
+    <input type="hidden" name="cat" value="{{ cat }}">
+    <div style="flex:1"><label>Adicionar à lista {{ rot.get(cat, cat) }}</label><input type="text" name="dominio" placeholder="ex.: site-de-apostas.com" required></div>
+    <div style="flex:0"><button class="danger">Adicionar</button></div>
+  </form>
 </div>
 
 <div class="card">
-  <h2>{{ itens|length }} domínio(s){% if q %} com “{{ q }}”{% endif %}{% if itens|length >= 2000 %} <span class="mut" style="font-size:.8rem">· mostrando os 2000 mais recentes</span>{% endif %}</h2>
-  <table>
-    <thead><tr><th>Domínio</th><th>Entrou por</th><th>Quando</th><th></th></tr></thead>
-    <tbody>
-    {% for i in itens %}
-      <tr>
-        <td><a href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}">{{ i.domain }}</a></td>
-        <td class="mut" style="font-size:.85rem">{{ i.added_by or '—' }}</td>
-        <td class="mut" style="white-space:nowrap;font-size:.85rem">{{ (i.added_at or '')[:16]|replace('T', ' ') }}</td>
-        <td style="white-space:nowrap">
-          <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline" onsubmit="return confirm('Tirar {{ i.domain }} da lista {{ rot.get(cat, cat) }}? Fica registrado como “manter liberado” (o bloqueio automático não põe de volta).')">
-            <input type="hidden" name="cat" value="{{ cat }}"><input type="hidden" name="dominio" value="{{ i.domain }}">
-            <button class="danger" style="padding:.15rem .5rem;font-size:.78rem">✕ tirar da lista</button>
-          </form>
-        </td>
-      </tr>
-    {% else %}
-      <tr><td colspan="4" class="mut">Lista vazia{% if q %} para essa busca{% endif %}.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <h2>{{ det.total }} domínio(s){% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem">de {{ det.total_geral }} na lista</span>{% endif %}</h2>
+  {% if cat == 'para_revisar' %}<p class="mut" style="font-size:.84rem;margin:-.3rem 0 .6rem">Sobras da migração dos grupos antigos — nenhuma empresa aplica esta lista. Filtre pela categoria da IA, marque e use <b>Mover para…</b> (ex.: tudo que a IA vê como Jogos → lista Jogos) ou <b>Tirar da lista</b>; os <b>Desconhecido</b> podem ir para <b>Pedir nova análise da IA</b>.</p>{% endif %}
+  {% with modo = 'lista' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>
 {% if sugestoes %}
 <div class="card">

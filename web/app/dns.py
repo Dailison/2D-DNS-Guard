@@ -1,5 +1,5 @@
-"""Telas de DNS do console: Grupos (quem usa cada política), Domínios (o que cada grupo bloqueia), Liberados (IPs isentos do
-filtro) e Logs DNS — tudo direto no Technitium (app Advanced Blocking)."""
+"""Telas de DNS do console: Listas de bloqueio (por categoria) e de liberação, Domínios (em quais listas
+cada domínio está), políticas por empresa (sincronizadas no Technitium), Liberados (IPs isentos), Logs DNS e Gráficos."""
 
 from urllib.parse import quote
 
@@ -18,9 +18,7 @@ admin_bp = Blueprint("admin", __name__)
 def dashboard():
     if current_app.config.get("ANALYZER_ENABLED"):
         return redirect(url_for("analise.painel"))
-    return redirect(url_for("admin.grupos"))
-
-
+    return redirect(url_for("admin.liberados"))
 
 
 # ------------------------------------------------- Liberados DNS (Technitium)
@@ -111,125 +109,21 @@ def liberados_revogar():
     return redirect(url_for("admin.liberados"))
 
 
-def _sem_technitium():
-    return render_template("admin/nao_configurado.html", oque="Technitium (TECHNITIUM_URL/TECHNITIUM_TOKEN)")
+@admin_bp.get("/grupos")
+@login_required
+def grupos():
+    """Tela antiga: os grupos agora são internos (um por empresa, mantidos pelas políticas)."""
+    return redirect(url_for("analise.empresas"))
 
 
 @admin_bp.get("/bloqueios")
 @login_required
 def bloqueios():
-    """Tela antiga (dividida em Grupos e Domínios): links antigos seguem funcionando."""
-    args = request.args.to_dict()
-    destino = "admin.dominios" if (args.get("q") or args.get("qg")) else "admin.grupos"
-    return redirect(url_for(destino, **args))
+    return redirect(url_for("admin.listas_categoria"))
 
 
-@admin_bp.get("/grupos")
-@login_required
-def grupos():
-    """Tela antiga: grupos agora são internos (um por empresa, mantidos pelas políticas).
-    Quem aplica o quê fica em Empresas e em Listas de bloqueio. ?antigo=1 ainda mostra."""
-    if not request.args.get("antigo"):
-        return redirect(url_for("analise.empresas"))
-    if not current_app.config.get("TECHNITIUM_ENABLED"):
-        return _sem_technitium()
-    from app import empresas as emp
-    cfg, nomes = {}, []
-    try:
-        cfg = dnslib._get_config()
-        nomes = sorted(g.get("name") for g in cfg.get("groups", []) if g.get("name"))
-    except Exception as e:  # noqa: BLE001
-        flash(f"Não foi possível consultar o Technitium: {e}", "erro")
-    grupo = (request.args.get("grupo") or (nomes[0] if nomes else "")).strip()
-    ngm = cfg.get("networkGroupMap", {})
-    redes_por = {}
-    for k, v in ngm.items():
-        redes_por.setdefault(v, []).append(dnslib.norm_ip(k) or k)
-    rotulos = emp.rotulos_de_redes([r for rs in redes_por.values() for r in rs]) if ngm else {}
-    resumo = [{"nome": g.get("name"), "bloqueia": g.get("enableBlocking", True),
-               "dominios": len(g.get("blocked") or []), "redes": len(redes_por.get(g.get("name"), [])),
-               "empresas": sorted({rotulos[r].split(" · ")[0] for r in redes_por.get(g.get("name"), []) if r in rotulos})}
-              for g in sorted(cfg.get("groups", []), key=lambda g: (g.get("name") or "").lower())]
-    redes = sorted(redes_por.get(grupo, []), key=dnslib._sort_key)
-    # IPs individuais (/32, /128) à parte: no grupo Liberados são os da tela Liberados
-    ips = [r for r in redes if r.endswith(("/32", "/128"))]
-    faixas = [r for r in redes if r not in ips]
-    desc_ip = {}
-    if ips:
-        try:
-            desc_ip = {m["ip"]: " · ".join(x for x in (m.get("tenant_name") or m.get("empresa"), m.get("filial"),
-                                                       m.get("departamento"), m.get("usuario"), m.get("tipo")) if x)
-                       for m in api.get("/console/liberados-meta")}
-        except AnalyzerError:
-            pass
-    redes_emp = {r: rotulos[r] for r in redes if r in rotulos}
-    empresas_grupo = sorted({v.split(" · ")[0] for v in redes_emp.values()})
-    cadastro = sorted(({"id": e["id"], "name": e["name"],
-                        "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
-                       for e in emp.lista() if e.get("networks")), key=lambda e: e["name"].lower())
-    gobj = next((x for x in cfg.get("groups", []) if x.get("name") == grupo), {})
-    esp = emp.grupos_especificos()
-    por_nome = {x.get("name"): x for x in cfg.get("groups", [])}
-    for r in resumo:
-        r["listas"] = dnslib.listas_assinadas(por_nome.get(r["nome"], {}))
-        r["pacotes"] = dnslib.pacotes_liberados(por_nome.get(r["nome"], {}))
-        r["especifico"] = r["nome"] in esp
-    mapa = _mapa_empresas(emp.lista(), cfg)
-    return render_template("admin/grupos.html", grupos=nomes, grupo=grupo, resumo=resumo, redes=redes, mapa=mapa,
-                           categorias_lista=dnslib.CATEGORIAS_LISTA, assinadas=dnslib.listas_assinadas(gobj),
-                           categorias_risco=sorted(dnslib.CATEGORIAS_RISCO),
-                           pacotes=[(k, v[0], v[1]) for k, v in dnslib.PACOTES.items()],
-                           grupo_bloqueia=gobj.get("enableBlocking", True),
-                           redes_emp=redes_emp, empresas_grupo=empresas_grupo, cadastro=cadastro,
-                           faixas=faixas, ips=ips, desc_ip=desc_ip, especificos=emp.grupos_especificos(),
-                           sem_grupo=_sem_grupo(emp.lista(), ngm))
-
-
-def _mapa_empresas(empresas: list[dict], cfg: dict) -> list[dict]:
-    """Uma linha por rede (CIDR) do cadastro de Empresas: o grupo atribuído a ELA (exato) e o
-    que vale de fato (exato, herdado de uma faixa maior ou o default)."""
-    ngm = dnslib.ngm_de(cfg)
-    exato = {str(k): v for k, v in ngm.items()}
-    out = []
-    for e in empresas:
-        for n in e.get("networks") or []:
-            cidr = dnslib.norm_ip(n.get("cidr")) or n.get("cidr")
-            try:
-                vale = dnslib.grupo_da_rede(cidr, ngm) or "default"
-            except ValueError:
-                continue
-            out.append({"empresa": e["name"], "tid": e["id"], "unidade": n.get("unit") or "", "cidr": cidr,
-                        "grupo": exato.get(cidr, ""), "vale": vale, "auto": bool(e.get("auto_created"))})
-    return sorted(out, key=lambda r: (r["auto"], r["empresa"].lower(), r["unidade"].lower(), dnslib._sort_key(r["cidr"])))
-
-
-def _sem_grupo(empresas: list[dict], ngm: dict) -> list[dict]:
-    """Redes do cadastro de Empresas (inclui as criadas sozinhas a partir dos logs) que
-    nenhum grupo cobre: caem no `default`. `parciais` = pedaços dela que já têm grupo."""
-    import ipaddress
-    mapa = []
-    for k, g in ngm.items():
-        try:
-            n = ipaddress.ip_network(k, strict=False)
-        except ValueError:
-            continue
-        if n.prefixlen:                      # 0.0.0.0/0 e ::/0 = o próprio default
-            mapa.append((n, g))
-    out = []
-    for e in empresas:
-        for r in e.get("networks", []):
-            try:
-                net = ipaddress.ip_network(r["cidr"], strict=False)
-            except ValueError:
-                continue
-            if any(net.version == n.version and net.subnet_of(n) for n, _ in mapa):
-                continue
-            parciais = sorted(((str(n), g) for n, g in mapa if n.version == net.version and n.subnet_of(net)),
-                              key=lambda x: dnslib._sort_key(x[0]))
-            out.append({"empresa": e["name"], "unidade": r.get("unit") or "", "cidr": str(net),
-                        "auto": e.get("auto_created"), "pcs": e.get("clients"), "visto": e.get("last_seen"),
-                        "parciais": parciais})
-    return sorted(out, key=lambda x: (not x["auto"], x["empresa"].lower(), dnslib._sort_key(x["cidr"])))
+def _sem_technitium():
+    return render_template("admin/nao_configurado.html", oque="Technitium (TECHNITIUM_URL/TECHNITIUM_TOKEN)")
 
 
 @admin_bp.get("/dominios")
@@ -252,241 +146,26 @@ def dominios():
                            cats_risco=sorted(dnslib.CATEGORIAS_RISCO))
 
 
-@admin_bp.post("/bloqueios/add")
-@login_required
-def bloqueios_add():
-    grupo = (request.form.get("grupo") or "").strip()
-    texto = request.form.get("dominios") or ""
-    f = request.files.get("arquivo")
-    if f and f.filename:
-        try:
-            texto += "\n" + f.read().decode("utf-8", "replace")
-        except Exception:  # noqa: BLE001
-            flash("Não consegui ler o arquivo enviado.", "erro")
-    de = (request.form.get("de_grupo") or "").strip()
-    if de and de != grupo:
-        try:
-            texto += "\n" + "\n".join(dnslib.bloqueados(de) or [])
-        except Exception as e:  # noqa: BLE001
-            flash(f"Não consegui ler o grupo de origem: {e}", "erro")
-    try:
-        add, ja, total = dnslib.add_bloqueio(grupo, texto)
-        if add is None:
-            flash("Grupo inválido.", "erro")
-        elif add == 0 and ja == 0:
-            flash("Nenhum domínio válido no que você enviou.", "erro")
-        else:
-            flash(f"{add} adicionado(s), {ja} já existia(m). Total do grupo: {total}.", "ok")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao adicionar: {e}", "erro")
-    return redirect(url_for("admin.dominios", grupo=grupo))
-
-
-@admin_bp.post("/bloqueios/limpar")
-@login_required
-def bloqueios_limpar():
-    grupo = (request.form.get("grupo") or "").strip()
-    try:
-        n = dnslib.limpar_bloqueios(grupo)
-        if n is None:
-            flash("Grupo inválido.", "erro")
-        else:
-            flash(f"Lista de {grupo} limpa ({n} domínio(s) removido(s)).", "ok")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao limpar: {e}", "erro")
-    return redirect(url_for("admin.dominios", grupo=grupo))
-
-
-@admin_bp.post("/bloqueios/renomear")
-@login_required
-def bloqueios_renomear():
-    velho = (request.form.get("grupo") or "").strip()
-    novo = (request.form.get("novo_nome") or "").strip()
-    try:
-        n, msg = dnslib.renomear_grupo(velho, novo)
-        if n:
-            flash(f"Grupo '{velho}' {msg} para '{n}'.", "ok")
-            try:   # a config do grupo (ex.: específico) acompanha o nome
-                api.put("/console/group-settings", {"name": velho, "rename_to": n, "by": admin_atual().email})
-            except AnalyzerError:
-                pass
-            return redirect(url_for("admin.grupos", grupo=n))
-        flash(msg, "erro")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao renomear: {e}", "erro")
-    return redirect(url_for("admin.grupos", grupo=velho))
-
-
-@admin_bp.post("/bloqueios/deletar")
-@login_required
-def bloqueios_deletar():
-    grupo = (request.form.get("grupo") or "").strip()
-    try:
-        n, info = dnslib.deletar_grupo(grupo)
-        if n:
-            try:
-                api.delete(f"/console/group-settings?name={quote(n, safe='')}")
-            except AnalyzerError:
-                pass
-            extra = f" ({info} rede(s) desatribuída(s))" if info else ""
-            flash(f"Grupo '{n}' removido{extra}.", "ok")
-            return redirect(url_for("admin.grupos"))
-        flash(info, "erro")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao remover grupo: {e}", "erro")
-    return redirect(url_for("admin.grupos", grupo=grupo))
-
-
-@admin_bp.post("/bloqueios/grupo")
-@login_required
-def bloqueios_grupo():
-    nome = (request.form.get("nome") or "").strip()
-    clonar = (request.form.get("clonar_de") or "").strip() or None
-    try:
-        n, msg = dnslib.criar_grupo(nome, clonar)
-        if n:
-            flash(f"Grupo '{n}' {msg}.", "ok")
-            return redirect(url_for("admin.grupos", grupo=n))
-        flash(msg, "erro")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao criar grupo: {e}", "erro")
-    return redirect(url_for("admin.grupos"))
-
-
-@admin_bp.post("/bloqueios/rede")
-@login_required
-def bloqueios_rede_add():
-    grupo = (request.form.get("grupo") or "").strip()
-    try:
-        cidr, ant = dnslib.atribuir_rede(request.form.get("rede"), grupo)
-        if cidr:
-            flash(f"Rede {cidr} atribuída a {grupo}"
-                  + (f" (antes: {ant})." if ant else "."), "ok")
-        else:
-            flash(ant, "erro")   # ant carrega a mensagem de erro quando cidr é None
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao atribuir rede: {e}", "erro")
-    return redirect(url_for("admin.grupos", grupo=grupo))
-
-
-@admin_bp.post("/bloqueios/empresa")
-@login_required
-def bloqueios_empresa_add():
-    """Atribui ao grupo todas as redes (CIDR) de uma empresa do cadastro (ou só de uma filial)."""
-    from app import empresas as emp
-    grupo = (request.form.get("grupo") or "").strip()
-    tid = request.form.get("empresa", type=int)
-    filial = (request.form.get("filial") or "").strip()
-    e = next((x for x in emp.lista() if x["id"] == tid), None)
-    redes = [n["cidr"] for n in (e or {}).get("networks", []) if not filial or (n.get("unit") or "") == filial]
-    if not e:
-        flash("Escolha uma empresa do cadastro.", "erro")
-    elif not redes:
-        flash(f"{e['name']} não tem rede (CIDR) cadastrada"
-              + (f" na filial {filial}" if filial else "") + " — cadastre em Empresas.", "erro")
-    else:
-        try:
-            feitos, invalidos = dnslib.atribuir_redes(redes, grupo)
-            antes = [f"{c} (antes: {a})" for c, a in feitos if a]
-            nome = e["name"] + (f" · {filial}" if filial else "")
-            flash(f"{nome}: {len(feitos)} rede(s) atribuída(s) a {grupo}: {', '.join(c for c, _ in feitos)}."
-                  + (f" Mudaram de grupo: {'; '.join(antes)}." if antes else ""), "ok")
-            if invalidos:
-                flash(f"Redes inválidas no cadastro, ignoradas: {', '.join(invalidos)}", "erro")
-            current_app.logger.info("DNS: %s atribuiu %s (%s) a %s", admin_atual().email, nome, redes, grupo)
-        except Exception as ex:  # noqa: BLE001
-            flash(f"Falha ao atribuir: {ex}", "erro")
-    return redirect(url_for("admin.grupos", grupo=grupo))
-
-
-@admin_bp.post("/grupos/config")
-@login_required
-def grupo_config():
-    """Grupo específico (ex.: Anúncios): fica de fora do "Bloquear em todas"."""
-    grupo = (request.form.get("grupo") or "").strip()
-    esp = bool(request.form.get("especifico"))
-    try:
-        api.put("/console/group-settings", {"name": grupo, "especifico": esp, "by": admin_atual().email})
-        flash(f"{grupo}: " + ("grupo específico — não entra mais no \"Bloquear em todas\"." if esp
-                              else "volta a entrar no \"Bloquear em todas\"."), "ok")
-    except AnalyzerError as e:
-        flash(f"Falha ao salvar: {e}", "erro")
-    return redirect(url_for("admin.grupos", grupo=grupo))
-
-
-@admin_bp.post("/bloqueios/rede/rem")
-@login_required
-def bloqueios_rede_rem():
-    grupo = (request.form.get("grupo") or "").strip()
-    try:
-        r = dnslib.remover_rede(request.form.get("rede"), grupo)
-        if r:
-            flash(f"Rede {r} removida de {grupo} (volta a filtrar pela rede pai).", "ok")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao remover rede: {e}", "erro")
-    return redirect(url_for("admin.grupos", grupo=grupo))
-
-
-@admin_bp.post("/bloqueios/rem")
-@login_required
-def bloqueios_rem():
-    grupo = (request.form.get("grupo") or "").strip()
-    qg = (request.form.get("qg") or "").strip()
-    try:
-        d = dnslib.rem_bloqueio(grupo, request.form.get("dominio"))
-        if d:
-            flash(f"{d} removido de {grupo}.", "ok")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao remover: {e}", "erro")
-    if qg:  # veio da busca global: volta pra ela
-        return redirect(url_for("admin.dominios", qg=qg))
-    return redirect(url_for("admin.dominios", grupo=grupo, q=(request.form.get("q") or "")))
-
-
 @admin_bp.post("/bloqueios/rem-todos")
 @login_required
 def bloqueios_rem_todos():
     doms = request.form.getlist("dominios")
     qg = (request.form.get("qg") or "").strip()
     voltar = (request.form.get("voltar") or "").strip()
-    try:
-        rem, gruposaf = dnslib.rem_dominios_todos(doms)
-        try:   # listas de bloqueio por categoria (+ decisão 'manter liberado')
-            nl = api.post("/listas-remover", {"domains": doms}).get("removidos", 0)
-            if nl:
-                rem, gruposaf = rem + nl, gruposaf + nl
-                for d in doms:
-                    _decisao_global(d, "allowed")
-        except AnalyzerError:
-            pass
+    try:   # tira de todas as listas de bloqueio (+ decisão 'manter liberado': o automático não põe de volta)
+        rem = api.post("/listas-remover", {"domains": doms}).get("removidos", 0)
+        for d in doms:
+            _decisao_global(d, "allowed")
         if rem == 0:
-            flash("Nenhum domínio removido.", "erro")
+            flash("Nenhuma entrada encontrada nas listas de bloqueio.", "erro")
         else:
             alvo = ", ".join(doms) if len(doms) <= 3 else f"{len(doms)} domínios"
-            flash(f"{alvo}: {rem} remoção(ões) em {gruposaf} lista(s).", "ok")
+            flash(f"{alvo}: fora de {rem} lista(s) de bloqueio (vale no DNS em até 1 h).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao remover de todas as listas: {e}", "erro")
     if next_local(voltar):  # veio da tela de logs: volta pra ela
         return redirect(voltar)
     return redirect(url_for("admin.dominios", qg=qg))
-
-
-@admin_bp.post("/bloqueios/rem-varios")
-@login_required
-def bloqueios_rem_varios():
-    grupo = (request.form.get("grupo") or "").strip()
-    doms = request.form.getlist("dominios")
-    try:
-        rem, total = dnslib.rem_bloqueios(grupo, doms)
-        if rem is None:
-            flash("Grupo inválido.", "erro")
-        elif rem == 0:
-            flash("Nenhum domínio selecionado para remover.", "erro")
-        else:
-            flash(f"{rem} domínio(s) removido(s) de {grupo}. Total restante: {total}.", "ok")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao remover em massa: {e}", "erro")
-    return redirect(url_for("admin.dominios", grupo=grupo, q=(request.form.get("q") or "")))
 
 
 LOGS_LIMITE = 1000
@@ -586,9 +265,9 @@ def logs_dns():
         return render_template("admin/nao_configurado.html", oque="Technitium (TECHNITIUM_URL/TECHNITIUM_TOKEN)")
     from app import empresas as emp
     empresa = (request.args.get("empresa") or "").strip()   # id do cadastro de empresas
-    grupo = (request.args.get("grupo") or "").strip()       # grupo de bloqueio (política) do Technitium
+    grupo = ""   # (filtro por grupo saiu: os grupos agora são internos, um por empresa)
     if empresa and not empresa.isdigit():                   # links antigos: empresa=<grupo>
-        grupo, empresa = empresa, ""
+        empresa = ""
     cidr = (request.args.get("cidr") or "").strip()
     ip = (request.args.get("ip") or "").strip()
     dominio = (request.args.get("dominio") or "").strip()
@@ -617,8 +296,6 @@ def logs_dns():
         ip_like = None
         if empresa:
             redes = emp.redes_da_empresa(int(empresa))
-        elif grupo:
-            redes = dnslib.empresa_redes(grupo, mapa)
         elif cidr:
             import ipaddress
             try:
@@ -648,7 +325,7 @@ def logs_dns():
             inicio=dnslib.local_para_utc_iso(inicio), fim=dnslib.local_para_utc_iso(fim),
             dominio=dominio or None, ip_exato=ip or None,
             resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=smax)
-        # empresa/unidade pelo cadastro (o "empresa" do Technitium é o grupo de bloqueio)
+        # empresa/unidade pelo cadastro (o "empresa" do Technitium é o grupo interno)
         info = emp.resolver(l.get("ip") for l in linhas)
         for l in linhas:
             l["grupo"] = l.get("empresa")
@@ -756,34 +433,19 @@ def graficos():
         **_ctx_cls(cls_f, categoria))
 
 
-# ------------------------------------------------- Listas por categoria (analisador) assinadas pelos grupos
-@admin_bp.post("/grupos/listas")
-@login_required
-def grupo_listas():
-    """Quais listas por categoria o grupo assina (Technitium baixa de hora em hora)."""
-    grupo = (request.form.get("grupo") or "").strip()
-    try:
-        ass = dnslib.assinar_listas(grupo, request.form.getlist("cats"))
-        rot = dict(dnslib.CATEGORIAS_LISTA)
-        current_app.logger.info("DNS: %s: grupo %s assina listas %s", admin_atual().email, grupo, ass)
-        flash(f"{grupo}: assina " + (", ".join(rot[c] for c in ass) if ass else "nenhuma lista por categoria") + ".", "ok")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao salvar as listas do grupo: {e}", "erro")
-    return redirect(url_for("admin.grupos", grupo=grupo))
-
-
 @admin_bp.get("/listas-categoria")
 @login_required
 def listas_categoria():
-    """Listas de bloqueio por categoria: o que está em cada uma e quem assina."""
+    """Listas de bloqueio por categoria: o que está em cada uma e quais empresas a aplicam."""
     if not current_app.config.get("ANALYZER_ENABLED"):
         return render_template("admin/nao_configurado.html", oque="Analisador (ANALYZER_URL/ANALYZER_TOKEN)")
     cat = (request.args.get("cat") or "apostas").strip()
     q = (request.args.get("q") or "").strip().lower()
-    resumo, itens, ass = {"categorias": [], "auto": [], "auto_24h": 0}, [], {}
+    resumo, det = {"categorias": [], "auto": [], "auto_24h": 0}, _DET_VAZIO
+    fd = _det_filtros("recentes")
     try:
         resumo = api.get("/listas")
-        itens = api.get(f"/listas/{quote(cat, safe='')}", q=q or None, limit=2000)
+        det = api.get(f"/listas/{quote(cat, safe='')}/detalhes", **_det_params(fd))
     except AnalyzerError as e:
         flash(f"Falha ao carregar as listas: {e}", "erro")
     from app import empresas as emp
@@ -808,9 +470,83 @@ def listas_categoria():
         servicos = api.get("/liberacao")
     except AnalyzerError:
         servicos = []
-    return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, itens=itens,
+    return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd,
+                           scats=_site_cats(), pag_url=_pag_url,
                            categorias=dnslib.CATEGORIAS_LISTA, sugestoes=sugestoes, empresas_pol=empresas_pol,
                            default_tem=default_tem, servicos=servicos)
+
+
+# --------------------------------------------- tabela detalhada (listas e "Classificados por IA como Trabalho")
+_DET_VAZIO = {"total": 0, "total_geral": 0, "items": [], "facetas": {"cat_ia": {}, "classificacao": {}, "revisao": {}}}
+
+
+def _det_filtros(ordem_padrao: str, cls_padrao: str = "") -> dict:
+    a = request.args
+    pp = a.get("pp", 100, type=int)
+    return {"q": (a.get("q") or "").strip().lower(), "cls": a.get("cls", cls_padrao), "cat_ia": a.get("cat_ia", ""),
+            "revisao": a.get("revisao", ""), "ordem": a.get("ordem") or ordem_padrao,
+            "pp": pp if pp in (100, 250, 500) else 100, "pag": max(1, a.get("pag", 1, type=int))}
+
+
+def _det_params(fd: dict) -> dict:
+    return {"q": fd["q"] or None, "cls": fd["cls"] or None, "cat_ia": fd["cat_ia"] or None,
+            "revisao": fd["revisao"] or None, "ordem": fd["ordem"], "limit": fd["pp"], "offset": (fd["pag"] - 1) * fd["pp"]}
+
+
+def _pag_url(n: int) -> str:
+    args = request.args.to_dict()
+    args["pag"] = n
+    return url_for(request.endpoint, **args)
+
+
+def _site_cats() -> dict[str, str]:
+    try:
+        return {c["code"]: c["label"] for c in api.get("/site-categories")}
+    except AnalyzerError:
+        return {}
+
+
+@admin_bp.post("/listas-lote-dominios")
+@login_required
+def listas_lote_dominios():
+    """Ações em lote da tabela detalhada: mover p/ outras listas, tirar da lista, pôr em listas,
+    pedir nova análise da IA."""
+    d = request.get_json(silent=True) or {}
+    acao, cat = d.get("acao"), d.get("cat") or ""
+    doms = list(dict.fromkeys(x.strip().lower().rstrip(".") for x in d.get("dominios") or [] if x and x.strip()))
+    rot = dict(dnslib.CATEGORIAS_LISTA)
+    para = [c for c in d.get("para") or [] if c in rot and c != cat]
+    if not doms:
+        return _json(False, "Selecione pelo menos um domínio.")
+    quem = admin_atual().email
+    try:
+        if acao == "reanalisar":
+            r = api.post("/domains-reanalyze", {"domains": doms})
+            return _json(True, f"{r.get('enviados', 0)} domínio(s) enviados para nova análise (regras agora; IA, busca na web e WHOIS na fila)."
+                         + (f" {r['ignorados']} ficaram de fora (classificação travada à mão ou nunca acessados)." if r.get("ignorados") else ""))
+        if acao in ("mover", "tirar"):
+            if cat not in rot:
+                return _json(False, "lista inválida")
+            if acao == "mover" and not para:
+                return _json(False, "Marque pelo menos uma lista de destino.")
+            api.post("/listas-mover", {"domains": doms, "de": cat, "para": para if acao == "mover" else [], "by": quem})
+            for x in doms:
+                _decisao_global(x, "blocked" if acao == "mover" else "allowed")
+            current_app.logger.info("DNS: %s: %s %s de %s -> %s", quem, acao, doms, cat, para)
+            if acao == "tirar":
+                return _json(True, f"{len(doms)} domínio(s) fora da lista {rot[cat]} (decisão: manter liberado). O DNS atualiza em até 1 h.")
+            return _json(True, f"{len(doms)} domínio(s) movidos de {rot[cat]} para {', '.join(rot[c] for c in para)}. O DNS atualiza em até 1 h.")
+        if acao == "por":
+            if not para:
+                return _json(False, "Marque pelo menos uma lista.")
+            api.post("/listas-lote", {"domains": doms, "cats": para, "by": quem})
+            for x in doms:
+                _decisao_global(x, "blocked")
+            current_app.logger.info("DNS: %s pôs %s nas listas %s", quem, doms, para)
+            return _json(True, f"{len(doms)} domínio(s) nas listas {', '.join(rot[c] for c in para)}. O DNS atualiza em até 1 h.")
+        return _json(False, "ação inválida")
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
 
 
 def _tirar_da_lista(cat: str, dominio: str) -> None:
@@ -861,72 +597,6 @@ def _json(ok: bool, msg: str, **kw):
     return jsonify(ok=ok, msg=msg, **kw), (200 if ok else 400)
 
 
-@admin_bp.post("/grupos/api/rede")
-@login_required
-def grupos_api_rede():
-    """Grupo de UMA rede do cadastro. grupo vazio = tira a atribuição (vale a faixa maior/default)."""
-    d = request.get_json(silent=True) or {}
-    cidr, grupo = (d.get("cidr") or "").strip(), (d.get("grupo") or "").strip()
-    try:
-        cfg = dnslib._get_config()
-        atual = next((v for k, v in cfg.get("networkGroupMap", {}).items() if dnslib.norm_ip(k) == dnslib.norm_ip(cidr)), "")
-        if not grupo:
-            if atual:
-                dnslib.remover_rede(cidr, atual)
-            msg = f"{cidr}: sem grupo próprio (vale a faixa maior ou o default)."
-        else:
-            ipn, ant = dnslib.atribuir_rede(cidr, grupo)
-            if not ipn:
-                return _json(False, ant)
-            msg = f"{ipn} → {grupo}" + (f" (antes: {ant})" if ant else "")
-        vale = dnslib.grupo_da_rede(cidr, dnslib.ngm_de(dnslib._get_config())) or "default"
-        current_app.logger.info("DNS: %s: rede %s -> %s", admin_atual().email, cidr, grupo or "(sem grupo)")
-        return _json(True, msg, vale=vale)
-    except Exception as e:  # noqa: BLE001
-        return _json(False, f"Falha: {e}")
-
-
-@admin_bp.post("/grupos/api/listas")
-@login_required
-def grupos_api_listas():
-    d = request.get_json(silent=True) or {}
-    grupo = (d.get("grupo") or "").strip()
-    try:
-        ass = dnslib.assinar_listas(grupo, d.get("cats") or [])
-        current_app.logger.info("DNS: %s: grupo %s assina listas %s", admin_atual().email, grupo, ass)
-        rot = dict(dnslib.CATEGORIAS_LISTA)
-        return _json(True, f"{grupo}: " + (", ".join(rot[c] for c in ass) if ass else "nenhuma lista por categoria"), listas=ass)
-    except Exception as e:  # noqa: BLE001
-        return _json(False, f"Falha: {e}")
-
-
-@admin_bp.post("/grupos/api/especifico")
-@login_required
-def grupos_api_especifico():
-    d = request.get_json(silent=True) or {}
-    grupo, esp = (d.get("grupo") or "").strip(), bool(d.get("especifico"))
-    try:
-        api.put("/console/group-settings", {"name": grupo, "especifico": esp, "by": admin_atual().email})
-        return _json(True, f"{grupo}: " + ("específico (fora do “Bloquear em todas”)" if esp else "entra no “Bloquear em todas”"))
-    except AnalyzerError as e:
-        return _json(False, f"Falha: {e}")
-
-
-@admin_bp.post("/grupos/api/pacotes")
-@login_required
-def grupos_api_pacotes():
-    """Serviços liberados como exceção no grupo (vencem as listas assinadas)."""
-    d = request.get_json(silent=True) or {}
-    grupo = (d.get("grupo") or "").strip()
-    try:
-        lib = dnslib.liberar_pacotes(grupo, d.get("servicos") or [])
-        current_app.logger.info("DNS: %s: grupo %s libera %s", admin_atual().email, grupo, lib)
-        return _json(True, f"{grupo}: libera " + (", ".join(dnslib.PACOTES[k][0] for k in lib) if lib else "nenhum serviço"),
-                     pacotes=lib)
-    except Exception as e:  # noqa: BLE001
-        return _json(False, f"Falha: {e}")
-
-
 # ------------------------------------------------- Políticas: empresa <-> listas (modais)
 @admin_bp.post("/empresas/<int:tid>/politica")
 @login_required
@@ -975,7 +645,8 @@ def lista_empresas():
                                                                "services_blocked": p.get("services_blocked") or [],
                                                                "by": admin_atual().email})
                 mudou += 1
-        r = pol.sincronizar() if mudou else {"redes": None}
+        if mudou:
+            pol.sincronizar()
         current_app.logger.info("DNS: %s: lista %s -> empresas %s (default=%s)", admin_atual().email, cat, sorted(quer), d.get("default"))
         return _json(True, f"{mudou} política(s) alterada(s) e aplicadas no DNS." if mudou else "Nada mudou.")
     except Exception as e:  # noqa: BLE001
@@ -1038,11 +709,17 @@ def _servico_ctx(slug: str) -> dict:
 def listas_liberacao():
     """Listas de liberação avulsas (whitelist): vencem qualquer lista de bloqueio."""
     ctx = {"servico": None, "todas": []}
+    slug = request.args.get("slug") or ""
     try:
         todas = api.get("/liberacao")
         avulsas = [x for x in todas if not x.get("category")]
-        slug = request.args.get("slug") or (avulsas[0]["slug"] if avulsas else "")
-        ctx = _servico_ctx(slug) if slug else {"servico": None, "todas": todas}
+        if slug == "_trabalho":   # só consulta: não é lista, não vai p/ o Technitium
+            fd = _det_filtros("consultas", "TRABALHO")
+            ctx = {"servico": None, "todas": todas, "trabalho": True, "fd": fd, "det": api.get("/sem-lista", **_det_params(fd)),
+                   "scats": _site_cats(), "pag_url": _pag_url}
+        else:
+            slug = slug or (avulsas[0]["slug"] if avulsas else "")
+            ctx = _servico_ctx(slug) if slug else {"servico": None, "todas": todas}
     except AnalyzerError as e:
         flash(f"Falha ao carregar as listas de liberação: {e}", "erro")
     return render_template("admin/servico.html", modo="liberacao", categorias=dnslib.CATEGORIAS_LISTA, **ctx)

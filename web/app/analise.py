@@ -16,7 +16,6 @@ from flask import (Blueprint, current_app, flash, get_flashed_messages, jsonify,
 from app import analyzer_client as api
 from app import technitium as dnslib
 from app.analyzer_client import AnalyzerError
-from app.empresas import grupos_especificos
 from app.auth import admin_atual, login_required, next_local
 
 analise_bp = Blueprint("analise", __name__, url_prefix="/analise")
@@ -103,8 +102,8 @@ def _ctx(**kw):
 
 # ------------------------------------------------------------------ status bloqueado/liberado
 def _indice_status(tenant: dict | None):
-    """(índice de bloqueio, grupos do escopo). Escopo = grupos da empresa; na visão
-    'todos' (ou empresa sem grupo), todos os grupos de bloqueio."""
+    """(índice de bloqueio, grupos do escopo). Escopo = grupos internos "Empresa: …" das redes da
+    empresa (um por política); na visão 'todos', todos."""
     from flask import g
     if not current_app.config.get("TECHNITIUM_ENABLED"):
         return None, None
@@ -127,15 +126,6 @@ def _status(nomes, tenant: dict | None) -> dict[str, list[str]]:
     if idx is None:
         return {}
     return {n: dnslib.bloqueado_em(idx, n, grupos) for n in dict.fromkeys(nomes) if n}
-
-
-def _status_global(st: dict[str, list[str]]) -> dict[str, list[str]]:
-    """{domínio bloqueado: [grupos onde está bloqueado]} em TODAS as listas (não só as da empresa) —
-    marca no diálogo Bloquear… as listas em que já está."""
-    idx, _ = _indice_status(None)
-    if idx is None:
-        return {}
-    return {n: dnslib.bloqueado_em(idx, n) for n, g in st.items() if g}
 
 
 def _fila_pendente(fila: list[dict], tenants: list[dict]) -> tuple[list[dict], int]:
@@ -343,38 +333,6 @@ def decisoes_lote():
     return _fim(voltar)
 
 
-@analise_bp.post("/decisoes/<int:tid>/<path:nome>")
-def decisao(tid, nome):
-    """Bloquear (nos grupos da empresa) ou manter liberado — e registra a decisão."""
-    acao = request.form.get("acao")
-    voltar = request.form.get("voltar") or url_for("analise.decisoes", t=tid)
-    try:
-        if acao == "bloquear":
-            tenant = next((t for t in _tenants() if t["id"] == tid), None)
-            idx = dnslib.indice_bloqueio()
-            grupos = sorted(_grupos_empresa(tenant, idx["ngm"]))
-            if not grupos:
-                flash(f"{nome}: a empresa não tem grupo de bloqueio no Technitium — bloqueie pela página do domínio.",
-                      "erro")
-                return _fim(voltar)
-            dnslib.bloquear_em(grupos, nome)
-            api.post(f"/tenants/{tid}/review/{quote(nome, safe='')}", {"status": "blocked", "by": _quem()})
-            current_app.logger.info("DNS: %s BLOQUEOU %s em %s (decisão)", _quem(), nome, grupos)
-            flash(f"{nome} bloqueado em {', '.join(grupos)}.", "ok")
-        elif acao == "liberar":
-            api.post(f"/tenants/{tid}/review/{quote(nome, safe='')}", {"status": "allowed", "by": _quem()})
-            flash(f"{nome}: mantido liberado (decisão registrada).", "ok")
-        elif acao == "manter_bloqueado":
-            api.post(f"/tenants/{tid}/review/{quote(nome, safe='')}", {"status": "blocked", "by": _quem()})
-            flash(f"{nome}: mantido bloqueado (decisão registrada).", "ok")
-        elif acao == "reabrir":
-            api.post(f"/tenants/{tid}/review/{quote(nome, safe='')}", {"status": None, "by": _quem()})
-            flash(f"{nome} voltou para a fila de decisão.", "ok")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha: {e}", "erro")
-    return _fim(voltar if next_local(voltar) else url_for("analise.decisoes", t=tid))
-
-
 # ------------------------------------------------------------------ domínios
 @analise_bp.get("/dominios")
 def dominios():
@@ -389,13 +347,13 @@ def dominios():
         except AnalyzerError as e:
             flash(f"Falha ao listar domínios: {e}", "erro")
         st = _status([d["name"] for d in res["items"]], ctx["tenant"])
-    return render_template("admin/analise/dominios.html", res=res, f=f, st=st, stg=_status_global(st),
+    return render_template("admin/analise/dominios.html", res=res, f=f, st=st,
                            scats=_site_cats(),
                            grp=_grp_ctx(ctx["tenants"]), aba="dominios", voltar=request.full_path, **ctx)
 
 
 def _grupos_empresa(tenant: dict | None, ngm: dict) -> dict[str, list[str]]:
-    """{grupo de bloqueio: [redes da empresa que usam esse grupo]}."""
+    """{grupo interno do Technitium ("Empresa: …"): [redes da empresa nesse grupo]}."""
     out: dict[str, list[str]] = {}
     for n in (tenant or {}).get("networks", []):
         g = dnslib.grupo_da_rede(n["cidr"], ngm)
@@ -404,46 +362,60 @@ def _grupos_empresa(tenant: dict | None, ngm: dict) -> dict[str, list[str]]:
     return out
 
 
-def _compartilham(grupos, ngm: dict, excluir: str | None) -> dict[str, list[str]]:
-    """{grupo: [outras empresas que usam o mesmo grupo]} — via cadastro de empresas."""
+def _aplicam_listas() -> dict[str, list[str]]:
+    """{lista: [empresas que a aplicam]} pelas políticas (redes sem cadastro = "padrão")."""
     from app import empresas as emp
-    out = {}
-    for g in grupos:
-        redes = [str(k) for k, v in ngm.items() if v == g and k.prefixlen < 32 and k.prefixlen > 0]
-        nomes = {r.split(" · ")[0] for r in emp.rotulos_de_redes(redes).values()}
-        out[g] = sorted(nomes - {excluir})
-    return out
+    from app import politicas as pol
+    por = pol.por_escopo()
+    empresas = [e for e in emp.lista() if not e.get("auto_created")]
+    out: dict[str, set] = {}
+    for e in empresas:
+        p = por.get(f"tenant:{e['id']}") or por.get("default") or {}
+        for c in p.get("lists") or []:
+            out.setdefault(c, set()).add(e["name"])
+        for k, pu in por.items():
+            if k.startswith(f"unit:{e['id']}:"):
+                for c in pu.get("lists") or []:
+                    out.setdefault(c, set()).add(f"{e['name']} · {k.split(':', 2)[2]}")
+    for c in (por.get("default") or {}).get("lists") or []:
+        out.setdefault(c, set()).add("padrão")
+    return {c: sorted(v) for c, v in out.items()}
+
+
+def _listas_da_empresa(tid: int | None) -> list[str]:
+    """Listas que valem para a empresa (política dela + unidades; sem política = padrão)."""
+    from app import politicas as pol
+    por = pol.por_escopo()
+    p = por.get(f"tenant:{tid}") or por.get("default") or {}
+    cats = set(p.get("lists") or [])
+    for k, pu in por.items():
+        if k.startswith(f"unit:{tid}:"):
+            cats |= set(pu.get("lists") or [])
+    return sorted(cats)
 
 
 def _bloqueio_ctx(nome_reg: str, tenant: dict | None, evidencias: list) -> dict | None:
     if not current_app.config.get("TECHNITIUM_ENABLED"):
         return None
     try:
-        cfg = dnslib._get_config()
-        ngm = dnslib.ngm_de(cfg)
-        estado = dnslib.estado_bloqueio(nome_reg, cfg)
-        g_emp = _grupos_empresa(tenant, ngm)
-        rot, ass, listas = dict(dnslib.CATEGORIAS_LISTA), dnslib.assinantes(cfg), []
+        rot, listas = dict(dnslib.CATEGORIAS_LISTA), []
+        aplicam = _aplicam_listas()
+        da_empresa = set(_listas_da_empresa(tenant["id"])) if tenant and tenant.get("id") else set()
         try:
             listas = [{"cat": r["category"], "rot": rot.get(r["category"], r["category"]), "entrada": r["domain"],
-                       "por": r.get("added_by"), "grupos": ass.get(r["category"], [])}
+                       "por": r.get("added_by"), "empresas": aplicam.get(r["category"], []),
+                       "da_empresa": r["category"] in da_empresa}
                       for r in api.get(f"/listas-dominio/{quote(nome_reg, safe='')}")]
         except AnalyzerError:
             pass
         return {
-            "nome": nome_reg, "estado": estado, "grupos_empresa": g_emp, "listas": listas,
+            "nome": nome_reg, "listas": listas,
             "categorias": dnslib.CATEGORIAS_LISTA, "risco": sorted(dnslib.CATEGORIAS_RISCO),
-            "compartilham": _compartilham(g_emp.keys(), ngm, (tenant or {}).get("name")),
-            "todos": dnslib.grupos_ativos(cfg),
-            "especificos": sorted(grupos_especificos()),
-            "bloqueado_empresa": sorted(set(estado) & set(g_emp)),
             "protegido": any(e.get("kind") == "catalog" and (e.get("data") or {}).get("protected")
                              for e in evidencias or []),
         }
-    except ValueError:
-        return None   # nome que não é domínio bloqueável (ex.: IP)
     except Exception as e:  # noqa: BLE001
-        flash(f"Não foi possível consultar os bloqueios do Technitium: {e}", "erro")
+        flash(f"Não foi possível consultar as listas de bloqueio: {e}", "erro")
         return None
 
 
@@ -460,22 +432,6 @@ def dominio(nome):
         blq = _bloqueio_ctx(d["domain"]["name"], ctx["tenant"], d["domain"].get("evidence"))
     return render_template("admin/analise/dominio.html", d=d, nome=nome, blq=blq, scats=_site_cats(),
                            aba="dominios", **ctx)
-
-
-def _escopo_grupos(escopo: str, tid: int, dominio: str, acao: str) -> list[str]:
-    cfg = dnslib._get_config()
-    ngm = dnslib.ngm_de(cfg)
-    ativos = set(dnslib.grupos_ativos(cfg))
-    tenant = next((t for t in _tenants() if t["id"] == tid), None)
-    if escopo.startswith("g:"):
-        return [escopo[2:]] if escopo[2:] in ativos else []
-    if escopo == "empresa":
-        return sorted(set(_grupos_empresa(tenant, ngm)) & ativos)
-    if escopo == "todos":
-        if acao == "bloquear":   # grupos específicos (ex.: Anúncios) não entram em "todos"
-            return sorted(ativos - grupos_especificos())
-        return sorted(dnslib.estado_bloqueio(dominio, cfg))
-    return []
 
 
 def _voltar(nome: str, tid):
@@ -512,49 +468,24 @@ def _registrar_decisao(tid, dominio: str, status: str) -> None:
         pass   # domínio nunca visto nesta empresa: nada a registrar
 
 
-@analise_bp.post("/dominio/<path:nome>/bloquear")
-def dominio_bloquear(nome):
-    tid = request.form.get("tid", type=int)
-    dominio_reg = request.form.get("dominio", "")
-    try:
-        grupos = _escopo_grupos(request.form.get("escopo", ""), tid, dominio_reg, "bloquear")
-        if not grupos:
-            flash("Nenhum grupo de bloqueio no escopo escolhido.", "erro")
-        else:
-            res = dnslib.bloquear_em(grupos, dominio_reg)
-            add = [g for g, s in res.items() if s == "adicionado"]
-            ja = [g for g, s in res.items() if s == "já bloqueado"]
-            current_app.logger.info("DNS: %s BLOQUEOU %s em %s", _quem(), dominio_reg, add)
-            flash(f"{dominio_reg} bloqueado em: {', '.join(add) or '—'}."
-                  + (f" Já estava bloqueado em: {', '.join(ja)}." if ja else ""), "ok")
-        _registrar_decisao(tid, dominio_reg, "blocked")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao bloquear: {e}", "erro")
-    return _voltar(nome, tid)
-
-
 @analise_bp.post("/dominio/<path:nome>/liberar")
 def dominio_liberar(nome):
+    """Desbloquear: tira o domínio das listas de bloqueio (escopo "empresa" = só das listas que a
+    empresa aplica; senão, de todas) e registra "manter liberado". Listas são compartilhadas: vale
+    para todas as empresas que aplicam cada lista."""
     tid = request.form.get("tid", type=int)
     dominio_reg = request.form.get("dominio", "")
     try:
-        escopo = request.form.get("escopo", "")
-        grupos = _escopo_grupos(escopo, tid, dominio_reg, "liberar")
-        removidas, restam = dnslib.liberar_em(grupos, dominio_reg) if grupos else ({}, {})
-        if escopo == "todos":   # listas de bloqueio por categoria valem p/ todas as empresas que as aplicam
-            n = api.post("/listas-remover", {"domains": [dominio_reg]}).get("removidos", 0)
-            if n:
-                removidas = dict(removidas, **{"listas de bloqueio": [f"{n} lista(s)"]})
-        current_app.logger.info("DNS: %s LIBEROU %s em %s", _quem(), dominio_reg, removidas)
-        if removidas:
-            flash(f"{dominio_reg} liberado. Entradas removidas: "
-                  + "; ".join(f"{g}: {', '.join(v)}" for g, v in removidas.items()) + ".", "ok")
+        cats = _listas_da_empresa(tid) if request.form.get("escopo") == "empresa" and tid else []
+        n = api.post("/listas-remover", {"domains": [dominio_reg], "cats": cats}).get("removidos", 0)
+        current_app.logger.info("DNS: %s LIBEROU %s (%d lista(s)%s)", _quem(), dominio_reg, n,
+                                f" dentre {cats}" if cats else "")
+        if n:
+            flash(f"{dominio_reg} fora de {n} lista(s) de bloqueio (vale no DNS em até 1 h).", "ok")
         else:
-            flash("Nenhuma entrada do domínio encontrada no escopo escolhido.", "erro")
-        if restam:
-            flash("Atenção: continua bloqueado por domínio PAI em "
-                  + "; ".join(f"{g} ({', '.join(v)})" for g, v in restam.items())
-                  + ". Remover o pai liberaria tudo abaixo dele — faça isso em Domínios se for o caso.", "erro")
+            flash(f"{dominio_reg} não está em nenhuma lista de bloqueio"
+                  + (" da empresa" if cats else "") + " (pode estar bloqueado por um domínio pai; veja em Domínios).",
+                  "erro")
         _registrar_decisao(tid, dominio_reg, "allowed")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao liberar: {e}", "erro")

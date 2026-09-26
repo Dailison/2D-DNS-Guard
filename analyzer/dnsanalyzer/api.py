@@ -1101,6 +1101,65 @@ def lista_sugestoes(categoria: str, limit: int = Query(500, le=5000)):
         return listas.sugestoes(c, categoria, limit)
 
 
+@app.get("/listas/{categoria}/detalhes", dependencies=[Depends(auth)])
+def lista_detalhes(categoria: str, q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
+                   revisao: Optional[str] = None, ordem: str = "recentes", offset: int = Query(0, ge=0),
+                   limit: int = Query(100, le=1000)):
+    """Itens da lista com a classificação da IA, a revisão manual (quem/quando) e facetas p/ filtrar."""
+    if categoria not in listas.CATEGORIAS:
+        raise HTTPException(404, "categoria sem lista")
+    with db.conn() as c:
+        return listas.detalhes(c, categoria, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, ordem=ordem,
+                               offset=offset, limit=limit)
+
+
+@app.get("/sem-lista", dependencies=[Depends(auth)])
+def sem_lista(q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
+              revisao: Optional[str] = None, ordem: str = "consultas", offset: int = Query(0, ge=0),
+              limit: int = Query(100, le=1000)):
+    """Domínios analisados fora de qualquer lista (não vão p/ o Technitium)."""
+    with db.conn() as c:
+        return listas.sem_lista(c, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, ordem=ordem,
+                                offset=offset, limit=limit)
+
+
+class MoverIn(BaseModel):
+    domains: list[str]
+    de: str
+    para: list[str]
+    by: str = ""
+
+
+@app.post("/listas-mover", dependencies=[Depends(auth)])
+def listas_mover(body: MoverIn):
+    """Tira os domínios da lista `de` e põe nas listas `para` (para=[] só tira)."""
+    doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    ruins = [x for x in [body.de, *body.para] if x not in listas.CATEGORIAS]
+    if ruins:
+        raise HTTPException(422, f"lista inexistente: {', '.join(ruins)}")
+    with db.conn() as c:
+        for cat in body.para:
+            c.execute("INSERT INTO category_lists (category, domain, added_by) SELECT %s, d, %s FROM unnest(%s::text[]) d "
+                      "ON CONFLICT DO NOTHING", (cat, body.by or None, doms))
+        n = 0 if body.de in body.para else c.execute(
+            "DELETE FROM category_lists WHERE category=%s AND domain = ANY(%s)", (body.de, doms)).rowcount
+    return {"ok": True, "movidos": len(doms), "removidos": n}
+
+
+class NomesIn(BaseModel):
+    domains: list[str]
+
+
+@app.post("/domains-reanalyze", dependencies=[Depends(auth)])
+def reanalyze_lote(body: NomesIn):
+    """Nova análise em lote (regras agora; IA + busca na fila). Travados à mão ficam de fora."""
+    nomes = sorted({_domain_name(x) for x in body.domains if x and x.strip()})
+    with db.conn() as c:
+        n = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, llm_attempts=0 "
+                      "WHERE name = ANY(%s) AND NOT locked", (nomes,)).rowcount
+    return {"ok": True, "enviados": n, "ignorados": len(nomes) - n}
+
+
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
 def listas_do_dominio(name: str):
     """Em que listas o domínio está (ele mesmo ou um domínio pai)."""
@@ -1350,38 +1409,3 @@ def auto_block_candidates(limit: int = Query(300, le=2000)):
     """O que o bloqueio automático vai colocar nas listas no próximo ciclo."""
     with db.conn() as c:
         return listas.candidatos(c, limite=limit)
-
-
-# ------------------------------------------------------------------ configuração dos grupos (console)
-class GroupSettingIn(BaseModel):
-    name: str
-    especifico: bool = False
-    rename_to: Optional[str] = None
-    by: str = ""
-
-
-@app.get("/console/group-settings", dependencies=[Depends(auth)])
-def group_settings_list():
-    with db.conn() as c:
-        return c.execute("SELECT name, especifico, updated_by, updated_at FROM group_settings ORDER BY name").fetchall()
-
-
-@app.put("/console/group-settings", dependencies=[Depends(auth)])
-def group_settings_set(body: GroupSettingIn):
-    """Grava a config do grupo; com rename_to só renomeia (grupo renomeado no Technitium)."""
-    with db.conn() as c:
-        if body.rename_to:
-            c.execute("UPDATE group_settings SET name=%s, updated_by=%s, updated_at=now() WHERE name=%s",
-                      (body.rename_to, body.by or None, body.name))
-        else:
-            c.execute("INSERT INTO group_settings (name, especifico, updated_by) VALUES (%s,%s,%s) "
-                      "ON CONFLICT (name) DO UPDATE SET especifico=EXCLUDED.especifico, "
-                      "updated_by=EXCLUDED.updated_by, updated_at=now()", (body.name, body.especifico, body.by or None))
-        return {"ok": True}
-
-
-@app.delete("/console/group-settings", dependencies=[Depends(auth)])
-def group_settings_delete(name: str):
-    with db.conn() as c:
-        c.execute("DELETE FROM group_settings WHERE name=%s", (name,))
-        return {"ok": True}

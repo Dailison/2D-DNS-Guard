@@ -1,7 +1,7 @@
 """Cadastro de empresas (fonte: analisador de DNS) — resolução IP/CIDR -> "Empresa · Unidade".
 
-Usado por Logs DNS e Grupos para identificar a empresa mesmo quando várias
-compartilham o mesmo grupo de bloqueio do Technitium. Se o analisador estiver
+Usado por Logs DNS, Gráficos e pelas políticas (listas por empresa) para identificar a empresa
+pelo IP. Se o analisador estiver
 fora do ar, as telas seguem funcionando (só sem os nomes).
 """
 
@@ -29,19 +29,6 @@ def lista() -> list[dict]:
         except AnalyzerError:
             g._empresas = []
     return g._empresas
-
-
-def grupos_especificos() -> set[str]:
-    """Grupos marcados como específicos (ex.: Anúncios): ficam de fora do "Bloquear em
-    todas". Config guardada no analisador (cache por requisição; falha = nenhum)."""
-    if not habilitado():
-        return set()
-    if "_esp" not in g:
-        try:
-            g._esp = {x["name"] for x in api.get("/console/group-settings") if x["especifico"]}
-        except AnalyzerError:
-            g._esp = set()
-    return g._esp
 
 
 def rotulo(info: dict | None) -> str:

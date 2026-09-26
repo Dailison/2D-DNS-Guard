@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Logs DNS{% endblock %}
+{% block title %}Logs{% endblock %}
 {% block content %}
 {# selos da classificação da IA: esta tela não herda o _base.html da Análise #}
 <style>
@@ -14,7 +14,7 @@
     {% if row.categoria %}<span class="cls-cat">{{ cat_label.get(row.categoria, row.categoria) }}</span>{% endif %}
   {% else %}<span class="mut">—</span>{% endif %}
 {% endmacro %}
-<h1>Logs DNS <span class="mut" style="font-size:.8rem">· Technitium, com empresa por IP</span></h1>
+<h1>Logs <span class="mut" style="font-size:.8rem">· Technitium, com empresa por IP</span></h1>
 
 <div class="card">
   <form method="get" class="row">
@@ -22,11 +22,6 @@
       <select name="empresa">
         <option value="">— Todas —</option>
         {% for e in lista_empresas %}<option value="{{ e.id }}" {{ 'selected' if empresa == e.id|string }}>{{ e.name }}{{ ' (sem cadastro)' if e.auto_created }}</option>{% endfor %}
-      </select></div>
-    <div><label>Grupo de bloqueio</label>
-      <select name="grupo">
-        <option value="">— Todos —</option>
-        {% for g in grupos %}<option value="{{ g }}" {{ 'selected' if grupo == g }}>{{ g }}</option>{% endfor %}
       </select></div>
     <div><label>Faixa / parte do IP</label><input type="text" name="cidr" value="{{ cidr }}" placeholder="10.100 ou 10.70.0.0/16"></div>
     <div><label>IP exato</label><input type="text" name="ip" value="{{ ip }}" placeholder="10.70.20.9"></div>
@@ -55,9 +50,9 @@
       </select></div>
     <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Filtrar</button></div>
   </form>
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0"><b>Empresa</b> vem do <a href="{{ url_for('analise.empresas') }}">cadastro de empresas</a> (todas as unidades/redes dela); <b>Grupo de bloqueio</b> é a política do Technitium (pode reunir várias empresas). <b>Faixa / parte do IP</b> aceita CIDR (<code>10.70.0.0/16</code>) ou um pedaço do IP (<code>10.100</code> traz todos os IPs que contêm isso). <b>Resposta</b> = como o Technitium respondeu (<code>Blocked</code> = bloqueado pelo filtro, <code>Cached</code>, <code>Recursive</code>…). Reduza o período para buscas mais fundas. Horários no fuso de São Paulo (GMT-3).</p>
+  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0"><b>Empresa</b> vem do <a href="{{ url_for('analise.empresas') }}">cadastro de empresas</a> (todas as unidades/redes dela). <b>Faixa / parte do IP</b> aceita CIDR (<code>10.70.0.0/16</code>) ou um pedaço do IP (<code>10.100</code> traz todos os IPs que contêm isso). <b>Resposta</b> = como o Technitium respondeu (<code>Blocked</code> = bloqueado pelo filtro, <code>Cached</code>, <code>Recursive</code>…). Reduza o período para buscas mais fundas. Horários no fuso de São Paulo (GMT-3).</p>
   <p class="mut" style="font-size:.85rem;margin:.3rem 0 0"><b>Classificação IA</b> = a do analisador para o site (o ajuste manual da empresa, marcado com ✎, prevalece); juntando empresas numa linha, vale a pior. <b>Ameaças</b> = Malicioso + Suspeito. Para descobrir <b>qual computador</b> acessou um site malicioso: Classificação IA = Malicioso e vista <b>Por computador</b>.</p>
-  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0">Nas linhas <b style="color:#dc2626">Blocked</b>, a coluna <b>Desbloquear</b> mostra o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME <code>↳</code>). O botão <code>✕</code> remove esse domínio do <code>blocked[]</code> de <b>todos os grupos</b> de uma vez.</p>
+  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0">Nas linhas <b style="color:#dc2626">Blocked</b>, a coluna <b>Desbloquear</b> mostra o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME <code>↳</code>). O botão <code>✕</code> tira esse domínio de <b>todas as listas de bloqueio</b> (vale no DNS em até 1 h).</p>
 </div>
 
 <div class="card">
@@ -77,10 +72,10 @@
       {% set alvos = row.culpados if row.culpados else [row.dominio] %}
       {% for c in alvos %}
         <form method="post" action="{{ url_for('admin.bloqueios_rem_todos') }}" style="display:inline-block;margin:0 .2rem .2rem 0"
-              onsubmit="return confirm('Remover {{ c }} da lista de bloqueio de TODOS os grupos?')">
+              onsubmit="return confirm('Tirar {{ c }} de todas as listas de bloqueio?')">
           <input type="hidden" name="dominios" value="{{ c }}">
           <input type="hidden" name="voltar" value="{{ voltar }}">
-          <button class="danger" title="Remove {{ c }} do blocked[] de todos os grupos" style="padding:.15rem .5rem;font-size:.78rem">✕ {{ c }}</button>
+          <button class="danger" title="Tira {{ c }} de todas as listas de bloqueio" style="padding:.15rem .5rem;font-size:.78rem">✕ {{ c }}</button>
         </form>
       {% endfor %}
     {% else %}<span class="mut">—</span>{% endif %}
@@ -135,7 +130,7 @@
       <tr>
         <td class="mut" style="white-space:nowrap">{{ (l.timestamp or '')[:19]|replace('T',' ') }}</td>
         <td><code>{{ l.ip }}</code>{% if l.empresa and l.empresa != '—' %} <b style="font-size:.85rem">· {{ l.empresa }}</b>{% endif %}
-          {% if l.grupo %}<br><span class="mut" style="font-size:.75rem">grupo: {{ l.grupo }}</span>{% endif %}</td>
+</td>
         <td>{{ l.dominio }}
           {% if l.resposta == 'Blocked' and l.answer and 'CNAME' in l.answer %}
             <br><span class="mut" style="font-size:.75rem">↳ {{ l.answer }}</span>

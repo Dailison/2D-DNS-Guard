@@ -92,7 +92,7 @@
       <a href="{{ url_for('admin.listas_liberacao') }}" class="{{ 'on' if request.endpoint == 'admin.listas_liberacao' }}">Listas de liberação</a>
       <a href="{{ url_for('admin.dominios') }}" class="{{ 'on' if request.endpoint == 'admin.dominios' }}">Domínios</a>
       <a href="{{ url_for('admin.liberados') }}" class="{{ 'on' if request.endpoint == 'admin.liberados' }}">Liberados</a>
-      <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs DNS</a>{% endif %}
+      <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs</a>{% endif %}
       {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('admin.graficos') }}" class="{{ 'on' if request.endpoint == 'admin.graficos' }}">Gráficos</a>{% endif %}
       {% if adm.is_super %}<a href="{{ url_for('operadores.lista') }}" class="{{ 'on' if request.blueprint == 'operadores' }}">Operadores</a>{% endif %}
       {% endif %}

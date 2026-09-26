@@ -99,3 +99,99 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
         log.info("bloqueio automático: %d site(s) nas listas por categoria: %s", len(feitos),
                  ", ".join(f"{r['name']} ({r['category']})" for r in feitos[:20]))
     return feitos
+
+
+# ------------------------------------------------------------------ detalhes p/ o console
+# O que a IA achou de cada domínio + se alguém já revisou à mão. "manual" = classificação travada,
+# decisão (global ou de empresa), ajuste de empresa ou entrada posta na lista por um operador.
+_ORIGEM_NAO_MANUAL = (AUTO_BY, "migração", "serviço ", "catálogo", "classificação da IA")
+DETALHE_SQL = (
+    "SELECT d.name AS domain, d.id, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
+    " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "
+    " g.status AS g_status, g.reviewed_by AS g_by, g.reviewed_at AS g_at, "
+    " t.n_decisoes, t.n_ajustes, t.ult_status, t.ult_por, t.ult_em "
+    "FROM domains d LEFT JOIN global_reviews g ON g.domain_id = d.id "
+    "LEFT JOIN LATERAL (SELECT count(*) FILTER (WHERE td.review_status IS NOT NULL) AS n_decisoes, "
+    "   count(*) FILTER (WHERE td.override_classification IS NOT NULL) AS n_ajustes, "
+    "   (array_agg(td.review_status ORDER BY td.reviewed_at DESC NULLS LAST))[1] AS ult_status, "
+    "   (array_agg(td.reviewed_by ORDER BY td.reviewed_at DESC NULLS LAST))[1] AS ult_por, "
+    "   max(td.reviewed_at) AS ult_em "
+    "  FROM tenant_domains td WHERE td.domain_id = d.id "
+    "   AND (td.review_status IS NOT NULL OR td.override_classification IS NOT NULL)) t ON true "
+    "WHERE d.name = ANY(%s)")
+
+
+def _revisao(r: dict, added_by: str | None = None) -> str:
+    if not r.get("id") or not r.get("classification") or r.get("llm_pending"):
+        return "pendente"
+    manual_lista = bool(added_by) and not any(added_by.startswith(p) for p in _ORIGEM_NAO_MANUAL)
+    if r.get("locked") or r.get("classified_by") == "manual" or r.get("g_status") or r.get("n_decisoes") \
+            or r.get("n_ajustes") or manual_lista:
+        return "manual"
+    return "ia"
+
+
+def _detalhar(c, rows: list[dict]) -> list[dict]:
+    """Junta a cada {domain, added_by?, added_at?} os dados da IA e das revisões."""
+    info = {r["domain"]: r for r in c.execute(DETALHE_SQL, ([x["domain"] for x in rows],)).fetchall()}
+    out = []
+    for x in rows:
+        r = {**info.get(x["domain"], {}), **x}
+        r["revisao"] = _revisao(r, x.get("added_by"))
+        out.append(r)
+    return out
+
+
+def _facetar(rows: list[dict]) -> dict:
+    fac: dict = {"cat_ia": {}, "classificacao": {}, "revisao": {}}
+    for r in rows:
+        for k, v in (("cat_ia", r.get("cat_ia") or "_sem"), ("classificacao", r.get("classification") or "_sem"),
+                     ("revisao", r["revisao"])):
+            fac[k][v] = fac[k].get(v, 0) + 1
+    return fac
+
+
+def _filtrar_paginar(rows: list[dict], q=None, cls=None, cat_ia=None, revisao=None, ordem="recentes",
+                     offset=0, limit=100, fixo: dict | None = None) -> dict:
+    """Facetas contadas com os OUTROS filtros aplicados (cada filtro mostra o que sobra nele)."""
+    q = (q or "").strip().lower()
+    filtros = {"classificacao": cls, "cat_ia": cat_ia, "revisao": revisao}
+    campo = {"classificacao": lambda r: r.get("classification") or "_sem",
+             "cat_ia": lambda r: r.get("cat_ia") or "_sem", "revisao": lambda r: r["revisao"]}
+
+    def passa(r, exceto=None):
+        if q and q not in r["domain"]:
+            return False
+        return all(not v or k == exceto or campo[k](r) == v for k, v in filtros.items())
+
+    fac = {k: _facetar([r for r in rows if passa(r, k)])[k] for k in filtros}
+    sel = [r for r in rows if passa(r)]
+    chave = {"consultas": lambda r: -(r.get("total_queries") or 0),
+             "nome": lambda r: r["domain"],
+             "recentes": lambda r: -((r.get("added_at") or r.get("analyzed_at")).timestamp()
+                                     if (r.get("added_at") or r.get("analyzed_at")) else 0)}.get(ordem)
+    sel.sort(key=chave or (lambda r: -(r.get("total_queries") or 0)))
+    for r in sel:
+        r.pop("id", None)
+    return {"total": len(sel), "total_geral": len(rows), "items": sel[offset:offset + limit], "facetas": fac}
+
+
+def detalhes(c, cat: str, **filtros) -> dict:
+    """Itens de uma lista de bloqueio com a classificação da IA e o estado da revisão manual."""
+    rows = c.execute("SELECT domain, added_by, added_at FROM category_lists WHERE category=%s", (cat,)).fetchall()
+    return _filtrar_paginar(_detalhar(c, rows), **filtros)
+
+
+def _em_lista(nome: str, conjunto: set[str]) -> bool:
+    p = nome.split(".")
+    return any(".".join(p[i:]) in conjunto for i in range(len(p) - 1))
+
+
+def sem_lista(c, **filtros) -> dict:
+    """Domínios já analisados que não estão em NENHUMA lista (bloqueio ou liberação, nem por domínio
+    pai). Não vão p/ o Technitium: só p/ consulta, pedir nova análise ou pôr numa lista."""
+    em = {r["domain"] for r in c.execute("SELECT domain FROM category_lists UNION SELECT domain FROM allow_list_domains")}
+    nomes = [r["name"] for r in c.execute(
+        "SELECT name FROM domains WHERE kind = 'public' AND classification IS NOT NULL AND NOT llm_pending")]
+    rows = [{"domain": n} for n in nomes if not _em_lista(n, em)]
+    return _filtrar_paginar(_detalhar(c, rows), **filtros)

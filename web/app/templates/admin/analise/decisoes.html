@@ -38,7 +38,7 @@
     ninguém decidiu ainda — um site por linha (acessado por várias empresas = “Diversas”). <b>Bloquear…</b> pergunta em quais listas do Technitium bloquear (já vêm marcadas as das empresas que acessaram); marque várias linhas para decidir em lote;
     <b>Manter liberado</b> só registra a decisão — o site fica como está e sai da fila. Suspeitos/maliciosos também avisam a TI pelo webhook
     (se configurado em Fontes e IA).
-    {% if ocultos %}<br>{{ ocultos }} site(s) da fila já estão bloqueados nos grupos da empresa e não aparecem aqui.{% endif %}
+    {% if ocultos %}<br>{{ ocultos }} site(s) da fila já estão bloqueados pelas listas da empresa e não aparecem aqui.{% endif %}
   </p>
   {% include "admin/analise/_fila.html" %}
 </div>

@@ -11,7 +11,7 @@
   <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:center">
     <h2 style="margin:0;font-size:1.3rem">{{ dm.name }}</h2>
     {{ m.badge(cls) }} {{ m.cat(dm.category) }}
-    {% if blq %}{% if blq.estado or (blq.listas and blq.listas|selectattr('grupos')|list) %}<span class="stt blk">🔒 Bloqueado</span>{% else %}<span class="stt ok">🔓 Liberado</span>{% endif %}{% endif %}
+    {% if blq %}{% if blq.listas and blq.listas|selectattr('empresas')|list %}<span class="stt blk">🔒 Bloqueado</span>{% else %}<span class="stt ok">🔓 Liberado</span>{% endif %}{% endif %}
     {% if tv.review_status %}<span class="tag">{{ {'blocked':'decidido: bloquear','allowed':'decidido: manter liberado'}.get(tv.review_status) }} · {{ tv.reviewed_by or '' }}</span>{% endif %}
     {% if d.global_review %}{% set gr = d.global_review %}
     <span class="tag" title="decidido na visão Todos os clientes em {{ gr.reviewed_at|dt_sp }}: vale para empresas sem decisão própria, inclusive as que acessarem depois">🌐 {{ {'blocked':'decisão global: bloquear','allowed':'decisão global: manter liberado'}.get(gr.status) }} · {{ gr.reviewed_by or '' }}
@@ -156,35 +156,21 @@
   <div class="card">
     <h2>Ações</h2>
     {% if blq %}
-    {% set ge = blq.grupos_empresa %}
-    {% macro shared(g) -%}
-      {%- if blq.compartilham.get(g) %} <span class="mut" style="font-size:.78rem">(também: {{ blq.compartilham[g]|join(', ') }})</span>{% endif -%}
-    {%- endmacro %}
     <div id="bloqueio" style="border:1px solid var(--bd);border-radius:10px;padding:.7rem .8rem;margin-bottom:1rem;background:#fafbfc">
       <label style="margin-top:0">Bloqueio no DNS (Technitium) — <code>{{ blq.nome }}</code></label>
-      {% if blq.estado %}
-        <p style="margin:.3rem 0">🔒 <b>Bloqueado</b> em:</p>
-        <ul style="margin:.2rem 0 .5rem 1.1rem;padding:0;font-size:.88rem">
-          {% for g, ents in blq.estado.items() %}
-            <li><b>{{ g }}</b>{{ ' ← grupo desta empresa' if g in ge }} —
-              {% for e, tipo in ents[:4] %}<code>{{ e }}</code>{{ {'exata':'','pai':' (domínio pai: bloqueia tudo abaixo)','sub':' (subdomínio)'}[tipo] }}{{ ', ' if not loop.last }}{% endfor %}{% if ents|length > 4 %} +{{ ents|length - 4 }}{% endif %}</li>
-          {% endfor %}
-        </ul>
-      {% elif not blq.listas %}
-        <p style="margin:.3rem 0">🔓 <b>Não está bloqueado</b> em nenhum grupo de bloqueio.</p>
+      {% if not blq.listas %}
+        <p style="margin:.3rem 0">🔓 <b>Não está</b> em nenhuma lista de bloqueio.</p>
       {% endif %}
       {% for l in blq.listas %}
         <div style="margin:.3rem 0;font-size:.9rem">⛔ Na <a href="{{ url_for('admin.listas_categoria', cat=l.cat) }}"><b>lista {{ l.rot }}</b></a>
-          (<code>{{ l.entrada }}</code>{% if l.por %}, {{ l.por }}{% endif %}) — assinada por:
-          {% if l.grupos %}<b>{{ l.grupos|join(', ') }}</b>{% else %}<b>nenhum grupo</b> (não bloqueia){% endif %}
-          <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline;margin-left:.3rem" onsubmit="return confirm('Tirar {{ l.entrada }} da lista {{ l.rot }}? Fica registrado como “manter liberado”; vale para todos os grupos que assinam a lista (em até 1 h).')">
+          (<code>{{ l.entrada }}</code>{% if l.por %}, {{ l.por }}{% endif %}){% if l.da_empresa %} <span class="tag" style="font-size:.7rem">vale para {{ tenant.name if tenant else 'esta empresa' }}</span>{% endif %} — aplicada por:
+          {% if l.empresas %}<b>{{ l.empresas|join(', ') }}</b>{% else %}<b>nenhuma empresa</b> (não bloqueia){% endif %}
+          <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline;margin-left:.3rem" onsubmit="return confirm('Tirar {{ l.entrada }} da lista {{ l.rot }}? Fica registrado como “manter liberado”; vale para todas as empresas que aplicam a lista (em até 1 h).')">
             <input type="hidden" name="cat" value="{{ l.cat }}"><input type="hidden" name="dominio" value="{{ l.entrada }}">
             <input type="hidden" name="voltar" value="{{ request.full_path }}">
             <button style="padding:.1rem .5rem;font-size:.78rem;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer">🔓 tirar da lista</button>
           </form></div>
       {% endfor %}
-      <p class="mut" style="font-size:.82rem;margin:.2rem 0 .6rem">Grupos de <b>{{ tenant.name if tenant else 'esta empresa' }}</b>:
-        {% for g, redes in ge.items() %}<b>{{ g }}</b> ({{ redes|join(', ') }}){{ shared(g) }}{{ '; ' if not loop.last }}{% else %}nenhum (redes sem grupo no Technitium){% endfor %}</p>
 
       {% if blq.protegido %}
         <div class="flash erro" style="margin:.4rem 0">⚠ Este domínio é <b>infraestrutura protegida</b> (catálogo). Bloqueá-lo pode quebrar sistemas de trabalho (login, atualizações, Office…).</div>
@@ -211,41 +197,7 @@
         b.disabled = false;
       });
       </script>
-      {% if blq.estado %}<p class="mut" style="font-size:.8rem;margin:.2rem 0">Entradas antigas nas listas próprias dos grupos (anteriores às listas por categoria):</p>{% endif %}
-      <div class="row" style="align-items:flex-end;gap:.6rem">
-        {% if blq.estado %}
-        <form method="post" action="{{ url_for('analise.dominio_liberar', nome=dm.name) }}"
-              onsubmit="return confirm('Liberar {{ blq.nome }} no escopo escolhido? Remove o domínio e seus subdomínios das listas de bloqueio desses grupos (afeta todas as empresas de cada grupo).')">
-          <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">
-          <label>Liberar em</label>
-          <div style="display:flex;gap:.3rem">
-            <select name="escopo">
-              <option value="todos">todos os grupos onde está bloqueado ({{ blq.estado|length }})</option>
-              {% if blq.bloqueado_empresa %}<option value="empresa">só nos grupos desta empresa ({{ blq.bloqueado_empresa|join(', ') }})</option>{% endif %}
-              {% for g in blq.estado %}<option value="g:{{ g }}">só no grupo {{ g }}</option>{% endfor %}
-            </select>
-            <button class="btn" style="background:#16a34a;box-shadow:none;white-space:nowrap">🔓 Liberar</button>
-          </div>
-        </form>
-        {% endif %}
-        {% if config.get('BLOQUEIO_POR_GRUPO') %}{# bloquear agora = pôr numa lista (acima) #}
-        <form method="post" action="{{ url_for('analise.dominio_bloquear', nome=dm.name) }}"
-              onsubmit="return confirm('{{ '⚠ INFRAESTRUTURA PROTEGIDA! ' if blq.protegido }}Bloquear {{ blq.nome }} (e todos os subdomínios) no escopo escolhido? Vale para TODAS as empresas de cada grupo.')">
-          <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">
-          <label>Bloquear em</label>
-          <div style="display:flex;gap:.3rem">
-            <select name="escopo">
-              {% if ge %}<option value="empresa">grupos desta empresa ({{ ge.keys()|join(', ') }})</option>{% endif %}
-              {% set esp = blq.especificos or [] %}
-              <option value="todos">todos os grupos de bloqueio ({{ blq.todos|reject('in', esp)|list|length }}){% if esp %} — exceto específicos: {{ esp|join(', ') }}{% endif %}</option>
-              {% for g in blq.todos if g not in blq.estado %}<option value="g:{{ g }}">só no grupo {{ g }}</option>{% endfor %}
-            </select>
-            <button class="danger" style="white-space:nowrap">🔒 Bloquear</button>
-          </div>
-        </form>
-        {% endif %}
-      </div>
-      <p class="hint" style="margin-top:.5rem">Grupos de bloqueio são compartilhados: a mudança vale para todas as empresas do grupo. Tem efeito na próxima consulta (o cache do domínio é limpo). Para exceções só de alguns computadores, use DNS → Liberados.</p>
+      <p class="hint" style="margin-top:.5rem">As listas são compartilhadas: a mudança vale para todas as empresas que aplicam cada lista. Quais listas cada empresa aplica: Empresas → Listas…. Para exceções só de alguns computadores, use DNS → Liberados.</p>
     </div>
     {% endif %}
     {% if todos %}

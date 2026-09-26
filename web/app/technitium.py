@@ -6,7 +6,6 @@ O config do Advanced Blocking é CRÍTICO (todas as blocklists dos sites vivem
 nele). Aqui lemos o config inteiro, mexemos SÓ no `networkGroupMap`, e gravamos
 de volta — nunca tocamos nos `groups`.
 """
-import copy
 import ipaddress
 import json
 import re
@@ -187,62 +186,6 @@ def revogar(ip_raw):
 
 # ---- Bloqueios por grupo (domínios da lista `blocked` de cada grupo) ----
 
-def _grupo_obj(cfg, nome):
-    for g in cfg.get("groups", []):
-        if g.get("name") == nome:
-            return g
-    return None
-
-
-def grupos_bloqueio():
-    """Nomes dos grupos (seletor das telas Grupos e Domínios)."""
-    cfg = _get_config()
-    return sorted(g.get("name") for g in cfg.get("groups", []) if g.get("name"))
-
-
-# ---- Bloquear/liberar UM domínio (ações da tela Análise DNS -> domínio) ----
-
-_NOME_RE = re.compile(r"^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?)*$")
-
-
-def _norm_nome(dominio):
-    d = (dominio or "").strip().rstrip(".").lower()
-    if not d or not _NOME_RE.match(d):
-        raise ValueError(f"domínio inválido: {dominio!r}")
-    return d
-
-
-def tipo_entrada(entrada, dominio):
-    """Como uma entrada de `blocked` afeta o domínio: exata | pai | sub."""
-    if entrada == dominio:
-        return "exata"
-    return "pai" if dominio.endswith("." + entrada) else "sub"
-
-
-def grupos_ativos(cfg):
-    """Grupos com bloqueio ligado (exclui os de isenção, como Liberados)."""
-    return sorted(g["name"] for g in cfg.get("groups", []) if g.get("name") and g.get("enableBlocking", True))
-
-
-def estado_bloqueio(dominio, cfg=None):
-    """{grupo: [(entrada, tipo)]}: entradas de `blocked` que afetam o domínio — o
-    próprio nome (exata), um domínio pai (bloqueia tudo abaixo) ou subdomínios (parcial)."""
-    d = _norm_nome(dominio)
-    cfg = cfg if cfg is not None else _get_config()
-    out = {}
-    for g in cfg.get("groups", []):
-        if not g.get("enableBlocking", True):
-            continue
-        hits = []
-        for e in g.get("blocked", []):
-            el = e.lower()
-            if el == d or d.endswith("." + el) or el.endswith("." + d):
-                hits.append((el, tipo_entrada(el, d)))
-        if hits:
-            out[g["name"]] = sorted(hits, key=lambda x: ({"exata": 0, "pai": 1, "sub": 2}[x[1]], x[0]))
-    return out
-
-
 def ngm_de(cfg):
     """networkGroupMap (ip_network -> grupo) a partir de uma config já carregada."""
     out = {}
@@ -275,24 +218,6 @@ CATEGORIAS_LISTA = [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("adul
                     ("para_revisar", "Para revisar")]
 CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "adulto", "apostas", "jogos"}   # bloqueio automático
 
-# Serviços que uma política pode LIBERAR como exceção (vai p/ o "allowed" do grupo, que vence
-# qualquer bloqueio — inclusive as listas assinadas). Ex.: "Redes sociais, exceto Instagram e Facebook".
-PACOTES = {
-    "instagram": ("Instagram", ["instagram.com", "cdninstagram.com", "instagr.am", "ig.me"]),
-    "facebook": ("Facebook", ["facebook.com", "facebook.net", "fbcdn.net", "fbsbx.com", "fb.com", "fb.me",
-                              "messenger.com", "m.me", "facebook.com.br"]),
-    "whatsapp": ("WhatsApp", ["whatsapp.com", "whatsapp.net", "wa.me"]),
-    "youtube": ("YouTube", ["youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com",
-                            "ggpht.com"]),
-    "linkedin": ("LinkedIn", ["linkedin.com", "licdn.com", "lnkd.in"]),
-    "tiktok": ("TikTok", ["tiktok.com", "tiktokcdn.com", "tiktokv.com", "tiktokcdn-us.com", "ttwstatic.com",
-                          "ibytedtos.com", "byteoversea.com", "bytedance.com"]),
-    "x": ("X (Twitter)", ["twitter.com", "x.com", "twimg.com", "t.co"]),
-    "telegram": ("Telegram", ["telegram.org", "telegram.me", "t.me", "telesco.pe"]),
-    "spotify": ("Spotify", ["spotify.com", "scdn.co", "spotifycdn.com"]),
-    "netflix": ("Netflix", ["netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net"]),
-    "kwai": ("Kwai", ["kwai.com", "kwai.net", "kwaicdn.com", "kslawin.com", "yximgs.com", "kuaishou.com"]),
-}
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")
 
 
@@ -303,30 +228,6 @@ def url_lista(cat):
 def listas_assinadas(g):
     """Categorias que o grupo assina (pelas URLs de listas do DNS Guard em blockListUrls)."""
     return sorted({m.group(1) for u in (g.get("blockListUrls") or []) if (m := _LISTA_RE.search(str(u)))})
-
-
-def assinantes(cfg=None):
-    """{categoria: [grupos com bloqueio ligado que assinam]}."""
-    cfg = cfg if cfg is not None else _get_config()
-    out = {c: [] for c, _ in CATEGORIAS_LISTA}
-    for g in cfg.get("groups", []):
-        if g.get("name") and g.get("enableBlocking", True):
-            for c in listas_assinadas(g):
-                out.setdefault(c, []).append(g["name"])
-    return out
-
-
-def assinar_listas(grupo, cats):
-    """Deixa o grupo assinando exatamente `cats` (mantém outras URLs que não são do DNS Guard)."""
-    cfg = _get_config()
-    g = _grupo_obj(cfg, grupo)
-    if g is None:
-        raise ValueError(f"grupo {grupo} não existe")
-    validas = {c for c, _ in CATEGORIAS_LISTA}
-    outras = [u for u in (g.get("blockListUrls") or []) if not _LISTA_RE.search(str(u))]
-    g["blockListUrls"] = outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(cats) & validas]
-    _set_config(cfg)
-    return listas_assinadas(g)
 
 
 def dominios_das_listas(cats):
@@ -356,26 +257,6 @@ def dominios_liberacao(slug):
         except Exception:  # noqa: BLE001
             cache[slug] = set()
     return cache[slug]
-
-
-def pacotes_liberados(g):
-    """Serviços (PACOTES) cujos domínios estão todos no 'allowed' do grupo."""
-    permitidos = {x.lower() for x in g.get("allowed") or []}
-    return [k for k, (_, doms) in PACOTES.items() if set(doms) <= permitidos]
-
-
-def liberar_pacotes(grupo, servicos):
-    """Deixa o grupo liberando exatamente `servicos` como exceção; mantém outras exceções manuais."""
-    cfg = _get_config()
-    g = _grupo_obj(cfg, grupo)
-    if g is None:
-        raise ValueError(f"grupo {grupo} não existe")
-    todos = {d for _, doms in PACOTES.values() for d in doms}
-    quer = {d for k in servicos if k in PACOTES for d in PACOTES[k][1]}
-    manuais = [x for x in g.get("allowed") or [] if x.lower() not in todos]
-    g["allowed"] = sorted(set(manuais) | quer)
-    _set_config(cfg)
-    return pacotes_liberados(g)
 
 
 def indice_bloqueio(cfg=None):
@@ -414,397 +295,11 @@ def bloqueado_em(indice, dominio, grupos=None):
     return [g for g in alvo if indice["grupos"].get(g, set()) & cands and not (perm.get(g, set()) & cands)]
 
 
-def bloquear_em(grupos, dominio):
-    """Adiciona o domínio (e, com isso, seus subdomínios) ao `blocked` dos grupos,
-    numa única gravação. Retorna {grupo: 'adicionado' | 'já bloqueado' | 'grupo inexistente'}."""
-    d = _norm_nome(dominio)
-    cfg = _get_config()
-    res, mudou = {}, False
-    for nome in grupos:
-        g = _grupo_obj(cfg, nome)
-        if g is None:
-            res[nome] = "grupo inexistente"
-            continue
-        atual = {x.lower() for x in g.get("blocked", [])}
-        if d in atual or any(d.endswith("." + p) for p in atual):
-            res[nome] = "já bloqueado"
-            continue
-        g["blocked"] = sorted(atual | {d})
-        res[nome] = "adicionado"
-        mudou = True
-    if mudou:
-        _set_config(cfg)
-        limpar_cache(d)
-    return res
-
-
-def bloquear_varios_em(grupos, dominios):
-    """Vários domínios em vários grupos, numa única gravação.
-    Retorna {grupo: {'adicionados': [...], 'ja': [...]}} (grupo inexistente fica de fora)."""
-    ds = list(dict.fromkeys(_norm_nome(x) for x in dominios if x))
-    cfg = _get_config()
-    res, novos = {}, set()
-    for nome in grupos:
-        g = _grupo_obj(cfg, nome)
-        if g is None:
-            continue
-        atual = {x.lower() for x in g.get("blocked", [])}
-        r = res[nome] = {"adicionados": [], "ja": []}
-        for d in ds:
-            if d in atual or any(d.endswith("." + p) for p in atual):
-                r["ja"].append(d)
-            else:
-                atual.add(d)
-                r["adicionados"].append(d)
-                novos.add(d)
-        g["blocked"] = sorted(atual)
-    if novos:
-        _set_config(cfg)
-        for d in novos:
-            limpar_cache(d)
-    return res
-
-
-def liberar_em(grupos, dominio):
-    """Remove do `blocked` dos grupos as entradas EXATAS e de SUBDOMÍNIOS do domínio
-    (numa única gravação). Entradas de domínio PAI não são removidas (liberariam
-    tudo abaixo delas): voltam em `restam` para o operador decidir em Domínios."""
-    d = _norm_nome(dominio)
-    cfg = _get_config()
-    removidas, restam, mudou = {}, {}, False
-    for nome in grupos:
-        g = _grupo_obj(cfg, nome)
-        if g is None:
-            continue
-        manter, tirar = [], []
-        for e in g.get("blocked", []):
-            el = e.lower()
-            if el == d or el.endswith("." + d):
-                tirar.append(el)
-            else:
-                manter.append(e)
-                if d.endswith("." + el):
-                    restam.setdefault(nome, []).append(el)
-        if tirar:
-            g["blocked"] = manter
-            removidas[nome] = sorted(tirar)
-            mudou = True
-    if mudou:
-        _set_config(cfg)
-        limpar_cache(d)
-    return removidas, restam
-
-
-def limpar_cache(dominio):
-    """Tira o domínio do cache do Technitium (a mudança vale na próxima consulta)."""
-    try:
-        _api_get(f"cache/delete?domain={urllib.parse.quote(dominio)}")
-    except Exception:  # noqa: BLE001 — cache é otimização; a regra já foi gravada
-        pass
-
-
-# Listas por-grupo que definem o que o grupo bloqueia/permite (zeradas num grupo vazio)
-_LISTAS_GRUPO = ("blocked", "allowed", "blockedRegex", "allowedRegex",
-                 "blockListUrls", "allowListUrls", "regexBlockListUrls",
-                 "regexAllowListUrls", "adblockListUrls")
-
-
-def _grupos_protegidos():
-    """Grupos do sistema que não podem ser renomeados/removidos: o `default`
-    (exigido pelo Technitium) e o de isenção usado pela tela Liberados."""
-    return {"default", _grupo()}
-
-
-def renomear_grupo(velho, novo):
-    """Renomeia um grupo e atualiza as redes que apontam para ele no
-    networkGroupMap. Retorna (novo_nome, msg) ou (None, erro)."""
-    velho = (velho or "").strip()
-    novo = (novo or "").strip()[:150]
-    if not novo:
-        return None, "Informe o novo nome."
-    if velho in _grupos_protegidos():
-        return None, f"O grupo '{velho}' é do sistema e não pode ser renomeado."
-    cfg = _get_config()
-    g = _grupo_obj(cfg, velho)
-    if g is None:
-        return None, f"Grupo '{velho}' não existe."
-    if novo == velho:
-        return None, "O novo nome é igual ao atual."
-    if _grupo_obj(cfg, novo) is not None:
-        return None, f"Já existe um grupo chamado '{novo}'."
-    g["name"] = novo
-    for k, v in cfg.get("networkGroupMap", {}).items():
-        if v == velho:
-            cfg["networkGroupMap"][k] = novo
-    _set_config(cfg)
-    return novo, "renomeado"
-
-
-def deletar_grupo(grupo):
-    """Remove um grupo e desatribui as redes que apontavam para ele. Retorna
-    (grupo, nº_redes_desatribuídas) ou (None, erro)."""
-    grupo = (grupo or "").strip()
-    if grupo in _grupos_protegidos():
-        return None, f"O grupo '{grupo}' é do sistema e não pode ser removido."
-    cfg = _get_config()
-    if _grupo_obj(cfg, grupo) is None:
-        return None, f"Grupo '{grupo}' não existe."
-    cfg["groups"] = [x for x in cfg.get("groups", []) if x.get("name") != grupo]
-    ngm = cfg.get("networkGroupMap", {})
-    redes = [k for k, v in ngm.items() if v == grupo]
-    for k in redes:
-        del ngm[k]
-    _set_config(cfg)
-    return grupo, len(redes)
-
-
-def criar_grupo(nome, clonar_de=None):
-    """Cria um novo grupo no Advanced Blocking. Se `clonar_de`, copia a estrutura
-    inteira do grupo de origem (incl. domínios bloqueados); senão cria vazio.
-    Preserva todos os campos exigidos pelo Technitium via deep-copy de um modelo.
-    Retorna (nome, msg) em sucesso ou (None, erro)."""
-    nome = (nome or "").strip()[:150]
-    if not nome:
-        return None, "Informe o nome do grupo."
-    cfg = _get_config()
-    grupos = cfg.get("groups")
-    if not grupos:
-        return None, "Nenhum grupo modelo disponível no Technitium."
-    if _grupo_obj(cfg, nome) is not None:
-        return None, f"Já existe um grupo chamado '{nome}'."
-    if clonar_de:
-        src = _grupo_obj(cfg, clonar_de)
-        if src is None:
-            return None, f"Grupo de origem '{clonar_de}' não encontrado."
-        novo = copy.deepcopy(src)
-        novo["name"] = nome
-        msg = f"criado (clonado de '{clonar_de}': {len(novo.get('blocked', []))} bloqueios)"
-    else:
-        novo = copy.deepcopy(grupos[0])   # modelo p/ manter todos os campos exigidos
-        novo["name"] = nome
-        for k in _LISTAS_GRUPO:
-            if k in novo:
-                novo[k] = []
-        msg = "criado (vazio)"
-    grupos.append(novo)
-    _set_config(cfg)
-    return nome, msg
-
-
-def redes_do_grupo(grupo):
-    """CIDRs/IPs atribuídos a um grupo no networkGroupMap (redes que usam esse grupo)."""
-    cfg = _get_config()
-    out = [norm_ip(k) or k for k, v in cfg.get("networkGroupMap", {}).items() if v == grupo]
-    return sorted(out, key=_sort_key)
-
-
-def atribuir_rede(ip_raw, grupo):
-    """Atribui uma rede/IP (CIDR) a um grupo de bloqueio no networkGroupMap.
-    Retorna (cidr, anterior_ou_None) ou (None, mensagem_erro)."""
-    ipn = norm_ip(ip_raw)
-    if not ipn:
-        return None, "IP ou faixa inválidos (ex.: 10.23.0.0/16 ou 10.23.5.10)."
-    cfg = _get_config()
-    if _grupo_obj(cfg, grupo) is None:
-        return None, f"Grupo '{grupo}' não existe."
-    ngmap = cfg.setdefault("networkGroupMap", {})
-    anterior = None
-    for k in list(ngmap):
-        if norm_ip(k) == ipn:
-            if ngmap[k] != grupo:
-                anterior = ngmap[k]
-            del ngmap[k]
-    ngmap[ipn] = grupo
-    _set_config(cfg)
-    return ipn, anterior
-
-
-def atribuir_redes(ips, grupo):
-    """Várias redes de uma vez (1 leitura/gravação do config). Retorna
-    ([(cidr, anterior_ou_None)], [inválidos]) ou levanta ValueError se o grupo não existe."""
-    cfg = _get_config()
-    if _grupo_obj(cfg, grupo) is None:
-        raise ValueError(f"Grupo '{grupo}' não existe.")
-    ngmap = cfg.setdefault("networkGroupMap", {})
-    feitos, invalidos = [], []
-    for ip_raw in ips:
-        ipn = norm_ip(ip_raw)
-        if not ipn:
-            invalidos.append(ip_raw)
-            continue
-        anterior = None
-        for k in list(ngmap):
-            if norm_ip(k) == ipn:
-                if ngmap[k] != grupo:
-                    anterior = ngmap[k]
-                del ngmap[k]
-        ngmap[ipn] = grupo
-        feitos.append((ipn, anterior))
-    if feitos:
-        _set_config(cfg)
-    return feitos, invalidos
-
-
-def remover_rede(ip_raw, grupo):
-    """Remove a atribuição de uma rede/IP de um grupo (só se estiver nesse grupo)."""
-    ipn = norm_ip(ip_raw)
-    if not ipn:
-        return None
-    cfg = _get_config()
-    ngmap = cfg.get("networkGroupMap", {})
-    removed = False
-    for k in list(ngmap):
-        if norm_ip(k) == ipn and ngmap[k] == grupo:
-            del ngmap[k]
-            removed = True
-    if removed:
-        _set_config(cfg)
-        return ipn
-    return None
-
-
-def _clean_dom(line):
-    s = (line or "").strip()
-    if not s or s[0] in "#!;[":
-        return None
-    parts = s.split()
-    if len(parts) >= 2 and re.match(r"^\d{1,3}(\.\d{1,3}){3}$", parts[0]):
-        s = parts[1]          # formato hosts: "0.0.0.0 dominio"
-    else:
-        s = parts[0]
-    s = s.lstrip("|").rstrip("^").replace("*.", "")
-    s = re.sub(r"^https?://", "", s).split("/")[0].strip(".").lower()
-    if re.match(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)+$", s):
-        return s
-    return None
-
-
-def parse_dominios(texto):
-    """Extrai domínios de um texto (um por linha; aceita hosts/adblock/comentários)."""
-    seen, res = set(), []
-    for line in (texto or "").splitlines():
-        d = _clean_dom(line)
-        if d and d not in seen:
-            seen.add(d)
-            res.append(d)
-    return res
-
-
-def _norm_busca(s):
-    """Normaliza o termo de busca para casar mesmo quando se cola uma URL ou
-    formato de blocklist: tira esquema (http/https), caminho após '/', prefixos
-    '||'/'*.'/'www.' e '^'/'.' das pontas. Assim 'https://openai.com/',
-    'www.openai.com' e '||openai.com^' casam com 'openai.com' e seus subdomínios."""
-    s = (s or "").strip().lower()
-    s = re.sub(r"^https?://", "", s)
-    s = s.split("/")[0].split("?")[0]
-    s = s.lstrip("|").replace("*.", "").strip(".^")
-    if s.startswith("www."):
-        s = s[4:]
-    return s
-
-
-def bloqueados(grupo, busca=None):
-    cfg = _get_config()
-    g = _grupo_obj(cfg, grupo)
-    if g is None:
-        return None
-    doms = sorted(g.get("blocked", []))
-    if busca:
-        b = _norm_busca(busca)
-        if b:
-            doms = [d for d in doms if b in d.lower()]
-    return doms
-
-
-def add_bloqueio(grupo, dominios):
-    """Adiciona 1+ domínios à lista `blocked` do grupo (dedupe). Retorna
-    (adicionados, ja_existiam, total) ou (None, 0, 0) se grupo inexistente."""
-    novos = parse_dominios(dominios) if isinstance(dominios, str) else \
-        [d for d in (_clean_dom(x) for x in dominios) if d]
-    cfg = _get_config()
-    g = _grupo_obj(cfg, grupo)
-    if g is None:
-        return None, 0, 0
-    atual = set(g.get("blocked", []))
-    add = [d for d in dict.fromkeys(novos) if d not in atual]
-    if add:
-        g["blocked"] = sorted(atual | set(add))
-        _set_config(cfg)
-    return len(add), len(novos) - len(add), len(g.get("blocked", []))
-
-
-def limpar_bloqueios(grupo):
-    """Esvazia a lista `blocked` do grupo. Retorna nº removidos, ou None se o grupo
-    não existe. Não toca em allowed/URLs/regex nem em outros grupos."""
-    cfg = _get_config()
-    g = _grupo_obj(cfg, grupo)
-    if g is None:
-        return None
-    n = len(g.get("blocked", []))
-    if n:
-        g["blocked"] = []
-        _set_config(cfg)
-    return n
-
-
-def rem_bloqueio(grupo, dominio):
-    dom = (dominio or "").strip().lower()
-    cfg = _get_config()
-    g = _grupo_obj(cfg, grupo)
-    if g is None or dom not in set(g.get("blocked", [])):
-        return None
-    g["blocked"] = [d for d in g.get("blocked", []) if d != dom]
-    _set_config(cfg)
-    return dom
-
-
-def rem_bloqueios(grupo, dominios):
-    """Remove vários domínios da lista `blocked` do grupo numa única gravação.
-    Retorna (removidos, total_restante) ou (None, 0) se o grupo não existe."""
-    alvo = {(d or "").strip().lower() for d in (dominios or []) if (d or "").strip()}
-    cfg = _get_config()
-    g = _grupo_obj(cfg, grupo)
-    if g is None:
-        return None, 0
-    atual = g.get("blocked", [])
-    restante = [d for d in atual if d.lower() not in alvo]
-    rem = len(atual) - len(restante)
-    if rem:
-        g["blocked"] = restante
-        _set_config(cfg)
-    return rem, len(restante)
-
-
-def buscar_em_todos(termo, limite=500):
-    """Procura `termo` (substring) na lista `blocked` de TODOS os grupos.
-    Retorna (itens, total, cap) onde itens = [(dominio, [grupos])] ordenado."""
-    t = (termo or "").strip().lower()
-    if not t:
-        return [], 0, False
-    cfg = _get_config()
-    mapa = {}
-    for g in cfg.get("groups", []):
-        gn = g.get("name")
-        for d in g.get("blocked", []):
-            if t in d.lower():
-                mapa.setdefault(d, []).append(gn)
-    itens = sorted(mapa.items())
-    total = len(itens)
-    return [(d, grs) for d, grs in itens[:limite]], total, total > limite
-
-
 def blocked_index():
-    """Retorna (union, bygroup): conjunto de todos os domínios bloqueados (união
-    de todos os grupos) e o mapa {grupo: set(domínios)}. Para diagnosticar qual
-    entrada da lista causa um bloqueio (inclusive por cadeia CNAME)."""
-    cfg = _get_config()
-    union, bygroup = set(), {}
-    for g in cfg.get("groups", []):
-        s = {x.lower() for x in g.get("blocked", [])}
-        bygroup[g.get("name")] = s
-        union |= s
-    return union, bygroup
+    """(union, por_lista): todos os domínios das listas de bloqueio por categoria (do analisador) e
+    {lista: set(domínios)}. Para diagnosticar qual entrada causa um bloqueio (inclusive por CNAME)."""
+    doms = dominios_das_listas([c for c, _ in CATEGORIAS_LISTA])
+    return set().union(*doms.values()) if doms else set(), doms
 
 
 def parse_chain(answer):
@@ -838,29 +333,6 @@ def culpados(qname, answer, union):
     return out
 
 
-def rem_dominios_todos(dominios):
-    """Remove os domínios (exatos) da lista `blocked` de TODOS os grupos numa
-    única gravação. Retorna (remocoes, grupos_afetados)."""
-    alvo = {(d or "").strip().lower() for d in (dominios or []) if (d or "").strip()}
-    if not alvo:
-        return 0, 0
-    cfg = _get_config()
-    rem, gruposaf = 0, 0
-    for g in cfg.get("groups", []):
-        atual = g.get("blocked", [])
-        restante = [d for d in atual if d.lower() not in alvo]
-        n = len(atual) - len(restante)
-        if n:
-            g["blocked"] = restante
-            rem += n
-            gruposaf += 1
-    if rem:
-        _set_config(cfg)
-    return rem, gruposaf
-
-
-# ---- Logs DNS: resolve empresa (grupo do Advanced Blocking) + consulta ----
-
 def networkgroupmap():
     """{ip_network: grupo} do Advanced Blocking, para resolver a empresa do IP."""
     cfg = _get_config()
@@ -871,12 +343,6 @@ def networkgroupmap():
         except ValueError:
             pass
     return out
-
-
-def empresas(mapa=None):
-    """Nomes de empresa/grupo que têm redes atribuídas (para o dropdown)."""
-    mapa = mapa if mapa is not None else networkgroupmap()
-    return sorted(set(mapa.values()))
 
 
 def resolver_empresa(ip_str, mapa):
@@ -890,11 +356,6 @@ def resolver_empresa(ip_str, mapa):
         if ip in net and net.prefixlen > best_len:
             best, best_len = grp, net.prefixlen
     return best
-
-
-def empresa_redes(empresa, mapa):
-    """Redes (ip_network) atribuídas a uma empresa/grupo."""
-    return [n for n, g in mapa.items() if g == empresa]
 
 
 def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
@@ -1014,8 +475,6 @@ def _aplica_politica(g, lists, services, bloqueados=()):
                           + [url_liberacao(s) for s in sorted(set(bloqueados) - set(services))])
     outras = [u for u in (g.get("allowListUrls") or []) if not _LIB_RE.search(str(u))]
     g["allowListUrls"] = outras + [url_liberacao(s) for s in sorted(set(services))]
-    pacotes = {d for _, doms in PACOTES.values() for d in doms}   # (antes as liberações iam coladas no grupo)
-    g["allowed"] = sorted(x for x in g.get("allowed") or [] if x.lower() not in pacotes)
 
 
 def sincronizar_politicas(empresas, politicas, aplicar=True):

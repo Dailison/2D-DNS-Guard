@@ -264,6 +264,30 @@ def store(c, aggs: dict[tuple, Agg]) -> dict:
             "tenants": len(set(ip_tenant.values())), "at": now.isoformat()}
 
 
+# erros do Technitium causados por UMA entrada do log (não pelo pedido): o app Query Logs não
+# consegue devolver a página que contém um nome IDN inválido e a coleta travava na mesma janela
+_ERROS_DE_ENTRADA = ("not a valid IDN", "Decoded string")
+
+
+def _buscar_logs(client: TechnitiumClient, start: datetime, end: datetime, page_size: int,
+                 pulados: list) -> list[dict]:
+    """Entradas com start <= ts < end. Entrada que o Technitium não consegue devolver: divide a
+    janela ao meio até isolar o segundo dela e pula SÓ esse segundo (anotado em `pulados`)."""
+    try:
+        return [e for e in client.iter_logs(start, end, page_size)
+                if (ts := parse_ts(e.get("timestamp", ""))) is None or start <= ts < end]
+    except RuntimeError as e:
+        if not any(m in str(e) for m in _ERROS_DE_ENTRADA):
+            raise
+        if end - start <= timedelta(seconds=1):
+            log.warning("coleta: pulando %s..%s (%s)", start.isoformat(), end.isoformat(), e)
+            pulados.append(start.isoformat())
+            return []
+        mid = start + timedelta(seconds=int((end - start).total_seconds()) // 2)
+        return (_buscar_logs(client, start, mid, page_size, pulados)
+                + _buscar_logs(client, mid, end, page_size, pulados))
+
+
 def collect_once(client: TechnitiumClient | None = None) -> dict:
     """Processa UMA janela. Retorna estatísticas (window_end=None se nada a fazer)."""
     cfg = settings()
@@ -277,7 +301,8 @@ def collect_once(client: TechnitiumClient | None = None) -> dict:
     if end <= start:
         return {"window_end": None}
 
-    entries = list(client.iter_logs(start, end, cfg.ingest_page_size))
+    pulados: list[str] = []
+    entries = _buscar_logs(client, start, end, cfg.ingest_page_size, pulados)
     aggs = aggregate(entries, start, end, cfg.exclude_clients)
     with db.conn() as c:
         stats = store(c, aggs)
@@ -287,7 +312,7 @@ def collect_once(client: TechnitiumClient | None = None) -> dict:
             (CURSOR_KEY, end.isoformat()),
         )
     stats.update({"entries": len(entries), "window_start": start.isoformat(), "window_end": end.isoformat(),
-                  "caught_up": end >= limit})
+                  "caught_up": end >= limit, **({"skipped_seconds": pulados} if pulados else {})})
     return stats
 
 

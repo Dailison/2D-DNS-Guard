@@ -100,6 +100,7 @@ class Settings:
     lista_ia_enabled: bool
     lista_confianca_min: float
     online_enabled: bool
+    online_workers: int
     gemini_api_key: str
     gemini_modelos: list
     gemini_reforco: list
@@ -188,7 +189,8 @@ def load_settings() -> Settings:
         auto_block_categories=_list("AUTO_BLOCK_CATEGORIES", "jogos,apostas,adulto,vpn_proxy,ameaca"),
         lista_ia_enabled=_bool(os.environ.get("LISTA_IA_ENABLED"), True),   # etapa "lista" (qual lista de bloqueio)
         lista_confianca_min=float(os.environ.get("LISTA_CONFIANCA_MIN") or 0.9),
-        online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 3 (só com GEMINI_API_KEY)
+        online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 4 (só com GEMINI_API_KEY)
+        online_workers=max(_int("ONLINE_WORKERS", 6), 1),   # consultas simultâneas (Gemma é lento; a cota é por modelo)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
         # plano grátis desta conta (AI Studio, 2026-09-26) — "modelo:rpm:rpd", na ordem de uso:
         # volume: 3.5/3.1 Flash-Lite 15/min 500/dia, Gemma 4 31B 30/min 14.400/dia (lento: ~40-75 s);

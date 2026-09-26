@@ -137,7 +137,12 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
     modelo = modelo or cfg.gemini_modelos[0][0]
     listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
     sistema = SYSTEM.format(listas=listas, categorias=", ".join(categorias))
-    pergunta = _contexto(d) + "\n\nClassifique este domínio."
+    sug = ""
+    if d.get("lista_ia"):   # validação: a IA online confirma ou corrige a sugestão da IA local
+        sug = (f"\nSugestão da IA local (modelo pequeno, pode errar): lista '{d['lista_ia']}'"
+               + (f" (confiança {d['lista_conf']:.2f})" if d.get("lista_conf") is not None else "")
+               + (f" — {d['lista_motivo']}" if d.get("lista_motivo") else "") + ". Confirme ou corrija.")
+    pergunta = _contexto(d) + sug + "\n\nClassifique este domínio."
     corpo: dict = {"generationConfig": {"temperature": 0}}
     if modelo.startswith("gemma"):   # Gemma pela API: sem instrução de sistema nem modo JSON (JSON extraído do texto)
         corpo["contents"] = [{"role": "user", "parts": [{"text": sistema + "\n\n" + pergunta}]}]
@@ -179,6 +184,7 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
 
 # fila da fase 3: dúvidas da etapa "lista" + desconhecidos que já passaram pela fase 2
 _NAS_LISTAS_REVISAO = "d.name IN (SELECT domain FROM category_lists WHERE category IN ('para_revisar', 'outros_bloqueios'))"
+_EM_DECISOES = "EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'para_revisar' AND l.domain = d.name)"
 _FILA = ("d.kind = 'public' AND NOT d.llm_pending AND (d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') "
          "AND ((d.lista_duvida AND (d.online_at IS NULL OR d.online_at < d.lista_at)) "
          " OR (d.classification = 'DESCONHECIDO' AND (d.online_at IS NULL OR d.online_at < d.analyzed_at) "
@@ -188,8 +194,8 @@ _FILA = ("d.kind = 'public' AND NOT d.llm_pending AND (d.online_claimed_at IS NU
 def _reservar(c) -> dict | None:
     return c.execute(
         "UPDATE domains SET online_claimed_at = now() WHERE id = (SELECT d.id FROM domains d WHERE " + _FILA +
-        " ORDER BY d.lista_duvida DESC, d.total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED) "
-        "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence").fetchone()
+        " ORDER BY " + _EM_DECISOES + " DESC, d.lista_duvida DESC, d.total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED) "
+        "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_conf, lista_motivo").fetchone()
 
 
 def _certo(obj: dict) -> bool:

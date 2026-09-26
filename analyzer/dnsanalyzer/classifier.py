@@ -418,7 +418,7 @@ def _whois_worker(stop, cats: list[dict], reforco: "_Reforco", wid: int) -> None
 
 
 def _online_worker(stop) -> None:
-    """Fase 3: IA online (Gemini) — um worker só, no ritmo da cota (GEMINI_RPM/RPD)."""
+    """Fase 4: IA online (Gemini/Gemma) — ONLINE_WORKERS em paralelo; a cota (RPM/RPD) é por modelo."""
     while not stop():
         try:
             with db.conn() as c:
@@ -499,7 +499,7 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
-    db.set_max_size(7 + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
+    db.set_max_size(6 + cfg.online_workers + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:
@@ -528,7 +528,8 @@ def run_forever(stop=lambda: False) -> None:
             threading.Thread(target=_whois_worker, args=(stop, cats, reforco, i), daemon=True,
                              name=f"whois-{i}").start()
         log.info("etapa 3 (WHOIS) em paralelo: %d worker(s)", cfg.whois_workers)
-    threading.Thread(target=_online_worker, args=(stop,), daemon=True, name="online").start()
+    for i in range(cfg.online_workers):
+        threading.Thread(target=_online_worker, args=(stop,), daemon=True, name=f"online-{i}").start()
     log.info("fase 4 (IA online): %s", " | ".join(",".join(f"{m} {r}/min {d}/dia" for m, r, d in n) for n in online.niveis())
              if online.habilitado() else "desligada (sem GEMINI_API_KEY)")
     while not stop():

@@ -180,57 +180,90 @@ DUVIDA_BY = "IA com dúvida"        # foi para Para revisar com a sugestão
 PARA_REVISAR = "para_revisar"
 
 
+def _coerente(cat: str, cls: str | None, categoria: str | None) -> bool:
+    return not (cat == "ameaca" and cls != "MALICIOSO") and \
+        not (cat in _EXIGE_NAO_TRABALHO and cls == "TRABALHO") and \
+        not (categoria == "infraestrutura" and cat != "doh_dns")   # infra de sistemas: só com revisão
+
+
 def aplicar(c, limite: int = 3000) -> dict:
-    """Resultados novos da etapa "lista" -> listas. Certeza = confiança >= LISTA_CONFIANCA_MIN, coerente
-    com a classificação principal e sem decisão humana contra (quando a lista bloqueia alguma empresa).
-    Sem certeza -> Para revisar (com a sugestão). Site já numa lista (pessoa/migração) fica onde está."""
+    """Resultados novos da etapa "lista" e da IA online -> listas.
+
+    Com a IA online ligada, ela é a VALIDADORA: a sugestão da IA local (com ou sem certeza) espera a
+    fase 4 (lista_duvida); a resposta da IA online com certeza e coerente (pela classificação DELA) põe o
+    site na lista — e corrige o que a IA local tinha posto sozinha; sem certeza -> Decisões (fase 5),
+    a menos que o site já esteja numa lista. Sem IA online: a certeza da IA local basta (como antes).
+    Site posto numa lista por pessoa/migração fica onde está; decisão humana contra -> Decisões."""
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
-        " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed') AS g_allowed, "
+        " d.online_resp->>'classificacao' AS cls_online, "
+        " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
+        "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
         " EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id AND (td.review_status = 'allowed' "
         "         OR td.override_classification = 'TRABALHO')) AS t_allowed, "
-        " ARRAY(SELECT l.category FROM category_lists l WHERE l.domain = d.name) AS em "
+        " ARRAY(SELECT l.category || '|' || coalesce(l.added_by, '') FROM category_lists l WHERE l.domain = d.name) AS em "
         "FROM domains d WHERE d.lista_at IS NOT NULL AND d.lista_fonte <> 'falhou' "
         " AND d.lista_aplicada_at IS DISTINCT FROM d.lista_at ORDER BY d.lista_at LIMIT %s", (limite,)).fetchall()
     aplicadas = {x for r in c.execute("SELECT lists FROM policies") for x in (r["lists"] or [])}
     out = {"direto": [], "revisar": [], "resolvidos": [], "online": []}
     from . import online as _online
     online_ok = _online.habilitado()
+
+    def para_decisoes(r, cat):
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                  (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})"))
+        out["revisar"].append((r["name"], cat))
+
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
-        cat, em = r["lista_ia"], set(r["em"] or [])
+        cat = r["lista_ia"]
+        em = dict(x.split("|", 1) for x in (r["em"] or []))                    # {lista: quem pôs}
+        da_ia = {k for k, v in em.items() if v.startswith(AUTO_BY)}              # postas pela IA
+        moveis = {PARA_REVISAR, OUTROS} | da_ia
+        fixas = set(em) - moveis                                                 # pessoa/migração/Sistema
         certo = (r["lista_conf"] or 0) >= cfg.lista_confianca_min
         online = (r["lista_fonte"] or "").startswith("online")
-        if not cat and em == {PARA_REVISAR} and certo and online:
-            # a IA online resolveu a dúvida: não é de lista nenhuma
-            c.execute("DELETE FROM category_lists WHERE category = %s AND domain = %s", (PARA_REVISAR, r["name"]))
-            out["resolvidos"].append(r["name"])
-            continue
-        if not cat or cat in em or (em - {PARA_REVISAR, OUTROS}):
-            continue
-        coerente = not (cat == "ameaca" and r["classification"] != "MALICIOSO") and \
-            not (cat in _EXIGE_NAO_TRABALHO and r["classification"] == "TRABALHO") and \
-            not (r["category"] == "infraestrutura" and cat != "doh_dns")   # infra de sistemas: só com revisão
-        humano_contra = cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
-        if certo and coerente and not humano_contra:
-            por = f"{AUTO_BY} ({cat})"
-            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                      (cat, r["name"], por))
-            c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", ([PARA_REVISAR, OUTROS], r["name"]))
-            if cat in aplicadas:   # passou a bloquear alguém: conta como decidido (sai da fila de Decisões)
-                c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
-                          "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
-            out["direto"].append((r["name"], cat))
-        elif not humano_contra and not online and online_ok:
-            # dúvida da IA local: antes da fase 4 (manual), a fase 3 (IA online) tenta resolver
+        cls = r["cls_online"] if online and r["cls_online"] else r["classification"]
+        humano_contra = bool(cat) and cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
+
+        if not online and online_ok:   # IA local: espera a validação da IA online
+            if not cat or cat in em or fixas:
+                continue
+            if humano_contra:
+                if PARA_REVISAR not in em:
+                    para_decisoes(r, cat)
+                continue
             c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
             out["online"].append((r["name"], cat))
-        elif PARA_REVISAR not in em and OUTROS not in em:   # Outros: fica lá (bloqueado) com a sugestão
-            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                      (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat})"))
-            out["revisar"].append((r["name"], cat))
-    if out["direto"] or out["revisar"] or out["online"]:
-        log.info("listas pela IA: %d direto, %d p/ a IA online, %d p/ Para revisar", len(out["direto"]),
-                 len(out["online"]), len(out["revisar"]))
+            continue
+
+        if fixas and (not cat or cat not in em):
+            continue   # alguém pôs noutra lista: fica
+        if certo and not cat and online:
+            # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs)
+            tirar = [x for x in moveis if x in em and x != OUTROS]
+            if tirar:
+                c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
+                out["resolvidos"].append(r["name"])
+            continue
+        if not cat:
+            continue
+        if certo and _coerente(cat, cls, r["category"]) and not humano_contra:
+            if cat not in em:
+                por = f"{AUTO_BY} ({cat})"
+                c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                          (cat, r["name"], por))
+                if cat in aplicadas:   # passou a bloquear alguém: conta como decidido
+                    c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
+                              "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
+                out["direto"].append((r["name"], cat))
+            tirar = [x for x in moveis if x in em and x != cat]
+            if tirar:
+                c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
+        elif not da_ia and PARA_REVISAR not in em and OUTROS not in em:
+            para_decisoes(r, cat)   # sem certeza em nenhuma fase: fase 5 (Outros fica lá, bloqueado, com a sugestão)
+    if out["direto"] or out["revisar"] or out["online"] or out["resolvidos"]:
+        log.info("listas pela IA: %d direto, %d p/ a IA online, %d p/ Decisões, %d resolvidos", len(out["direto"]),
+                 len(out["online"]), len(out["revisar"]), len(out["resolvidos"]))
     return out

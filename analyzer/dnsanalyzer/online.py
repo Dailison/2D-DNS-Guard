@@ -144,7 +144,7 @@ def perguntar(d: dict, categorias: list[str], buscar: bool) -> tuple[dict, dict]
         raise OnlineIndisponivel(f"Gemini: HTTP {r.status_code}: {r.text[:200]}")
     j = r.json()
     partes = ((j.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
-    texto = "".join(p.get("text", "") for p in partes)
+    texto = "".join(p.get("text", "") for p in partes if not p.get("thought"))
     obj = _json_da_resposta(texto)
     fontes = [c.get("web", {}).get("uri") for c in
               ((j.get("candidates") or [{}])[0].get("groundingMetadata") or {}).get("groundingChunks") or []][:5]

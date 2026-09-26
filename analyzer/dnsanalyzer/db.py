@@ -19,8 +19,12 @@ _pool: ConnectionPool | None = None
 def pool() -> ConnectionPool:
     global _pool
     if _pool is None:
+        cfg = settings()
+        # cada análise simultânea da IA segura 1 conexão enquanto monta o dossiê (+1 rápida p/ o
+        # feed "IA ao vivo"): o pool cresce com os workers (reforço com GPU) — PostgreSQL: 40
+        workers = cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls)
         _pool = ConnectionPool(
-            settings().database_url, min_size=1, max_size=8, open=True,
+            cfg.database_url, min_size=1, max_size=max(8, 6 + workers), open=True,
             kwargs={"row_factory": dict_row, "autocommit": False},
         )
     return _pool

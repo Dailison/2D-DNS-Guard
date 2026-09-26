@@ -153,7 +153,8 @@ def _sugestao(r: dict) -> str:
 
 
 _CAMPO = {"classificacao": lambda r: r.get("classification") or "_sem",
-          "cat_ia": lambda r: r.get("cat_ia") or "_sem", "revisao": lambda r: r["revisao"], "sugestao": _sugestao}
+          "cat_ia": lambda r: r.get("cat_ia") or "_sem", "revisao": lambda r: r["revisao"], "sugestao": _sugestao,
+          "recomendacao": lambda r: r.get("corp_action") or "_sem"}
 
 
 def _facetar(rows: list[dict]) -> dict:
@@ -165,11 +166,11 @@ def _facetar(rows: list[dict]) -> dict:
     return fac
 
 
-def _filtrar_paginar(rows: list[dict], q=None, cls=None, cat_ia=None, revisao=None, sug=None, ordem="recentes",
+def _filtrar_paginar(rows: list[dict], q=None, cls=None, cat_ia=None, revisao=None, sug=None, rec=None, ordem="recentes",
                      offset=0, limit=100) -> dict:
     """Facetas contadas com os OUTROS filtros aplicados (cada filtro mostra o que sobra nele)."""
     q = (q or "").strip().lower()
-    filtros = {"classificacao": cls, "cat_ia": cat_ia, "revisao": revisao, "sugestao": sug}
+    filtros = {"classificacao": cls, "cat_ia": cat_ia, "revisao": revisao, "sugestao": sug, "recomendacao": rec}
     campo = _CAMPO
 
     def passa(r, exceto=None):

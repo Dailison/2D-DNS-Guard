@@ -97,6 +97,9 @@ def test_filtros_e_paginacao(api):
     j = api.get("/listas/para_revisar/detalhes", headers=H, params={"ordem": "consultas", "limit": 2, "offset": 1}).json()
     assert j["total"] == 4 and [r["domain"] for r in j["items"]] == ["jogo.com", "duvida.com"]
     assert api.get("/listas/xx/detalhes", headers=H).status_code == 404
+    j = api.get("/listas/para_revisar/detalhes", headers=H, params={"rec": "_sem"}).json()
+    assert j["total"] == 4 and j["facetas"]["recomendacao"] == {"_sem": 4}
+    assert api.get("/listas/para_revisar/detalhes", headers=H, params={"rec": "LIBERAR"}).json()["total"] == 0
 
 
 def test_sem_lista_exclui_listas_e_dominio_pai(api):

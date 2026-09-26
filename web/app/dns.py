@@ -482,13 +482,13 @@ def _det_filtros(ordem_padrao: str, cls_padrao: str = "") -> dict:
     a = request.args
     pp = a.get("pp", 100, type=int)
     return {"q": (a.get("q") or "").strip().lower(), "cls": a.get("cls", cls_padrao), "cat_ia": a.get("cat_ia", ""),
-            "revisao": a.get("revisao", ""), "sug": a.get("sug", ""), "ordem": a.get("ordem") or ordem_padrao,
+            "revisao": a.get("revisao", ""), "sug": a.get("sug", ""), "rec": a.get("rec", ""), "ordem": a.get("ordem") or ordem_padrao,
             "pp": pp if pp in (100, 250, 500) else 100, "pag": max(1, a.get("pag", 1, type=int))}
 
 
 def _det_params(fd: dict) -> dict:
     return {"q": fd["q"] or None, "cls": fd["cls"] or None, "cat_ia": fd["cat_ia"] or None,
-            "revisao": fd["revisao"] or None, "sug": fd["sug"] or None, "ordem": fd["ordem"], "limit": fd["pp"], "offset": (fd["pag"] - 1) * fd["pp"]}
+            "revisao": fd["revisao"] or None, "sug": fd["sug"] or None, "rec": fd["rec"] or None, "ordem": fd["ordem"], "limit": fd["pp"], "offset": (fd["pag"] - 1) * fd["pp"]}
 
 
 def _pag_url(n: int) -> str:

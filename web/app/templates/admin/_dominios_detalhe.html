@@ -31,6 +31,10 @@
     <option value="">todas</option>
     {% for k, n in det.facetas.get('sugestao', {})|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.sug }}>{{ {'_nenhuma': 'nenhuma lista', '_sem': 'ainda não vista'}.get(k) or LISTAS_ROT.get(k, k) }} ({{ n }})</option>{% endfor %}
   </select></div>
+  <div><label>Recomendação</label><select name="rec" onchange="this.form.submit()">
+    <option value="">todas</option>
+    {% for k in ('BLOQUEAR', 'LIBERAR', 'REVISAR', '_sem') if k in det.facetas.get('recomendacao', {}) or k == fd.rec %}<option value="{{ k }}" {{ 'selected' if k == fd.rec }}>{{ {'BLOQUEAR': '⛔ Bloquear', 'LIBERAR': '✅ Liberar', 'REVISAR': '👀 Revisar', '_sem': 'sem recomendação'}[k] }} ({{ det.facetas.get('recomendacao', {}).get(k, 0) }})</option>{% endfor %}
+  </select></div>
   <div><label>Revisão</label><select name="revisao" onchange="this.form.submit()">
     <option value="">todas</option>
     {% for k in ('ia', 'manual', 'pendente') %}<option value="{{ k }}" {{ 'selected' if k == fd.revisao }}>{{ REV[k] }} ({{ det.facetas.revisao.get(k, 0) }})</option>{% endfor %}

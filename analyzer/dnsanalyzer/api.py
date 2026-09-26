@@ -1108,23 +1108,23 @@ def lista_sugestoes(categoria: str, limit: int = Query(500, le=5000)):
 
 @app.get("/listas/{categoria}/detalhes", dependencies=[Depends(auth)])
 def lista_detalhes(categoria: str, q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
-                   revisao: Optional[str] = None, sug: Optional[str] = None, ordem: str = "recentes", offset: int = Query(0, ge=0),
+                   revisao: Optional[str] = None, sug: Optional[str] = None, rec: Optional[str] = None, ordem: str = "recentes", offset: int = Query(0, ge=0),
                    limit: int = Query(100, le=1000)):
     """Itens da lista com a classificação da IA, a revisão manual (quem/quando) e facetas p/ filtrar."""
     if categoria not in listas.CATEGORIAS:
         raise HTTPException(404, "categoria sem lista")
     with db.conn() as c:
-        return listas.detalhes(c, categoria, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, ordem=ordem,
+        return listas.detalhes(c, categoria, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, rec=rec, ordem=ordem,
                                offset=offset, limit=limit)
 
 
 @app.get("/sem-lista", dependencies=[Depends(auth)])
 def sem_lista(q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
-              revisao: Optional[str] = None, sug: Optional[str] = None, ordem: str = "consultas", offset: int = Query(0, ge=0),
+              revisao: Optional[str] = None, sug: Optional[str] = None, rec: Optional[str] = None, ordem: str = "consultas", offset: int = Query(0, ge=0),
               limit: int = Query(100, le=1000)):
     """Domínios analisados fora de qualquer lista (não vão p/ o Technitium)."""
     with db.conn() as c:
-        return listas.sem_lista(c, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, ordem=ordem,
+        return listas.sem_lista(c, q=q, cls=cls, cat_ia=cat_ia, revisao=revisao, sug=sug, rec=rec, ordem=ordem,
                                 offset=offset, limit=limit)
 
 

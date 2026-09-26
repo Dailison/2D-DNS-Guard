@@ -127,3 +127,19 @@ def test_web_search_single_site_is_not_enough():
     f = combine(r, llm("TRABALHO", work=80, recognized=True,
                        reasons=[{"evidence_id": i, "text": "Dell"} for i in ids]), ev(r))
     assert f.classification == "DESCONHECIDO"
+
+
+def test_web_search_cited_one_of_several_sites_is_enough():
+    # a IA leu a busca (4 sites diferentes) mas citou só um resultado: vale (antes caía em DESCONHECIDO)
+    r = base("kudabibi.com", search=_busca("blox-fruits.fandom.com", "mobilegamer.com.br", "youtube.com"))
+    ids = [e.id for e in r.evidence if e.kind == "websearch"]
+    f = combine(r, llm("NAO_TRABALHO", work=5, recognized=True,
+                       reasons=[{"evidence_id": ids[0], "text": "jogo online"}]), ev(r))
+    assert f.classification == "NAO_TRABALHO"
+
+
+def test_web_search_available_but_not_used_is_not_enough():
+    # busca com 2+ sites no dossiê, mas a IA só citou o nome (E0): continua sem apoio -> DESCONHECIDO
+    r = base("kudabibi.com", search=_busca("a.com", "b.com"))
+    f = combine(r, llm("NAO_TRABALHO", work=5, recognized=True), ev(r))
+    assert f.classification == "DESCONHECIDO"

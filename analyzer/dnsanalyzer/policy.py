@@ -88,12 +88,13 @@ def combine(rule: RuleResult, llm: LLMResult, evidence: list[dict]) -> Final:
             notes.append(f"IA não reconhece o serviço (sugeriu {cls}): classificado como DESCONHECIDO")
             cls, work_forced = "DESCONHECIDO", 50
         elif not rule.flags.get("ranked") and not any(
-                ev_by_id[r["evidence_id"]]["kind"] in TRUSTED_ID_KINDS for r in valid) and len(
-                {ev_by_id[r["evidence_id"]]["data"].get("host") for r in valid
-                 if ev_by_id[r["evidence_id"]]["kind"] == "websearch"}) < 2:
+                ev_by_id[r["evidence_id"]]["kind"] in TRUSTED_ID_KINDS for r in valid) and not (
+                any(ev_by_id[r["evidence_id"]]["kind"] in ("websearch", "site") for r in valid) and len(
+                    {e["data"].get("host") for e in evidence if e["kind"] == "websearch"} - {None}) >= 2):
             # modelos pequenos "reconhecem" domínios da cauda longa por chute: fora do top 1M
             # só vale se a IA se apoiou numa identidade externa confiável (Wikidata/certificado)
-            # ou em 2+ resultados de busca de sites diferentes (etapa 2) que concordam
+            # ou na busca na web/página do site, com resultados de 2+ sites diferentes no dossiê
+            # (o modelo raramente cita todos os ids que leu: exigir 2 citados descartava acertos)
             notes.append(f"domínio fora do top 1M (Tranco) e sem identificação externa confiável citada: "
                          f"reconhecimento da IA não é confiável (sugeriu {cls}); classificado como DESCONHECIDO")
             cls, work_forced = "DESCONHECIDO", 50

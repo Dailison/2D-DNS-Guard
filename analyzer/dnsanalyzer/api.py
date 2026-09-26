@@ -871,12 +871,28 @@ def liberados_meta_delete(ip: str):
 
 
 # ------------------------------------------------------------------ logs agrupados (console)
+# classificação efetiva (ajuste manual da empresa > IA) e "pior" quando a linha junta empresas
+_CLS_EFETIVA = "COALESCE(td.override_classification, d.classification)"
+_CLS_ORDEM = ("TRABALHO", "DESCONHECIDO", "NAO_TRABALHO", "SUSPEITO", "MALICIOSO")   # pior por último
+_CLS_RANK = "CASE " + _CLS_EFETIVA + " " + " ".join(
+    f"WHEN '{c}' THEN {i + 1}" for i, c in enumerate(_CLS_ORDEM)) + " ELSE 0 END"
+_CLS_DO_RANK = "CASE max(" + _CLS_RANK + ") " + " ".join(
+    f"WHEN {i + 1} THEN '{c}'" for i, c in enumerate(_CLS_ORDEM)) + " END"
+_CLS_COLS = (f"{_CLS_DO_RANK} AS classificacao, bool_or(td.override_classification IS NOT NULL) AS ajustada, "
+             "min(d.category) AS categoria, max(d.risk_score) AS risco, min(d.topic) AS assunto")
+
+
 @app.get("/logs/grouped", dependencies=[Depends(auth)])
 def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str] = None,
                  cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
-                 dominio: Optional[str] = None, blocked: bool = False, limit: int = Query(1000, le=5000)):
+                 dominio: Optional[str] = None, blocked: bool = False,
+                 cls: list[str] = Query(default=[]), categoria: Optional[str] = None,
+                 por_cliente: bool = False, limit: int = Query(1000, le=5000)):
     """Logs DNS agrupados por nome consultado (a partir de query_agg, por hora), com os
-    mesmos filtros da tela Logs DNS. Atraso = o da coleta (~5-7 min)."""
+    mesmos filtros da tela Logs DNS. Atraso = o da coleta (~5-7 min).
+    Cada linha traz a classificação efetiva (ajuste da empresa > IA; juntando empresas, a pior).
+    cls = classificações (PENDENTE = ainda sem classificação); por_cliente = uma linha por
+    nome × computador × empresa (quem acessou)."""
     where = ["q.bucket >= date_trunc('hour', %(s)s::timestamptz)", "q.bucket < %(e)s",
              "q.last_seen >= %(s)s", "q.first_seen <= %(e)s"]
     p: dict = {"s": start, "e": end, "lim": limit + 1}
@@ -896,16 +912,73 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
         where.append("f.name LIKE %(dom)s"); p["dom"] = f"%{dominio.strip().lower()}%"
     if blocked:
         where.append("q.blocked > 0")
+    cls = [x.strip().upper() for x in cls if x and x.strip()]
+    if cls:
+        p["cls"] = [x for x in cls if x != "PENDENTE"]
+        cond = [f"{_CLS_EFETIVA} = ANY(%(cls)s)"] if p["cls"] else []
+        if "PENDENTE" in cls:
+            cond.append(f"{_CLS_EFETIVA} IS NULL")
+        where.append("(" + " OR ".join(cond) + ")")
+    if categoria:
+        where.append("d.category = %(cat)s"); p["cat"] = categoria
+    base = ("FROM query_agg q JOIN fqdns f ON f.id=q.fqdn_id JOIN clients cl ON cl.id=q.client_id "
+            "JOIN tenants t ON t.id=q.tenant_id JOIN domains d ON d.id=q.domain_id "
+            "LEFT JOIN tenant_domains td ON td.tenant_id=q.tenant_id AND td.domain_id=q.domain_id ")
+    if por_cliente:
+        # nome do computador: rótulo do cliente ou, se não houver, o usuário/descrição dos Liberados
+        sql = ("SELECT g.dominio, host(g.ip) AS ip, COALESCE(g.label, lm.usuario) AS computador, "
+               " g.tenant_id, g.empresa, g.n, g.bloqueadas, g.ultima, g.classificacao, g.ajustada, "
+               " g.categoria, g.risco, g.assunto FROM ("
+               "SELECT f.name AS dominio, cl.ip, min(cl.label) AS label, t.id AS tenant_id, t.name AS empresa, "
+               " sum(q.queries) AS n, sum(q.blocked) AS bloqueadas, max(q.last_seen) AS ultima, " + _CLS_COLS + " "
+               + base + f"WHERE {' AND '.join(where)} GROUP BY f.name, cl.ip, t.id, t.name "
+               "ORDER BY max(q.last_seen) DESC LIMIT %(lim)s) g "
+               "LEFT JOIN LATERAL (SELECT m.usuario FROM liberado_meta m "
+               " WHERE m.ip IN (host(g.ip), host(g.ip) || '/32') ORDER BY m.ip LIMIT 1) lm ON true "
+               "ORDER BY g.ultima DESC")
+    else:
+        sql = ("SELECT f.name AS dominio, sum(q.queries) AS n, sum(q.blocked) AS bloqueadas, "
+               " count(DISTINCT q.client_id) AS nclientes, max(q.last_seen) AS ultima, "
+               " array_agg(DISTINCT t.name ORDER BY t.name) AS empresas, " + _CLS_COLS + " "
+               + base + f"WHERE {' AND '.join(where)} GROUP BY f.name ORDER BY max(q.last_seen) DESC LIMIT %(lim)s")
     with db.conn() as c:
-        rows = c.execute(
-            "SELECT f.name AS dominio, sum(q.queries) AS n, sum(q.blocked) AS bloqueadas, "
-            " count(DISTINCT q.client_id) AS nclientes, max(q.last_seen) AS ultima, "
-            " array_agg(DISTINCT t.name ORDER BY t.name) AS empresas "
-            "FROM query_agg q JOIN fqdns f ON f.id=q.fqdn_id JOIN clients cl ON cl.id=q.client_id "
-            "JOIN tenants t ON t.id=q.tenant_id "
-            f"WHERE {' AND '.join(where)} GROUP BY f.name ORDER BY max(q.last_seen) DESC LIMIT %(lim)s", p).fetchall()
+        rows = c.execute(sql, p).fetchall()
         cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
     return {"rows": rows[:limit], "cap": len(rows) > limit, "coletado_ate": cursor}
+
+
+class ClassificarIn(BaseModel):
+    nomes: list[str]
+
+
+@app.post("/logs/classificar", dependencies=[Depends(auth)])
+def logs_classificar(body: ClassificarIn):
+    """Classificação de cada nome consultado (vista Detalhado, que vem do Technitium em tempo
+    real). Nome ainda não coletado herda a do domínio pai já conhecido. `ajustes` = correções
+    por empresa ({tenant_id: classificação}); quem mostra aplica a da empresa do IP."""
+    nomes = list(dict.fromkeys(n.strip().lower().rstrip(".") for n in body.nomes if n and n.strip()))[:5000]
+    cands: dict[str, list[str]] = {}
+    for n in nomes:
+        parts = n.split(".")
+        lista = [_domain_name(n)] + [".".join(parts[i:]) for i in range(len(parts) - 1)]
+        cands[n] = [x for x in dict.fromkeys(lista) if x and "." in x]
+    todos = sorted({x for v in cands.values() for x in v})
+    if not todos:
+        return {}
+    with db.conn() as c:
+        doms = {r["name"]: r for r in c.execute(
+            "SELECT d.id, d.name, d.classification, d.category, d.risk_score, d.topic, "
+            " COALESCE((SELECT jsonb_object_agg(td.tenant_id::text, td.override_classification) "
+            "           FROM tenant_domains td WHERE td.domain_id=d.id "
+            "           AND td.override_classification IS NOT NULL), '{}'::jsonb) AS ajustes "
+            "FROM domains d WHERE d.name = ANY(%s)", (todos,)).fetchall()}
+    out = {}
+    for n, lista in cands.items():
+        d = next((doms[x] for x in lista if x in doms), None)
+        out[n] = None if d is None else {
+            "dominio": d["name"], "classificacao": d["classification"], "categoria": d["category"],
+            "risco": d["risk_score"], "assunto": d["topic"], "ajustes": d["ajustes"]}
+    return out
 
 
 # ------------------------------------------------------------------ configuração dos grupos (console)

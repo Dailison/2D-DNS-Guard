@@ -1,6 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Logs DNS{% endblock %}
 {% block content %}
+{# selos da classificação da IA: esta tela não herda o _base.html da Análise #}
+<style>
+  .cls{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .45rem;border-radius:6px;color:#fff;white-space:nowrap}
+  .cls.TRABALHO{background:#16a34a}.cls.NAO_TRABALHO{background:#d97706}.cls.SUSPEITO{background:#ea580c}
+  .cls.MALICIOSO{background:#b91c1c}.cls.DESCONHECIDO{background:#64748b}.cls.PENDENTE{background:#94a3b8}
+  .cls-cat{display:block;font-size:.72rem;color:var(--mut,#64748b);margin-top:.1rem}
+</style>
+{% macro selo(row) %}
+  {% if cls_label is defined %}
+    <span class="cls {{ row.cls or 'PENDENTE' }}">{{ cls_label.get(row.cls, row.cls) if row.cls else 'Aguardando IA' }}</span>{% if row.ajustada %} <span title="ajuste manual da empresa (prevalece sobre a IA)">✎</span>{% endif %}
+    {% if row.categoria %}<span class="cls-cat">{{ cat_label.get(row.categoria, row.categoria) }}</span>{% endif %}
+  {% else %}<span class="mut">—</span>{% endif %}
+{% endmacro %}
 <h1>Logs DNS <span class="mut" style="font-size:.8rem">· Technitium, com empresa por IP</span></h1>
 
 <div class="card">
@@ -23,23 +36,35 @@
         <option value="">— Todas —</option>
         {% for r in respostas %}<option value="{{ r }}" {{ 'selected' if resposta==r }}>{{ r }}</option>{% endfor %}
       </select></div>
+    <div><label>Classificação IA</label>
+      <select name="cls">
+        {% for v, rot in cls_filtros %}<option value="{{ v }}" {{ 'selected' if cls_f == v }}>{{ rot }}</option>{% endfor %}
+      </select></div>
+    <div><label>Categoria do site</label>
+      <select name="categoria">
+        <option value="">— Todas —</option>
+        {% for c in site_categorias %}<option value="{{ c.code }}" {{ 'selected' if categoria == c.code }}>{{ c.label }}</option>{% endfor %}
+      </select></div>
     <div><label>Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
     <div><label>Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
     <div><label>Vista</label>
       <select name="vista" onchange="this.form.submit()">
-        <option value="agrupado" {{ 'selected' if agrupar }}>Agrupado por domínio</option>
-        <option value="detalhado" {{ 'selected' if not agrupar }}>Detalhado (cada acesso)</option>
+        <option value="agrupado" {{ 'selected' if vista == 'agrupado' }}>Agrupado por domínio</option>
+        <option value="cliente" {{ 'selected' if vista == 'cliente' }}>Por computador (quem acessou)</option>
+        <option value="detalhado" {{ 'selected' if vista == 'detalhado' }}>Detalhado (cada acesso)</option>
       </select></div>
     <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Filtrar</button></div>
   </form>
   <p class="mut" style="font-size:.85rem;margin:.6rem 0 0"><b>Empresa</b> vem do <a href="{{ url_for('analise.empresas') }}">cadastro de empresas</a> (todas as unidades/redes dela); <b>Grupo de bloqueio</b> é a política do Technitium (pode reunir várias empresas). <b>Faixa / parte do IP</b> aceita CIDR (<code>10.70.0.0/16</code>) ou um pedaço do IP (<code>10.100</code> traz todos os IPs que contêm isso). <b>Resposta</b> = como o Technitium respondeu (<code>Blocked</code> = bloqueado pelo filtro, <code>Cached</code>, <code>Recursive</code>…). Reduza o período para buscas mais fundas. Horários no fuso de São Paulo (GMT-3).</p>
+  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0"><b>Classificação IA</b> = a do analisador para o site (o ajuste manual da empresa, marcado com ✎, prevalece); juntando empresas numa linha, vale a pior. <b>Ameaças</b> = Malicioso + Suspeito. Para descobrir <b>qual computador</b> acessou um site malicioso: Classificação IA = Malicioso e vista <b>Por computador</b>.</p>
   <p class="mut" style="font-size:.85rem;margin:.3rem 0 0">Nas linhas <b style="color:#dc2626">Blocked</b>, a coluna <b>Desbloquear</b> mostra o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME <code>↳</code>). O botão <code>✕</code> remove esse domínio do <code>blocked[]</code> de <b>todos os grupos</b> de uma vez.</p>
 </div>
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem">
     <h2 style="margin:0">
-      {% if agrupar %}{{ agrupado|length }} domínio(s) <span class="mut" style="font-size:.8rem">· {{ total_acessos if total_acessos is defined else linhas|length }} acessos</span>
+      {% if vista == 'cliente' %}{{ agrupado|length }} linha(s) computador × domínio <span class="mut" style="font-size:.8rem">· {{ total_acessos }} acessos</span>
+      {% elif agrupar %}{{ agrupado|length }} domínio(s) <span class="mut" style="font-size:.8rem">· {{ total_acessos if total_acessos is defined else linhas|length }} acessos</span>
       {% else %}{{ linhas|length }} registro(s){% endif %}
     </h2>
     <span class="mut" style="font-size:.8rem">
@@ -60,9 +85,29 @@
       {% endfor %}
     {% else %}<span class="mut">—</span>{% endif %}
   {% endmacro %}
-  {% if agrupar %}
+  {% if vista == 'cliente' %}
   <table>
-    <thead><tr><th>Último acesso</th><th>Domínio</th><th>Entradas</th><th>Clientes</th><th>Empresas</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <thead><tr><th>Último acesso</th><th>Computador</th><th>Empresa</th><th>Domínio</th><th>Classificação IA</th><th>Entradas</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <tbody>
+    {% for a in agrupado %}
+      <tr>
+        <td class="mut" style="white-space:nowrap">{{ (a.ultima or '')[:19]|replace('T',' ') }}</td>
+        <td><code>{{ a.ip }}</code>{% if a.computador %}<br><span style="font-size:.85rem">{{ a.computador }}</span>{% endif %}</td>
+        <td style="font-size:.85rem">{{ a.empresa or '—' }}</td>
+        <td>{{ a.dominio }}</td>
+        <td>{{ selo(a) }}</td>
+        <td><b>{{ a.n }}</b></td>
+        <td class="mut">{% if a.blocked %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% if a.bloqueadas < a.n %} <span style="font-size:.75rem">{{ a.bloqueadas }}/{{ a.n }}</span>{% endif %}{% else %}Resolvido{% endif %}</td>
+        <td style="white-space:nowrap">{{ desbloquear(a) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="mut">Nenhum registro no filtro/período.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif agrupar %}
+  <table>
+    <thead><tr><th>Último acesso</th><th>Domínio</th><th>Classificação IA</th><th>Entradas</th><th>Clientes</th><th>Empresas</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
     <tbody>
     {% for a in agrupado %}
       <tr>
@@ -70,6 +115,7 @@
         <td>{{ a.dominio }}
           {% if a.blocked and a.answer and 'CNAME' in a.answer %}<br><span class="mut" style="font-size:.75rem">↳ {{ a.answer }}</span>{% endif %}
         </td>
+        <td>{{ selo(a) }}</td>
         <td><b>{{ a.n }}</b></td>
         <td class="mut">{{ a.nclientes }}</td>
         <td class="mut" style="font-size:.85rem">{% if a.empresas %}{{ a.empresas[:3]|join(', ') }}{% if a.empresas|length > 3 %} <span title="{{ a.empresas|join(', ') }}">+{{ a.empresas|length - 3 }}</span>{% endif %}{% else %}—{% endif %}</td>
@@ -77,13 +123,13 @@
         <td style="white-space:nowrap">{{ desbloquear(a) }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="mut">Nenhum registro no filtro/período.</td></tr>
+      <tr><td colspan="8" class="mut">Nenhum registro no filtro/período.</td></tr>
     {% endfor %}
     </tbody>
   </table>
   {% else %}
   <table>
-    <thead><tr><th>Quando (São Paulo)</th><th>Cliente</th><th>Domínio</th><th>Tipo</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <thead><tr><th>Quando (São Paulo)</th><th>Cliente</th><th>Domínio</th><th>Classificação IA</th><th>Tipo</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
     <tbody>
     {% for l in linhas %}
       <tr>
@@ -95,6 +141,7 @@
             <br><span class="mut" style="font-size:.75rem">↳ {{ l.answer }}</span>
           {% endif %}
         </td>
+        <td>{{ selo(l) }}</td>
         <td class="mut">{{ l.tipo }}</td>
         <td class="mut">
           {% if l.resposta == 'Blocked' %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% else %}{{ l.resposta }}{% endif %}
@@ -103,7 +150,7 @@
         <td style="white-space:nowrap">{{ desbloquear(l) }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="mut">Nenhum registro no filtro/período.</td></tr>
+      <tr><td colspan="7" class="mut">Nenhum registro no filtro/período.</td></tr>
     {% endfor %}
     </tbody>
   </table>

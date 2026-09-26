@@ -729,6 +729,10 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                           "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by IN ('llm','web') "
                           " AND whois_at IS NULL AND NOT llm_pending AND kind='public' "
                           " AND NOT dominio_decidido(id)) AS whois FROM domains").fetchone()
+        from . import listas_ia, online
+        queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": online.status(c)["fila"],
+                 "online_on": online.habilitado(),
+                 "revisar": c.execute("SELECT count(*) AS n FROM category_lists WHERE category='para_revisar'").fetchone()["n"]}
         hour = c.execute("SELECT count(*) AS done, round(avg(seconds)::numeric, 1) AS avg_seconds FROM ai_events "
                          "WHERE kind='llm_done' AND created_at > now() - interval '1 hour'").fetchone()
     ok, msg = OllamaClient().available()
@@ -1188,44 +1192,57 @@ def listas_ia_status():
         return listas_ia.status(c)
 
 
-# ------------------------------------------------------------------ etapa 4 (IA online: revisa as dúvidas)
-@app.get("/etapa4/pendentes", dependencies=[Depends(auth)])
-def etapa4_pendentes(limit: int = Query(50, le=500)):
-    """Dúvidas da etapa "lista" que estão em Para revisar, com o que já se sabe de cada domínio."""
-    from . import listas_ia
+# ------------------------------------------------------------------ fase 3 (IA online)
+@app.get("/online/status", dependencies=[Depends(auth)])
+def online_status():
+    from . import online
+    with db.conn() as c:
+        return online.status(c)
+
+
+@app.get("/online/pendentes", dependencies=[Depends(auth)])
+def online_pendentes(limit: int = Query(50, le=500)):
+    """Fila da fase 3 (dúvidas da etapa "lista" + desconhecidos após a busca), com o contexto de cada um —
+    p/ outra IA online responder por /online/decisao (além do Gemini automático)."""
+    from . import listas_ia, online
     with db.conn() as c:
         rows = c.execute(
             "SELECT d.name, d.topic, d.classification, d.category, d.corp_reason, d.reasons, d.evidence, d.lista_ia, "
-            " d.lista_conf, d.lista_motivo, d.lista_servico, d.total_queries FROM category_lists l JOIN domains d ON d.name = l.domain "
-            "WHERE l.category = 'para_revisar' AND d.lista_at IS NOT NULL AND d.lista_fonte = 'local' "
-            "ORDER BY d.total_queries DESC LIMIT %s", (limit,)).fetchall()
+            " d.lista_conf, d.lista_motivo, d.total_queries FROM domains d WHERE " + online._FILA +
+            " ORDER BY d.lista_duvida DESC, d.total_queries DESC LIMIT %s", (limit,)).fetchall()
     return [{"domain": r["name"], "contexto": listas_ia._contexto(r), "sugestao_local": r["lista_ia"] or listas_ia.NENHUMA,
              "confianca_local": r["lista_conf"], "motivo_local": r["lista_motivo"], "total_queries": r["total_queries"]}
             for r in rows]
 
 
-class Etapa4In(BaseModel):
+class OnlineIn(BaseModel):
     domain: str
     lista: str
     confianca: float = Field(ge=0, le=1)
+    classificacao: Optional[str] = None
+    categoria: Optional[str] = None
+    reconhecido: bool = False
     motivo: str = ""
     servico: str = ""
     fonte: str = "claude"
 
 
-@app.post("/etapa4/decisao", dependencies=[Depends(auth)])
-def etapa4_decisao(body: Etapa4In):
-    """Resposta da IA online p/ um domínio: grava como a sugestão da lista (fonte etapa4:<quem>) e o
-    próximo ciclo aplica (certeza = entra na lista; "nenhuma" com certeza = sai de Para revisar)."""
-    from . import listas_ia
+@app.post("/online/decisao", dependencies=[Depends(auth)])
+def online_decisao(body: OnlineIn):
+    """Resposta de uma IA online p/ um domínio (mesmo efeito da resposta do Gemini): vira a sugestão de
+    lista e, para desconhecido reconhecido com certeza, a classificação. O próximo ciclo aplica."""
+    from . import listas_ia, online
     if body.lista not in listas_ia.LISTAS_IA and body.lista != listas_ia.NENHUMA:
         raise HTTPException(422, "lista inválida")
     with db.conn() as c:
-        r = c.execute("SELECT id FROM domains WHERE name = %s", (body.domain.strip().lower().rstrip("."),)).fetchone()
-        if not r:
+        d = c.execute("SELECT id, name, classification FROM domains WHERE name = %s",
+                      (body.domain.strip().lower().rstrip("."),)).fetchone()
+        if not d:
             raise HTTPException(404, "domínio não encontrado")
-        listas_ia.salvar(c, r["id"], body.lista, body.confianca, body.motivo, body.servico,
-                         "etapa4:" + (body.fonte or "online")[:30])
+        cats = [r["code"] for r in c.execute("SELECT code FROM site_categories")]
+        online.gravar(c, d, {"lista": body.lista, "confianca": body.confianca, "classificacao": body.classificacao,
+                             "categoria": body.categoria, "reconhecido": body.reconhecido, "motivo": body.motivo,
+                             "servico": body.servico}, {"model": body.fonte}, cats, fonte="online:" + (body.fonte or "online")[:30])
     return {"ok": True}
 
 

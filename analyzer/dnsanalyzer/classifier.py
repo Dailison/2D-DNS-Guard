@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, db, enrich, listas, listas_ia, ti, webintel, whois
+from . import catalog, db, enrich, listas, listas_ia, online, ti, webintel, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -415,6 +415,20 @@ def _whois_worker(stop, cats: list[dict], reforco: "_Reforco", wid: int) -> None
             time.sleep(30)
 
 
+def _online_worker(stop) -> None:
+    """Fase 3: IA online (Gemini) — um worker só, no ritmo da cota (GEMINI_RPM/RPD)."""
+    while not stop():
+        try:
+            with db.conn() as c:
+                scats = [r["code"] for r in site_categories(c)]
+            st = online.fase(scats)
+            if st != "done":
+                time.sleep(60)
+        except Exception:  # noqa: BLE001
+            log.exception("erro na fase 3 (IA online)")
+            time.sleep(60)
+
+
 def phase_d(client: OllamaClient, cats: list[dict]) -> str:
     """Etapa 3: WHOIS/RDAP (+ CNPJ) + IA para UM desconhecido (com a fila da IA vazia)."""
     if not settings().whois_enabled:
@@ -483,7 +497,7 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
-    db.set_max_size(6 + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
+    db.set_max_size(7 + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:
@@ -512,6 +526,9 @@ def run_forever(stop=lambda: False) -> None:
             threading.Thread(target=_whois_worker, args=(stop, cats, reforco, i), daemon=True,
                              name=f"whois-{i}").start()
         log.info("etapa 3 (WHOIS) em paralelo: %d worker(s)", cfg.whois_workers)
+    threading.Thread(target=_online_worker, args=(stop,), daemon=True, name="online").start()
+    log.info("fase 3 (IA online): %s", f"{cfg.gemini_model}, {cfg.gemini_rpm}/min, {cfg.gemini_rpd}/dia"
+             if online.habilitado() else "desligada (sem GEMINI_API_KEY)")
     while not stop():
         try:
             n = phase_a()
@@ -526,9 +543,9 @@ def run_forever(stop=lambda: False) -> None:
                         f"{r['name']} ({r['category']})" for r in feitos[:12]) + (" …" if len(feitos) > 12 else ""))
                 with db.conn() as c:
                     ap = listas_ia.aplicar(c)
-                if ap["direto"] or ap["revisar"] or ap["resolvidos"]:
-                    event("lista_ia", detail=f"listas pela IA: {len(ap['direto'])} direto, {len(ap['revisar'])} p/ Para revisar, "
-                          f"{len(ap['resolvidos'])} resolvidos pela etapa 4: " + ", ".join(
+                if ap["direto"] or ap["revisar"] or ap["resolvidos"] or ap["online"]:
+                    event("lista_ia", detail=f"listas pela IA: {len(ap['direto'])} direto, {len(ap['online'])} p/ a IA online, "
+                          f"{len(ap['revisar'])} p/ Para revisar, {len(ap['resolvidos'])} resolvidos pela IA online: " + ", ".join(
                               f"{n} ({c_})" for n, c_ in ap["direto"][:10]) + (" …" if len(ap["direto"]) > 10 else ""))
             if time.monotonic() - last_stale > 3600:
                 m = reanalyze_stale(cfg.reanalyze_days)

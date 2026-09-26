@@ -215,9 +215,8 @@ SECOES_LISTA = [
     ("🔒 Segurança", [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS")]),
     ("🚫 Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
                     ("streaming", "Streaming"), ("mensageiros", "Mensageiros")]),
-    ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("compras", "Compras"), ("noticias", "Notícias"),
-               ("pirataria", "Pirataria / Downloads")]),
-    ("🏢 Trabalho", [("ia_chatbots", "IA / Chatbots"), ("nuvem_remoto", "Nuvem / Acesso remoto")]),
+    ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),
+    ("🏢 Trabalho", [("compras", "Compras"), ("ia_chatbots", "IA / Chatbots"), ("nuvem_remoto", "Nuvem / Acesso remoto")]),
     ("🔧 Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros"), ("para_revisar", "Para revisar")]),
 ]
 CATEGORIAS_LISTA = [x for _, itens in SECOES_LISTA for x in itens]

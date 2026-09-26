@@ -18,9 +18,12 @@
 
 <div class="ia-top">
   <div class="metric"><div class="n" id="st-ia" style="font-size:1rem;padding-top:.4rem">…</div><div class="l" id="st-model">IA</div></div>
-  <div class="metric"><div class="n" id="st-fila">–</div><div class="l">Na fila da IA</div></div>
-  <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web quando a fila da IA esvaziar">Etapa 2 · busca na web</div></div>
-  <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado — em paralelo com a busca na web, .br primeiro">Etapa 3 · WHOIS</div></div>
+  <div class="metric"><div class="n" id="st-fila">–</div><div class="l">Fase 1 · IA local</div></div>
+  <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web quando a fila da IA esvaziar">Fase 2 · busca na web</div></div>
+  <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado — parte da fase 2, em paralelo com a busca">Fase 2 · WHOIS</div></div>
+  <div class="metric"><div class="n" id="st-lista">–</div><div class="l" title="qual lista de bloqueio cada site analisado recebe (IA local, com a capacidade livre)">Listas · IA local</div></div>
+  <div class="metric"><div class="n" id="st-online">–</div><div class="l" title="o que a IA local não resolveu com confiança vai para a IA online (Gemini)">Fase 3 · IA online</div></div>
+  <div class="metric"><div class="n" id="st-revisar">–</div><div class="l" title="Para revisar: classificação manual pela equipe de TI">Fase 4 · manual</div></div>
   <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
   <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div></div>
   <div class="metric"><div class="n" id="st-eta" style="font-size:1.1rem;padding-top:.3rem">–</div><div class="l">Previsão p/ zerar a fila</div></div>
@@ -107,6 +110,9 @@
     document.getElementById('st-fila').textContent = d.queue ? d.queue.ia : '–';
     document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca + (d.queue.ia ? ' (aguarda)' : '') : '–';
     document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois + (d.queue.ia ? ' (aguarda)' : '') : '–';
+    document.getElementById('st-lista').textContent = d.queue && d.queue.lista != null ? d.queue.lista : '–';
+    document.getElementById('st-online').textContent = d.queue && d.queue.online != null ? (d.queue.online_on ? d.queue.online : d.queue.online + ' (sem chave)') : '–';
+    document.getElementById('st-revisar').textContent = d.queue && d.queue.revisar != null ? d.queue.revisar : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';
     document.getElementById('st-media').textContent = d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–';
     document.getElementById('st-eta').textContent = d.eta_seconds ? '~' + (d.eta_seconds > 5400 ? Math.round(d.eta_seconds/3600) + ' h' : Math.round(d.eta_seconds/60) + ' min') : (d.queue && d.queue.ia === 0 ? 'fila vazia' : '–');

@@ -7,7 +7,7 @@
               'SUSPEITO': ('Suspeito', '#ffedd5', '#9a3412'), 'MALICIOSO': ('Malicioso', '#fee2e2', '#991b1b'),
               'DESCONHECIDO': ('Desconhecido', '#e5e7eb', '#374151')} %}
 {% set REC = {'BLOQUEAR': '⛔ bloquear', 'LIBERAR': '✅ liberar', 'REVISAR': '👀 revisar', 'MONITORAR': '👁 monitorar'} %}
-{% set POR = {'llm': 'IA', 'web': 'IA + busca na web', 'catalog': 'catálogo', 'rules': 'regras', 'internal': 'interno', 'manual': 'manual'} %}
+{% set POR = {'llm': 'fase 1 · IA local', 'web': 'fase 2 · busca na web + IA', 'online': 'fase 3 · IA online', 'catalog': 'catálogo', 'rules': 'regras', 'internal': 'interno', 'manual': 'manual'} %}
 {% set REV = {'ia': '🤖 Só IA', 'manual': '✋ Revisado', 'pendente': '⏳ Sem análise'} %}
 <style>
   .dd-t td{vertical-align:top} .dd-cls{display:inline-block;padding:.05rem .45rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
@@ -71,7 +71,7 @@
         {% if i.lista_at and i.lista_fonte != 'falhou' %}
           <b>{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else 'nenhuma lista' }}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}
           {% if i.lista_ia and modo == 'lista' and i.lista_ia == cat %} <span class="dd-sub">✓ esta</span>{% endif %}
-          <div class="dd-sub">{{ i.lista_servico or '' }}{% if i.lista_motivo %} — {{ i.lista_motivo|truncate(90) }}{% endif %}{% if (i.lista_fonte or '').startswith('etapa4') %} · etapa 4{% endif %}</div>
+          <div class="dd-sub">{{ i.lista_servico or '' }}{% if i.lista_motivo %} — {{ i.lista_motivo|truncate(90) }}{% endif %}{% if (i.lista_fonte or '').startswith('online') %} · fase 3 (IA online){% endif %}</div>
         {% else %}<span class="mut">—</span>{% endif %}
       </td>
       <td style="font-size:.84rem;max-width:20rem">{{ REC.get(i.corp_action, i.corp_action or '—') }}

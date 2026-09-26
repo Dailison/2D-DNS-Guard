@@ -35,7 +35,7 @@ LISTAS_IA = {
     "streaming": "vídeo, música e lives sob demanda (YouTube, Netflix, Spotify, Deezer, Twitch, Globoplay, Prime Video)",
     "mensageiros": "mensageiros e chat pessoal (WhatsApp, Telegram, Discord, Signal, Messenger, WeChat)",
     "publicidade": "redes de anúncio, rastreamento, analytics, pixels, atribuição de apps",
-    "compras": "lojas online e marketplaces de consumo, varejo, supermercado, delivery, cupons",
+    "compras": "lojas online, marketplaces, varejo, atacado, supermercado, delivery, cupons (conta como trabalho: compras da empresa)",
     "noticias": "portais de notícias, revistas, fofoca e entretenimento",
     "pirataria": "torrents, downloads piratas, cracks, IPTV pirata, filmes e séries piratas, conversores de vídeo",
     "ia_chatbots": "assistentes de IA, chatbots e geradores de texto ou imagem (ChatGPT, Claude, Gemini, Copilot, Perplexity)",
@@ -48,7 +48,7 @@ NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
 # o site precisa ser coerente com a classificação principal p/ entrar sozinho (senão: Para revisar)
 _EXIGE_NAO_TRABALHO = {"vpn_proxy", "adulto", "apostas", "jogos", "redes_sociais", "streaming", "publicidade", "pirataria",
-                       "compras", "noticias"}   # site TRABALHO nessas = contradição -> Para revisar
+                       "noticias"}   # site TRABALHO nessas = contradição -> revisão (Compras conta como trabalho)
 
 SYSTEM = """Você organiza sites em LISTAS de filtro de DNS para empresas brasileiras.
 A lista diz O QUE O SITE É — não se ele é de trabalho (cada empresa escolhe depois quais listas bloqueia).
@@ -175,6 +175,7 @@ def status(c) -> dict:
 
 # ------------------------------------------------------------------ aplicar nas listas
 AUTO_BY = "IA automática"          # entrou sozinha na lista (certeza)
+OUTROS = "outros_bloqueios"        # como Para revisar: com certeza, o site sai daqui p/ a lista certa
 DUVIDA_BY = "IA com dúvida"        # foi para Para revisar com a sugestão
 PARA_REVISAR = "para_revisar"
 
@@ -193,17 +194,20 @@ def aplicar(c, limite: int = 3000) -> dict:
         "FROM domains d WHERE d.lista_at IS NOT NULL AND d.lista_fonte <> 'falhou' "
         " AND d.lista_aplicada_at IS DISTINCT FROM d.lista_at ORDER BY d.lista_at LIMIT %s", (limite,)).fetchall()
     aplicadas = {x for r in c.execute("SELECT lists FROM policies") for x in (r["lists"] or [])}
-    out = {"direto": [], "revisar": [], "resolvidos": []}
+    out = {"direto": [], "revisar": [], "resolvidos": [], "online": []}
+    from . import online as _online
+    online_ok = _online.habilitado()
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
         cat, em = r["lista_ia"], set(r["em"] or [])
         certo = (r["lista_conf"] or 0) >= cfg.lista_confianca_min
-        if not cat and em == {PARA_REVISAR} and certo and (r["lista_fonte"] or "").startswith("etapa4"):
+        online = (r["lista_fonte"] or "").startswith("online")
+        if not cat and em == {PARA_REVISAR} and certo and online:
             # a IA online resolveu a dúvida: não é de lista nenhuma
             c.execute("DELETE FROM category_lists WHERE category = %s AND domain = %s", (PARA_REVISAR, r["name"]))
             out["resolvidos"].append(r["name"])
             continue
-        if not cat or cat in em or (em - {PARA_REVISAR}):
+        if not cat or cat in em or (em - {PARA_REVISAR, OUTROS}):
             continue
         coerente = not (cat == "ameaca" and r["classification"] != "MALICIOSO") and \
             not (cat in _EXIGE_NAO_TRABALHO and r["classification"] == "TRABALHO") and \
@@ -213,15 +217,20 @@ def aplicar(c, limite: int = 3000) -> dict:
             por = f"{AUTO_BY} ({cat})"
             c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                       (cat, r["name"], por))
-            c.execute("DELETE FROM category_lists WHERE category = %s AND domain = %s", (PARA_REVISAR, r["name"]))
+            c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", ([PARA_REVISAR, OUTROS], r["name"]))
             if cat in aplicadas:   # passou a bloquear alguém: conta como decidido (sai da fila de Decisões)
                 c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
                           "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
             out["direto"].append((r["name"], cat))
-        elif PARA_REVISAR not in em:
+        elif not humano_contra and not online and online_ok:
+            # dúvida da IA local: antes da fase 4 (manual), a fase 3 (IA online) tenta resolver
+            c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
+            out["online"].append((r["name"], cat))
+        elif PARA_REVISAR not in em and OUTROS not in em:   # Outros: fica lá (bloqueado) com a sugestão
             c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                       (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat})"))
             out["revisar"].append((r["name"], cat))
-    if out["direto"] or out["revisar"]:
-        log.info("listas pela IA: %d direto, %d p/ Para revisar", len(out["direto"]), len(out["revisar"]))
+    if out["direto"] or out["revisar"] or out["online"]:
+        log.info("listas pela IA: %d direto, %d p/ a IA online, %d p/ Para revisar", len(out["direto"]),
+                 len(out["online"]), len(out["revisar"]))
     return out

@@ -89,6 +89,12 @@ class Settings:
     auto_block_categories: list[str]
     lista_ia_enabled: bool
     lista_confianca_min: float
+    online_enabled: bool
+    gemini_api_key: str
+    gemini_model: str
+    gemini_rpm: int
+    gemini_rpd: int
+    gemini_grounding: bool
     lists_allowed_ips: list[str]
 
     reanalyze_days: int
@@ -171,6 +177,12 @@ def load_settings() -> Settings:
         auto_block_categories=_list("AUTO_BLOCK_CATEGORIES", "jogos,apostas,adulto,vpn_proxy,ameaca"),
         lista_ia_enabled=_bool(os.environ.get("LISTA_IA_ENABLED"), True),   # etapa "lista" (qual lista de bloqueio)
         lista_confianca_min=float(os.environ.get("LISTA_CONFIANCA_MIN") or 0.9),
+        online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 3 (só com GEMINI_API_KEY)
+        gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip(),
+        gemini_rpm=max(_int("GEMINI_RPM", 5), 1),
+        gemini_rpd=max(_int("GEMINI_RPD", 200), 1),
+        gemini_grounding=_bool(os.environ.get("GEMINI_GROUNDING"), True),   # busca no Google p/ desconhecidos
         # quem pode baixar /listas/<categoria>.txt sem token (o Technitium)
         lists_allowed_ips=_list("LISTS_ALLOWED_IPS", "10.100.10.15,127.0.0.1"),
         reanalyze_days=_int("REANALYZE_DAYS", 30),

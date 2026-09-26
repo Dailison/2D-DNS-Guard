@@ -45,7 +45,7 @@ IA = {"chatgpt.com": ("TRABALHO", "ia_chatbots", 1.0), "roblox.com": ("NAO_TRABA
       "loja-trab.com": ("TRABALHO", "jogos", 1.0), "whatsapp.com": ("TRABALHO", "mensageiros", 1.0),
       "tiktok.com": ("NAO_TRABALHO", "redes_sociais", 1.0), "sobra.com": ("NAO_TRABALHO", "pirataria", 0.95),
       "duvida-sobra.com": ("NAO_TRABALHO", "streaming", 0.5), "ja-listado.com": ("NAO_TRABALHO", "compras", 1.0),
-      "cognito.aws.com": ("TRABALHO", "nuvem_remoto", 1.0)}
+      "cognito.aws.com": ("TRABALHO", "nuvem_remoto", 1.0), "de-outros.com": ("NAO_TRABALHO", "jogos", 1.0)}
 
 
 def _dados(c):
@@ -61,7 +61,7 @@ def _dados(c):
               "VALUES (%s, %s, now(), now(), 'allowed', 'ana', now())", (t, ids["whatsapp.com"]))
     c.execute("INSERT INTO policies (scope, lists, services) VALUES ('tenant:%s', '{mensageiros,jogos}', '{}')" % t)
     c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'sobra.com', 'migração dos grupos antigos'),"
-              "('para_revisar', 'duvida-sobra.com', 'migração dos grupos antigos'), ('outros_bloqueios', 'ja-listado.com', 'op')")
+              "('para_revisar', 'duvida-sobra.com', 'migração dos grupos antigos'), ('infra_bloqueio', 'ja-listado.com', 'op'), ('outros_bloqueios', 'de-outros.com', 'migração')")
 
 
 def test_fila_classifica_e_aplica(env, monkeypatch):
@@ -90,14 +90,15 @@ def test_fila_classifica_e_aplica(env, monkeypatch):
     assert ("para_revisar", "whatsapp.com") in em and ("mensageiros", "whatsapp.com") not in em, "decisão humana"
     assert ("pirataria", "sobra.com") in em and ("para_revisar", "sobra.com") not in em, "sobra da migração movida"
     assert em[("para_revisar", "duvida-sobra.com")] == "migração dos grupos antigos"
-    assert ("compras", "ja-listado.com") not in em, "já numa lista: fica onde está"
+    assert ("compras", "ja-listado.com") not in em, "já numa lista manual (Infraestrutura): fica onde está"
+    assert ("jogos", "de-outros.com") in em and ("outros_bloqueios", "de-outros.com") not in em, "Outros = como Para revisar"
     assert ("para_revisar", "cognito.aws.com") in em and ("nuvem_remoto", "cognito.aws.com") not in em, "infra: revisão"
     assert not any(d == "erp.com.br" for _, d in em)
     assert g.get("roblox.com") == "IA automática (jogos)", "jogos é aplicada: decidido"
     assert "chatgpt.com" not in g, "ninguém aplica IA/Chatbots: não vira decisão"
-    assert st["fila"] == 0 and st["com_lista"] == 10
+    assert st["fila"] == 0 and st["com_lista"] == 11
     with db.conn() as c:
-        assert listas_ia.aplicar(c) == {"direto": [], "revisar": [], "resolvidos": []}, "não reaplica"
+        assert listas_ia.aplicar(c) == {"direto": [], "revisar": [], "resolvidos": [], "online": []}, "não reaplica"
 
 
 def test_detalhes_mostram_sugestao_e_aprovar(env):
@@ -112,20 +113,56 @@ def test_detalhes_mostram_sugestao_e_aprovar(env):
     assert r["movidos"] == {"jogos": ["talvez-jogo.com"], "streaming": ["duvida-sobra.com"]} and r["sem_sugestao"] == ["x.com"]
     nomes = {x["domain"] for x in env.get("/listas/para_revisar/detalhes", headers=H).json()["items"]}
     assert "talvez-jogo.com" not in nomes and "whatsapp.com" in nomes
-    r = env.post("/listas-aprovar", headers=H, json={"domains": ["ja-listado.com"], "de": "outros_bloqueios"}).json()
+    r = env.post("/listas-aprovar", headers=H, json={"domains": ["ja-listado.com"], "de": "infra_bloqueio"}).json()
     assert r["movidos"] == {"compras": ["ja-listado.com"]}
 
 
-def test_etapa4(env):
+def test_online_decisao_manual(env):
     from dnsanalyzer import db, listas_ia
-    p = env.get("/etapa4/pendentes", headers=H).json()
-    assert {x["domain"] for x in p} == {"loja-trab.com", "whatsapp.com", "cognito.aws.com"}
-    assert all(x["contexto"].startswith("Domínio: " + x["domain"]) for x in p)
-    assert env.post("/etapa4/decisao", headers=H, json={"domain": "loja-trab.com", "lista": "nenhuma", "confianca": 1.0,
+    p = env.get("/online/pendentes", headers=H).json()
+    assert p == [], "sem GEMINI_API_KEY a dúvida vai direto p/ Para revisar (nada na fila da fase 3)"
+    assert env.post("/online/decisao", headers=H, json={"domain": "loja-trab.com", "lista": "nenhuma", "confianca": 1.0,
                                                          "motivo": "loja de peças", "fonte": "claude"}).json()["ok"]
-    assert env.post("/etapa4/decisao", headers=H, json={"domain": "x.com", "lista": "jogos", "confianca": 1}).status_code == 404
-    assert env.post("/etapa4/decisao", headers=H, json={"domain": "loja-trab.com", "lista": "zz", "confianca": 1}).status_code == 422
+    assert env.post("/online/decisao", headers=H, json={"domain": "x.com", "lista": "jogos", "confianca": 1}).status_code == 404
+    assert env.post("/online/decisao", headers=H, json={"domain": "loja-trab.com", "lista": "zz", "confianca": 1}).status_code == 422
     with db.conn() as c:
         ap = listas_ia.aplicar(c)
     assert ap["resolvidos"] == ["loja-trab.com"]
-    assert "loja-trab.com" not in {x["domain"] for x in env.get("/etapa4/pendentes", headers=H).json()}
+    nomes = {x["domain"] for x in env.get("/listas/para_revisar/detalhes", headers=H).json()["items"]}
+    assert "loja-trab.com" not in nomes
+
+
+def test_fase3_gemini(env, monkeypatch):
+    """Com a chave: dúvida local -> fila da fase 3 (não vai p/ Para revisar); resposta do Gemini com
+    certeza -> lista; sem certeza -> Para revisar; desconhecido reconhecido -> classificação 'online'."""
+    from dnsanalyzer import config, db, listas_ia, online
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        for n, cls in (("duv1.com", "NAO_TRABALHO"), ("duv2.com", "NAO_TRABALHO")):
+            i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
+                          "VALUES (%s, %s, 'outros', now(), 50) RETURNING id", (n, cls)).fetchone()["id"]
+            listas_ia.salvar(c, i, "jogos", 0.6, "talvez", "x", "local")
+        c.execute("INSERT INTO domains (name, classification, category, analyzed_at, web_search_at, total_queries, classified_by) "
+                  "VALUES ('misterio.com.br', 'DESCONHECIDO', 'desconhecido', now(), now(), 99, 'web')")
+        ap = listas_ia.aplicar(c)
+    assert sorted(n for n, _ in ap["online"]) == ["duv1.com", "duv2.com"] and not ap["revisar"]
+    fila = [x["domain"] for x in env.get("/online/pendentes", headers=H).json()]
+    assert sorted(fila[:2]) == ["duv1.com", "duv2.com"] and "misterio.com.br" in fila, fila
+    resp = {"duv1.com": {"lista": "jogos", "confianca": 1.0, "classificacao": "NAO_TRABALHO", "reconhecido": True},
+            "duv2.com": {"lista": "jogos", "confianca": 0.5, "classificacao": "NAO_TRABALHO", "reconhecido": False},
+            "misterio.com.br": {"lista": "compras", "confianca": 0.95, "classificacao": "TRABALHO", "categoria": "compras",
+                                "reconhecido": True, "servico": "Loja de ferramentas", "motivo": "atacado"}}
+    buscou = []
+    monkeypatch.setattr(online.COTA, "esperar", lambda: True)
+    monkeypatch.setattr(online, "perguntar", lambda d, cats, buscar: (buscou.append((d["name"], buscar)) or resp[d["name"]], {"model": "g"}))
+    while online.fase(["compras", "outros", "desconhecido"]) == "done":
+        pass
+    assert ("misterio.com.br", True) in buscou and ("duv1.com", False) in buscou, "só desconhecido usa a busca do Google"
+    with db.conn() as c:
+        listas_ia.aplicar(c)
+        em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists")}
+        m = c.execute("SELECT classification, classified_by, topic FROM domains WHERE name='misterio.com.br'").fetchone()
+    assert ("jogos", "duv1.com") in em and ("para_revisar", "duv2.com") in em
+    assert ("compras", "misterio.com.br") in em, "Compras conta como trabalho"
+    assert m == {"classification": "TRABALHO", "classified_by": "online", "topic": "Loja de ferramentas"}
+    assert env.get("/online/pendentes", headers=H).json() == []

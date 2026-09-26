@@ -165,7 +165,7 @@ II 10.52.0.0/16"></textarea>
     {% endfor %}
     {% set avulsas = pacotes|rejectattr('category')|list %}
     {% if avulsas %}
-    <div class="pcat"><div style="font-weight:600;margin:.2rem 0">Listas de liberação avulsas <span class="mut" style="font-weight:400;font-size:.8rem">(vencem qualquer bloqueio)</span></div>
+    <div class="pcat"><div style="font-weight:600;margin:.2rem 0">Liberar como exceção <span class="mut" style="font-weight:400;font-size:.8rem">(serviços e listas de liberação — vencem qualquer bloqueio)</span></div>
       <div class="psrv">{% for x in avulsas %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" class="pAvulsa" value="{{ x.slug }}"> <span>{{ x.name }}</span></label>{% endfor %}</div>
     </div>
     {% endif %}

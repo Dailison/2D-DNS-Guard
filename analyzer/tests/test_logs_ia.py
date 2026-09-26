@@ -311,23 +311,10 @@ def test_listas_de_liberacao(api):
     assert p["services"] == ["instagram"]                       # apagar a lista tira da política
 
 
-def test_servicos_dentro_das_listas(api):
-    from dnsanalyzer.config import settings
+def test_servicos_so_para_liberar(api):
     ls = {x["slug"]: x for x in api.get("/liberacao", headers=H).json()}
-    assert ls["instagram"]["category"] == "redes_sociais" and ls["roblox"]["category"] == "jogos"
-    assert ls["whatsapp"]["category"] == "mensageiros"
-    if "testclient" not in settings().lists_allowed_ips:
-        settings().lists_allowed_ips.append("testclient")
-    txt = api.get("/listas/redes_sociais.txt").text
-    assert "cdninstagram.com\n" in txt and "snapchat.com\n" in txt              # serviços entram na lista da categoria
-    assert "roblox.com\n" in api.get("/servico/roblox.txt").text
-    r = api.post("/liberacao", json={"name": "Kick", "category": "streaming"}, headers=H); assert r.status_code == 200
-    assert api.post("/liberacao", json={"name": "X", "category": "nada"}, headers=H).status_code == 400
-    assert api.put("/liberacao/kick", json={"name": "Kick.com", "category": None}, headers=H).status_code == 200
-    assert {x["slug"]: x for x in api.get("/liberacao", headers=H).json()}["kick"]["category"] is None
-    assert api.put("/policies/tenant:9", json={"lists": ["streaming"], "services": ["youtube"], "services_blocked": ["tiktok", "youtube"]},
-                   headers=H).status_code == 200
-    p = {x["scope"]: x for x in api.get("/policies", headers=H).json()}["tenant:9"]
-    assert p["services"] == ["youtube"] and p["services_blocked"] == ["tiktok"]        # liberar vence bloquear
-    api.delete("/liberacao/tiktok", headers=H)
-    assert {x["scope"]: x for x in api.get("/policies", headers=H).json()}["tenant:9"]["services_blocked"] == []
+    assert {"youtube", "spotify", "spotify-video", "deezer", "instagram", "facebook", "pinterest", "discord",
+            "mercado-livre", "amazon", "telegram"} <= set(ls)
+    assert not {"tiktok", "roblox", "bet365", "whatsapp", "netflix"} & set(ls)
+    assert all(x["category"] is None for x in ls.values())
+    assert "mlstatic.com" in [d["domain"] for d in api.get("/liberacao/mercado-livre", headers=H).json()]

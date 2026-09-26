@@ -75,6 +75,14 @@ def _dados(c):
         q(t["a"], cl, "youtube.com", 20, 20)
     for cl in pcs:
         q(t["a"], cl, "loja.com", 3, 0, AGORA - timedelta(days=1))
+    # telemetria.com: TRABALHO, bloqueada há dias (via CNAME de entrada antiga) -> bloqueio conhecido, sem alerta
+    dom["telemetria.com"] = c.execute("INSERT INTO domains (name, classification, category) VALUES "
+                                      "('telemetria.com', 'TRABALHO', 'produtividade') RETURNING id").fetchone()["id"]
+    c.execute("INSERT INTO fqdns (name, domain_id) VALUES ('www.telemetria.com', %s)", (dom["telemetria.com"],))
+    fq["www.telemetria.com"] = c.execute("SELECT id FROM fqdns WHERE name='www.telemetria.com'").fetchone()["id"]
+    for cl in pcs[:7]:
+        q(t["a"], cl, "telemetria.com", 10, 10)
+        q(t["a"], cl, "telemetria.com", 10, 4, AGORA - timedelta(hours=3))
     q(t["b"], pb, "loja.com", 7, 0)
     c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'roblox.com', 'IA automática (jogos)'), "
               "('outros_bloqueios', 'erp.com.br', 'bloqueio automático (x)'), ('streaming', 'youtube.com', 'op@2d'), "
@@ -113,6 +121,7 @@ def test_alertas_de_bloqueio(api):
     assert ("block_spike", "roblox.com") in al and al[("block_spike", "roblox.com")]["details"]["ativos"] == 8
     assert ("block_spike", "youtube.com") not in al, "posto por pessoa: bloqueio intencional"
     assert ("blocked_work", "roblox.com") not in al and ("block_spike", "erp.com.br") not in al
+    assert not any(d == "telemetria.com" for _, d in al), "já vinha sendo bloqueado: conhecido, sem alerta"
     assert r["blocked_work"] == 1 and r["block_spike"] == 1
     assert behavior.run(AGORA - timedelta(minutes=30))["block_spike"] == 0, "dedup por dia"
 

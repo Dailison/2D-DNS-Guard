@@ -8,8 +8,10 @@ Alertas:
 * dga_burst         — muitos nomes aleatórios com NXDOMAIN (assinatura típica de malware com DGA)
 * blocked_work      — site de TRABALHO (classificação, categoria de trabalho ou protegido) bloqueado
 * block_spike       — um domínio bloqueado para muitos computadores da empresa na mesma hora
-  (os dois ignoram bloqueio INTENCIONAL: posto numa lista por pessoa — ou pela migração dos grupos — ou
-  numa lista de uso misto que a empresa escolheu; pegam o que a IA/bloqueio automático pôs, até via CNAME)
+  (os dois só olham bloqueio NOVO — nenhuma hora das 24 anteriores com ≥ 20% das consultas do domínio
+  bloqueadas na empresa — e ignoram bloqueio INTENCIONAL: posto numa lista por pessoa/migração ou numa
+  lista de uso misto. Bloqueio via CNAME de uma entrada antiga, ex. telemetria da Microsoft por
+  data.trafficmanager.net, é conhecido e não alerta; o incidente apple-dns.net, novo, alertaria)
 
 Comparações entre computadores são SEMPRE dentro do mesmo tenant.
 Detectores que dependem de histórico só rodam após o período de aquecimento.
@@ -40,7 +42,7 @@ def _upsert_alert(c, tenant_id, kind, severity, title, dedup, details, client_id
 
 
 _AUTO = ("IA automática", "IA com dúvida", "IA sem certeza", "bloqueio automático")
-_USO_MISTO = {"mensageiros", "ia_chatbots", "nuvem_remoto"}
+_USO_MISTO = {"mensageiros", "ia_chatbots", "nuvem_remoto", "doh_dns"}   # (DoH: bloquear é o objetivo da lista)
 
 
 def _intencional(c, nome: str) -> bool:
@@ -128,8 +130,15 @@ def run(since: datetime | None = None) -> dict:
             if bloq:
                 ativos = c.execute("SELECT count(DISTINCT client_id) AS n FROM query_agg WHERE tenant_id = %s AND bucket >= %s",
                                    (tid, hora)).fetchone()["n"]
+                # bloqueio que já existia: em alguma hora das 24 anteriores à janela o domínio já teve ≥ 20% das
+                # consultas bloqueadas na empresa — conhecido, não é o que o alerta procura
+                antigos = {r["domain_id"] for r in c.execute(
+                    "SELECT DISTINCT domain_id FROM (SELECT domain_id, bucket FROM query_agg WHERE tenant_id = %s "
+                    " AND domain_id = ANY(%s) AND bucket < %s AND bucket >= %s - interval '24 hours' "
+                    " GROUP BY domain_id, bucket HAVING sum(blocked) >= 5 AND sum(blocked) >= 0.2 * sum(queries)) x",
+                    (tid, [r["domain_id"] for r in bloq], hora, hora))}
                 for r in bloq:
-                    if _intencional(c, r["name"]):
+                    if r["domain_id"] in antigos or _intencional(c, r["name"]):
                         continue
                     e = catalog.match(r["name"])
                     trabalho = (r["classification"] == "TRABALHO" or r["category"] in corporate.NEVER_BLOCK

@@ -295,7 +295,8 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
           meta.get("seconds"),
           detail=" · ".join(x for x in (("etapa 2 (busca na web)" if etapa2 else
                                          f"com busca na web ({len(dossier['search'])} resultados)"
-                                         if dossier.get("search") else ""), svc, scat, extra) if x))
+                                         if dossier.get("search") else ""),
+                                        "reforço (GPU)" if meta.get("extra") else "", svc, scat, extra) if x))
     return "done"
 
 
@@ -362,12 +363,22 @@ def reanalyze_stale(days: int) -> int:
             "AND analyzed_at < now() - make_interval(days => %s)", (days,)).rowcount
 
 
-def _llm_worker(stop, cats: list[dict], wid: int) -> None:
-    """Worker extra da IA (a Fase A e a manutenção ficam no laço principal)."""
-    client = OllamaClient()
-    backoff = 0
+def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> None:
+    """Worker extra da IA (a Fase A e a manutenção ficam no laço principal). Com url = reforço
+    (ex.: PC com GPU): só reserva domínio quando aquele Ollama responde — desligado, só espera."""
+    client = OllamaClient(url)
+    backoff, no_ar = 0, None
     while not stop():
         try:
+            if client.extra:
+                ok, motivo = client.available()
+                if ok != no_ar and wid % 100 == 0:   # 1 aviso por servidor, não por worker
+                    log.info("reforço da IA %s: %s", url, "no ar" if ok else motivo)
+                    event("llm_extra", detail=f"reforço {url}: {'no ar' if ok else 'fora — ' + motivo[:150]}")
+                no_ar = ok
+                if not ok:
+                    time.sleep(60)
+                    continue
             st = phase_b(client, cats)
             if st == "idle":
                 time.sleep(20)
@@ -391,6 +402,15 @@ def run_forever(stop=lambda: False) -> None:
         for i in range(1, cfg.llm_workers):
             threading.Thread(target=_llm_worker, args=(stop, cats0, i), daemon=True, name=f"ia-{i}").start()
         log.info("IA com %d análises simultâneas", cfg.llm_workers)
+    if cfg.llm_enabled and cfg.ollama_extra_urls:
+        with db.conn() as c:
+            cats0 = categories(c)
+        for s, url in enumerate(cfg.ollama_extra_urls, start=1):
+            for j in range(cfg.llm_extra_workers):
+                threading.Thread(target=_llm_worker, args=(stop, cats0, s * 100 + j, url), daemon=True,
+                                 name=f"ia-extra{s}-{j}").start()
+        log.info("reforço da IA: %s (%d análises simultâneas cada)", ", ".join(cfg.ollama_extra_urls),
+                 cfg.llm_extra_workers)
     last_stale = 0.0
     backoff = 0
     with db.conn() as c:

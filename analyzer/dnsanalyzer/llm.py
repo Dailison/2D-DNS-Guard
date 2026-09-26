@@ -152,13 +152,16 @@ def build_messages(dossier_name: str, evidence: list[dict], categories: list[dic
 
 
 class OllamaClient:
-    def __init__(self):
+    def __init__(self, url: str | None = None):
+        """url = Ollama de reforço (OLLAMA_EXTRA_URLS); sem url, o da própria VM."""
         cfg = settings()
-        self.url = cfg.ollama_url
+        self.url = url or cfg.ollama_url
+        self.extra = bool(url)
         self.model = cfg.ollama_model
         self.timeout = cfg.llm_timeout
         self.num_ctx = cfg.llm_num_ctx
-        self.num_thread = cfg.llm_num_thread or max((os.cpu_count() or 4) - 2, 1)
+        # threads de CPU só fazem sentido no Ollama da VM; no reforço (GPU) o Ollama de lá decide
+        self.num_thread = None if self.extra else (cfg.llm_num_thread or max((os.cpu_count() or 4) - 2, 1))
         self.keep_alive = cfg.llm_keep_alive
 
     def available(self) -> tuple[bool, str]:
@@ -176,6 +179,9 @@ class OllamaClient:
                  site_categories: list[dict] | None = None) -> tuple[LLMResult, dict]:
         codes = [c["code"] for c in categories]
         scodes = [c["code"] for c in (site_categories or [])] or None
+        options = {"temperature": 0, "seed": 42, "num_ctx": self.num_ctx, "num_predict": 480}
+        if self.num_thread:
+            options["num_thread"] = self.num_thread
         payload = {
             "model": self.model,
             "messages": build_messages(name, evidence, categories, site_categories),
@@ -183,8 +189,7 @@ class OllamaClient:
             "stream": False,
             "think": False,
             "keep_alive": self.keep_alive,
-            "options": {"temperature": 0, "seed": 42, "num_ctx": self.num_ctx,
-                        "num_thread": self.num_thread, "num_predict": 480},
+            "options": options,
         }
         t0 = time.monotonic()
         try:
@@ -196,7 +201,7 @@ class OllamaClient:
         r.raise_for_status()
         data = r.json()
         content = (data.get("message") or {}).get("content", "")
-        meta = {"model": self.model, "seconds": round(time.monotonic() - t0, 1),
+        meta = {"model": self.model, "seconds": round(time.monotonic() - t0, 1), "extra": self.extra,
                 "eval_count": data.get("eval_count"), "prompt_eval_count": data.get("prompt_eval_count")}
         try:
             obj = json.loads(content)

@@ -60,6 +60,8 @@ class Settings:
     llm_num_thread: int
     llm_keep_alive: str
     llm_workers: int
+    ollama_extra_urls: list[str]
+    llm_extra_workers: int
     llm_max_attempts: int
     llm_skip_hosting_subdomains: bool
 
@@ -125,6 +127,10 @@ def load_settings() -> Settings:
         # análises simultâneas (combine com OLLAMA_NUM_PARALLEL). Em CPU sem GPU não ganhou nada
         # (medido 2026-09-24: banda de memória é o gargalo) — padrão 1
         llm_workers=max(_int("LLM_WORKERS", 1), 1),
+        # reforço opcional (ex.: PC com GPU): outros Ollama que aceleram a fila quando estão no ar.
+        # A IA da VM segue sozinha quando eles estão desligados.
+        ollama_extra_urls=[u.rstrip("/") for u in _list("OLLAMA_EXTRA_URLS")],
+        llm_extra_workers=max(_int("LLM_EXTRA_WORKERS", 2), 1),
         llm_max_attempts=_int("LLM_MAX_ATTEMPTS", 3),
         llm_skip_hosting_subdomains=_bool(os.environ.get("LLM_SKIP_HOSTING_SUBDOMAINS"), False),
         rdap_enabled=_bool(os.environ.get("RDAP_ENABLED"), True),

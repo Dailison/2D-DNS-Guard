@@ -81,6 +81,8 @@
     } else if (k === 'llm_error') {
       ic.textContent = '❌'; body.appendChild(document.createTextNode('Falha ao analisar '));
       body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ' — ' + (ev.detail || '')));
+    } else if (k === 'llm_extra') {
+      ic.textContent = '🚀'; body.appendChild(el('span', 'd', 'Reforço da IA: ' + (ev.detail || '')));
     } else if (k === 'llm_unavailable') {
       ic.textContent = '⏸️'; body.appendChild(el('span', 'd', 'IA indisponível: ' + (ev.detail || '')));
     } else { ic.textContent = '•'; body.appendChild(el('span', 'd', k + ' ' + (ev.name || '') + ' ' + (ev.detail || ''))); }

@@ -20,6 +20,7 @@ import logging
 import re
 import socket
 import ssl
+import threading
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
@@ -141,6 +142,7 @@ class BuscaIndisponivel(Exception):
 
 
 _ultima_busca = 0.0
+_busca_lock = threading.Lock()
 
 
 def search(c, domain: str, fetch: bool) -> list[dict] | None:
@@ -152,10 +154,11 @@ def search(c, domain: str, fetch: bool) -> list[dict] | None:
         return row["value"].get("results") if row else None
     import time
     global _ultima_busca
-    espera = cfg.web_search_min_interval - (time.monotonic() - _ultima_busca)
-    if espera > 0:
-        time.sleep(espera)
-    _ultima_busca = time.monotonic()
+    with _busca_lock:   # vários workers da IA: o intervalo mínimo vale entre todos
+        espera = cfg.web_search_min_interval - (time.monotonic() - _ultima_busca)
+        if espera > 0:
+            time.sleep(espera)
+        _ultima_busca = time.monotonic()
     r = httpx.get(cfg.web_search_url.rstrip("/") + "/search", timeout=40,
                   params={"q": f'"{domain}"', "format": "json", "language": "pt-BR", "safesearch": 0})
     r.raise_for_status()

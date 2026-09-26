@@ -728,8 +728,8 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                          "WHERE kind='llm_done' AND created_at > now() - interval '1 hour'").fetchone()
     ok, msg = OllamaClient().available()
     eta = None
-    if hour["avg_seconds"] and queue["ia"]:
-        eta = int(float(hour["avg_seconds"]) * queue["ia"])
+    if hour["done"] and queue["ia"]:   # pelo ritmo real (várias análises simultâneas / reforço com GPU)
+        eta = int(queue["ia"] * 3600 / hour["done"])
     return {"events": events, "current": cur, "queue": queue, "last_hour": hour, "eta_seconds": eta,
             "llm": {"ok": ok, "detail": msg, "model": settings().ollama_model}}
 

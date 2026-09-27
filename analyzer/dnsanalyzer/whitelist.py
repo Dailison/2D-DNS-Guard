@@ -45,6 +45,10 @@ CATEGORIAS = {
     "utilidades": "Utilidades (conversores, PDF, tradutores)",
     "servicos": "Serviços do dia a dia (mapas, clima, viagens)",
     "outros_trabalho": "Outros de trabalho",
+    # não é trabalho, sem lista de bloqueio (27/09: separadas de Outros liberados, pedido do usuário)
+    "religiao": "Religião e espiritualidade",
+    "infantil_hobby": "Infantil, hobby e arte",
+    "bem_estar": "Fitness, saúde pessoal e família",
     "outros_liberados": "Outros liberados (não é trabalho, sem lista de bloqueio)",
     "sem_resposta": "Sem resposta (não resolve no DNS)",   # pelo log do Technitium, antes da IA; nunca publicado
 }
@@ -74,8 +78,12 @@ DESCRICOES = {
     "utilidades": "ferramentas online legítimas: conversores de arquivo, PDF, tradutores, calculadoras, encurtadores",
     "servicos": "mapas, trânsito, clima, viagens, mobilidade, serviços do dia a dia",
     "outros_trabalho": "trabalho, mas nenhuma das categorias acima",
-    "outros_liberados": "IDENTIFICADO, não é de trabalho e não se encaixa em nenhuma lista de bloqueio (religião, cultura, "
-                        "ONGs, pessoal) — o que não foi identificado é nao_identificado",
+    "religiao": "igrejas, Bíblia online, devocionais, orações, conteúdo religioso e espiritual",
+    "infantil_hobby": "conteúdo infantil e educativo de lazer (desenhos para colorir, atividades), hobbies, artesanato, "
+                      "desenho e pintura, música, dança e arte",
+    "bem_estar": "fitness e esportes pessoais (Strava, corrida, academia), saúde e nutrição pessoal, gravidez, maternidade e família",
+    "outros_liberados": "IDENTIFICADO, não é de trabalho e não se encaixa em nenhuma lista de bloqueio nem nas whitelists "
+                        "acima (cultura, ONGs, causas, blogs pessoais) — o que não foi identificado é nao_identificado",
 }
 AUTO_BY = "IA whitelist"
 CATALOGO_BY = "catálogo (protegido)"

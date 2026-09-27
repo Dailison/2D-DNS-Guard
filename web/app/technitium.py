@@ -263,6 +263,8 @@ CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividad
                         ("desenvolvimento", "TI e desenvolvimento"), ("educacao", "Educação e cursos"), ("saude", "Saúde"),
                         ("utilidades", "Utilidades (conversores, PDF, tradutores)"),
                         ("servicos", "Serviços do dia a dia (mapas, clima, viagens)"), ("outros_trabalho", "Outros de trabalho"),
+                        ("religiao", "Religião e espiritualidade"), ("infantil_hobby", "Infantil, hobby e arte"),
+                        ("bem_estar", "Fitness, saúde pessoal e família"),
                         ("outros_liberados", "Outros liberados (não é trabalho, sem lista de bloqueio)"),
                         ("sem_resposta", "Sem resposta (não resolve no DNS)")]
 # as que vão p/ o DNS (allowListUrls): "Sem resposta" só organiza (nunca é publicada)

@@ -506,11 +506,11 @@ def test_revisao_da_infraestrutura(env):
 def test_revisao_da_infraestrutura_vem_antes_na_fila(env):
     from dnsanalyzer import db, online
     with db.conn() as c:
-        for n, q, por in (("grande-fila.com", 10**9, None), ("infra-fila.net", 1, "migração dos grupos antigos")):
+        for n, q, cat, por in (("grande-fila.com", 10**9, "para_revisar", "IA com dúvida (jogos)"),
+                               ("infra-fila.net", 1, "infra_bloqueio", "migração dos grupos antigos")):
             c.execute("INSERT INTO domains (name, classification, total_queries, lista_duvida, analyzed_at) "
                       "VALUES (%s, 'TRABALHO', %s, true, now())", (n, q))
-            if por:
-                c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('infra_bloqueio', %s, %s)", (n, por))
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s)", (cat, n, por))
         primeiro = None
         for _ in range(500):
             r = online._reservar(c)

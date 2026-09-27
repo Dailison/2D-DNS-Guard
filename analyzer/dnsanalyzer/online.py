@@ -256,13 +256,13 @@ _FILA = ("d.kind = 'public' AND NOT d.llm_pending AND (d.online_claimed_at IS NU
 
 
 _EM_INFRA = ("EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'infra_bloqueio' AND l.domain = {t}.name "
-             "AND l.added_by LIKE 'migração%%')")   # revisão da Infraestrutura (039): já bloqueia, vem logo depois de Decisões
+             "AND l.added_by LIKE 'migração%%')")   # revisão da Infraestrutura (039): bloqueia nas empresas, vem antes de Decisões
 
 
 def _reservar(c) -> dict | None:
     return c.execute(
         "UPDATE domains SET online_claimed_at = now() WHERE id = (SELECT d.id FROM domains d WHERE " + _FILA +
-        " ORDER BY " + _EM_DECISOES + " DESC, " + _EM_INFRA.format(t="d") + " DESC, d.lista_duvida DESC, d.total_queries DESC "
+        " ORDER BY " + _EM_INFRA.format(t="d") + " DESC, " + _EM_DECISOES + " DESC, d.lista_duvida DESC, d.total_queries DESC "
         "LIMIT 1 FOR UPDATE SKIP LOCKED) "
         "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_conf, lista_motivo, "
         "online_resp, " + _EM_INFRA.format(t="domains") + " AS em_infra").fetchone()

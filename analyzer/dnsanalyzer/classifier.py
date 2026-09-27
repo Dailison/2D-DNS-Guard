@@ -292,7 +292,12 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
             event("search_error", name, did, detail=f"busca indisponível: {e.__class__.__name__}")
             return "unavailable"
         except whois.WhoisIndisponivel as e:   # RDAP/Receita fora ou limitando
-            if "registro.br" in str(e) or "brasilapi" in str(e):   # limite/queda do serviço (vale p/ todos): depois
+            if "registro.br" in str(e):   # limite do registro.br: .br em pausa, o worker segue com os outros
+                c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
+                event("whois_error", name, did, detail=f"WHOIS indisponível: {e}; .br em pausa por "
+                                                       f"{whois.BR_PAUSA_S // 60} min")
+                return "deferred"
+            if "brasilapi" in str(e):   # queda do serviço (vale p/ todos): depois
                 c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
                 event("whois_error", name, did, detail=f"WHOIS indisponível: {e}")
                 return "unavailable"
@@ -462,13 +467,14 @@ def phase_c(client: OllamaClient, cats: list[dict]) -> str:
 
 def _claim_etapa3(c) -> dict | None:
     """Fase 2: próximo DESCONHECIDO p/ WHOIS (antes da busca na web), em paralelo com a fase 1.
-    .br primeiro (titular com CNPJ no registro.br identifica a empresa)."""
+    .br primeiro (titular com CNPJ no registro.br identifica a empresa); registro.br limitando: sem .br."""
+    sem_br = " AND name NOT LIKE '%.br'" if whois.br_pausado() else ""
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE ((classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')) OR """
         + listas_ia.incerta_sql() + """)
                AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
-               AND (NOT dominio_decidido(id) OR reanalise_pedida)
+               AND (NOT dominio_decidido(id) OR reanalise_pedida)""" + sem_br + """
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY (name LIKE '%.br') DESC, total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
            RETURNING *""").fetchone()

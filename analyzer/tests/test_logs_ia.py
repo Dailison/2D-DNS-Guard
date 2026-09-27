@@ -201,6 +201,18 @@ def test_etapa3_em_paralelo_e_br_primeiro(api):
         assert [a["name"], b["name"]] == ["empresa-exemplo.com.br", "sem-busca-ainda.com"]
 
 
+def test_etapa3_sem_br_com_registro_br_em_pausa(api, monkeypatch):
+    from dnsanalyzer import classifier, db, whois
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, total_queries) VALUES "
+                  "('limitado.com.br', 'br', 'DESCONHECIDO', 'llm', 900), "
+                  "('segue-sem-br.com', 'com', 'DESCONHECIDO', 'llm', 10)")
+    monkeypatch.setattr(whois, "br_pausado", lambda: True)
+    with db.conn() as c:
+        assert classifier._claim_etapa3(c)["name"] == "segue-sem-br.com"
+        assert classifier._claim_etapa3(c) is None
+
+
 def test_bloqueio_automatico_e_listas(api):
     from dnsanalyzer import db, listas
     from dnsanalyzer.config import settings

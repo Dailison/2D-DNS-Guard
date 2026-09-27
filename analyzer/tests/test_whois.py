@@ -84,6 +84,32 @@ def test_registro_br_sem_documento_e_limite_nao_grava(monkeypatch):
 
         def fetchone(self):
             return None
+    monkeypatch.setattr(whois, "_br_pausa_ate", 0.0)
     with pytest.raises(whois.WhoisIndisponivel):
         whois.lookup(C(), "iotsuite.com.br", fetch=True)
     assert not gravou
+
+
+def test_limite_do_registro_br_pausa_os_br(monkeypatch):
+    """Limite do registro.br: .br em pausa (nem consulta, p/ não esticar o bloqueio); os outros TLDs seguem."""
+    import copy
+    import pytest
+    sem_doc = copy.deepcopy(RDAP_BR)
+    sem_doc["entities"][0].pop("publicIds")
+    chamadas = []
+    monkeypatch.setattr(whois, "_get", lambda url, *a, **k: chamadas.append(url) or (sem_doc if ".br/" in url else None))
+    monkeypatch.setattr(whois, "_br_pausa_ate", 0.0)
+
+    class C:
+        def execute(self, sql, *a):
+            return self
+
+        def fetchone(self):
+            return None
+    with pytest.raises(whois.WhoisIndisponivel):
+        whois.lookup(C(), "ram.com.br", fetch=True)
+    assert whois.br_pausado()
+    with pytest.raises(whois.WhoisIndisponivel, match="pausa"):
+        whois.lookup(C(), "outro.com.br", fetch=True)
+    assert whois.lookup(C(), "exemplo.com", fetch=True) == {"encontrado": False, "fonte": "rdap"}
+    assert [u.rsplit("/", 1)[1] for u in chamadas] == ["ram.com.br", "exemplo.com"]

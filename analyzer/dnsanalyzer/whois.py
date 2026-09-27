@@ -29,6 +29,20 @@ _OCULTO = ("redacted", "privacy", "private", "proxy", "withheld", "whoisguard", 
            "data protected", "contact privacy", "domains by proxy", "identity protect")
 _lock = threading.Lock()
 _ultima: dict[str, float] = {}
+# limite do registro.br (vale p/ o IP do analisador, todos os workers): pausa os .br e a fase 2 segue com os outros.
+# (27/09: sem pausa, os 2 workers se revezavam no mesmo .br a cada 6 s por 50 min e a fase 2 inteira parou)
+BR_PAUSA_S = 600
+_br_pausa_ate = 0.0
+
+
+def br_pausado() -> bool:
+    return time.monotonic() < _br_pausa_ate
+
+
+def _pausar_br() -> None:
+    global _br_pausa_ate
+    _br_pausa_ate = time.monotonic() + BR_PAUSA_S
+    log.info("registro.br limitando as consultas: .br em pausa por %d min", BR_PAUSA_S // 60)
 
 
 class WhoisIndisponivel(Exception):
@@ -137,15 +151,23 @@ def lookup(c, domain: str, fetch: bool) -> dict | None:
     if not fetch:
         return row["value"] if row else None
     br = domain.endswith(".br")
-    j = _get(f"https://rdap.registro.br/domain/{domain}" if br else f"https://rdap.org/domain/{domain}",
-             "registro.br" if br else "rdap.org", 6.0 if br else 1.5)
+    if br and br_pausado():
+        raise WhoisIndisponivel("registro.br em pausa (limite de consultas)")
+    try:
+        j = _get(f"https://rdap.registro.br/domain/{domain}" if br else f"https://rdap.org/domain/{domain}",
+                 "registro.br" if br else "rdap.org", 6.0 if br else 1.5)
+    except WhoisIndisponivel:
+        if br:
+            _pausar_br()
+        raise
     out: dict = {"encontrado": False, "fonte": "registro.br" if br else "rdap"}
     if j:
         out.update(parse_rdap(j), encontrado=True)
         t = out.get("titular") or {}
         if br and t.get("nome") and not t.get("tipo"):
             # todo titular .br tem CPF/CNPJ: sem o documento = o registro.br limitou as consultas
-            # (medido: ~2 consultas/10 s bastam p/ ele omitir). Não grava; tenta de novo depois.
+            # (medido: ~2 consultas/10 s bastam p/ ele omitir). Não grava; tenta de novo depois da pausa.
+            _pausar_br()
             raise WhoisIndisponivel("registro.br omitiu o documento do titular (limite de consultas)")
         if t.get("tipo") == "cnpj":
             try:

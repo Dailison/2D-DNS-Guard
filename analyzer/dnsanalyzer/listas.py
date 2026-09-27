@@ -105,7 +105,7 @@ def expirar_ameacas(c, dias: int = 7) -> list[dict]:
         c.execute("DELETE FROM category_lists WHERE category = 'ameaca' AND domain = %s", (r["domain"],))
         c.execute("DELETE FROM global_reviews WHERE domain_id = %s AND reviewed_by = %s", (r["id"], r["added_by"]))
         c.execute("UPDATE domains SET needs_analysis = true, lista_aplicada_at = NULL WHERE id = %s", (r["id"],))
-        eventos.lista("lista_rem", r["domain"], "ameaca", f"saiu dos feeds de ameaça há {n} dias", r["id"])
+        eventos.lista("lista_rem", r["domain"], "ameaca", f"saiu dos feeds de ameaça há {n} dias", r["id"], "regras")
     if rows:
         log.info("ameaças expiradas (fora dos feeds há > %d dias): %s", dias, ", ".join(r["domain"] for r in rows))
     return rows
@@ -126,7 +126,7 @@ def marcar_inexistentes(c) -> dict:
         contexto(c, "inexistente (NXDOMAIN)", "o domínio não existe: ≥ 95% das consultas com NXDOMAIN em 7 dias")
         c.execute("DELETE FROM category_lists WHERE category = 'para_revisar' AND domain = ANY(%s)", ([r["name"] for r in novos],))
         eventos.registrar("decisao", None, detail="|" + f"{len(novos)} domínio(s) inexistentes (NXDOMAIN) fora da IA e de Decisões: "
-                          + ", ".join(r["name"] for r in novos[:15]) + (" …" if len(novos) > 15 else ""))
+                          + ", ".join(r["name"] for r in novos[:15]) + (" …" if len(novos) > 15 else ""), origem="regras")
     voltaram = c.execute(
         "UPDATE domains d SET kind = 'public', needs_analysis = true WHERE d.kind = 'inexistente' AND d.id IN ("
         " SELECT domain_id FROM query_agg WHERE bucket >= now() - interval '1 day' GROUP BY domain_id "
@@ -155,7 +155,7 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
         if motivo:   # não bloqueia sozinho: Decisões (sem global_reviews: segue candidato, sem repetir evento)
             if c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
                          "ON CONFLICT DO NOTHING", (r["name"], f"{por} · {motivo}")).rowcount:
-                eventos.lista("fase5", r["name"], r["category"], f"bloqueio automático barrado · {motivo}", r["id"])
+                eventos.lista("fase5", r["name"], r["category"], f"bloqueio automático barrado · {motivo}", r["id"], "auto")
             continue
         if online_ok and not ((r["lista_fonte"] or "").startswith("online") and r["lista_ia"] == r["category"]
                               and (r["lista_conf"] or 0) >= settings().online_confianca_min):
@@ -167,7 +167,7 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
         c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
                   "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
         feitos.append(r)
-        eventos.lista("lista_add", r["name"], r["category"], "bloqueio automático (recomendação da IA: bloquear)", r["id"])
+        eventos.lista("lista_add", r["name"], r["category"], "bloqueio automático (recomendação da IA: bloquear)", r["id"], "auto")
     if feitos:
         log.info("bloqueio automático: %d site(s) nas listas por categoria: %s", len(feitos),
                  ", ".join(f"{r['name']} ({r['category']})" for r in feitos[:20]))

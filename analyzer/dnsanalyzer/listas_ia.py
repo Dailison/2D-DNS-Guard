@@ -200,7 +200,7 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
                       "lista_at = now(), lista_claimed_at = NULL WHERE id = %s", (str(e)[:200], d["id"]))
         return "done"
     with db.conn() as c:
-        salvar(c, d["id"], res.lista, res.confianca, res.motivo, res.servico, FONTE_LOCAL)
+        salvar(c, d["id"], res.lista, res.confianca, res.motivo, res.servico, FONTE_LOCAL, fase_n)
     log.debug("lista %s -> %s (%.2f, %.1fs)", d["name"], res.lista, res.confianca, meta["seconds"])
     alta = (res.confianca or 0) >= settings().lista_confianca_min
     prox = proxima_fase(d)
@@ -213,10 +213,17 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
     return "done"
 
 
-def salvar(c, domain_id: int, lista: str, conf: float, motivo: str, servico: str, fonte: str) -> None:
+def salvar(c, domain_id: int, lista: str, conf: float, motivo: str, servico: str, fonte: str, fase: int | None = None) -> None:
     c.execute("UPDATE domains SET lista_ia = %s, lista_conf = %s, lista_motivo = %s, lista_servico = %s, "
-              "lista_fonte = %s, lista_at = now(), lista_claimed_at = NULL WHERE id = %s",
-              (None if lista == NENHUMA else lista, conf, (motivo or "")[:300], (servico or "")[:200], fonte, domain_id))
+              "lista_fonte = %s, lista_fase = %s, lista_at = now(), lista_claimed_at = NULL WHERE id = %s",
+              (None if lista == NENHUMA else lista, conf, (motivo or "")[:300], (servico or "")[:200], fonte, fase, domain_id))
+
+
+def origem(r: dict) -> str:
+    """Quem deu a resposta de lista em uso (p/ a coluna "Decisão" do IA ao vivo)."""
+    if (r.get("lista_fonte") or "").startswith("online"):
+        return "f4:online"
+    return f"f{r['lista_fase']}:local" if r.get("lista_fase") else "local"
 
 
 def status(c) -> dict:
@@ -314,7 +321,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
-        " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
+        " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.lista_fase, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
         " d.online_resp->'_meta'->'antes' AS antes, coalesce((d.online_resp->'_meta'->>'nivel_reforco')::boolean, false) AS reforco, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
@@ -334,7 +341,7 @@ def aplicar(c, limite: int = 3000) -> dict:
                   (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})" + (f" · {motivo}" if motivo else "")))
         out["revisar"].append((r["name"], cat))
         eventos.lista("fase5", r["name"], cat, (motivo or "nenhuma fase teve certeza")
-                      + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"])
+                      + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"], origem(r))
 
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
@@ -373,10 +380,12 @@ def aplicar(c, limite: int = 3000) -> dict:
         if local_decide:   # avaliado (Aprovados, sem reanálise) e fim da revisão pedida
             c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false, lista_duvida = false WHERE id = %s",
                       (r["id"],))
+            eventos.lista("aprovado", r["name"], None, f"nenhuma lista · {_fonte(r)}", r["id"], origem(r))
+            continue
 
         if fixas and (not cat or cat not in em):
             continue   # alguém pôs noutra lista: fica
-        if certo and not cat and (online or local_decide):
+        if certo and not cat and online:
             # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs). Da
             # Infraestrutura só com a resposta do modelo maior (ou dois modelos) e sem suspeita; senão, Decisões
             sai_infra = cls not in ("SUSPEITO", "MALICIOSO") and (r["reforco"] or _dois_nenhuma(r))
@@ -388,7 +397,9 @@ def aplicar(c, limite: int = 3000) -> dict:
                 listas.contexto(c, _fonte(r), "IA online: não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
                 out["resolvidos"].append(r["name"])
-                eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"])
+                eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r))
+            elif not em:
+                eventos.lista("aprovado", r["name"], None, f"nenhuma lista · {_fonte(r)}", r["id"], origem(r))
             continue
         if online and not certo and not cat and not em and (cls == "NAO_TRABALHO" or r["corp_action"] == "BLOQUEAR"):
             para_decisoes(r, None, "IA online sem certeza: talvez não seja de lista")
@@ -416,7 +427,8 @@ def aplicar(c, limite: int = 3000) -> dict:
                               "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
                 out["direto"].append((r["name"], cat))
                 eventos.lista("lista_add", r["name"], cat, _fonte(r)
-                              + (f" · saiu de {', '.join(x for x in moveis if x in em)}" if any(x in em for x in moveis) else ""), r["id"])
+                              + (f" · saiu de {', '.join(x for x in moveis if x in em)}" if any(x in em for x in moveis) else ""),
+                              r["id"], origem(r))
             tirar = [x for x in moveis if x in em and x != cat]
             if tirar:
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))

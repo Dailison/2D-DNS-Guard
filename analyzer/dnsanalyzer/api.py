@@ -734,13 +734,13 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
         from . import eventos
         if after_id:
             events = c.execute(
-                "SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
+                "SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
                 "WHERE id > %s ORDER BY id DESC LIMIT %s", (after_id, max(limit, 300))).fetchall()
         else:   # carga inicial: as últimas de CADA coluna (classificação e decisão)
             events = c.execute(
-                "(SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
+                "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
                 " WHERE kind <> ALL(%(d)s) ORDER BY id DESC LIMIT %(n)s) UNION ALL "
-                "(SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
+                "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
                 " WHERE kind = ANY(%(d)s) ORDER BY id DESC LIMIT %(n)s) ORDER BY id DESC",
                 {"d": list(eventos.DECISAO), "n": limit}).fetchall()
         # o que está em análise agora e em que fase (1-3 = claimed_at; lista = fase 1; 4 = IA online)
@@ -1123,7 +1123,7 @@ def lista_txt(categoria: str, request: Request):
                       (categoria, len(doms)))
             log.error("lista %s encolheu de %d para %d: publicação recusada", categoria, n0, len(doms))
             from . import eventos
-            eventos.registrar("lista_recusada", None, detail=f"{categoria}|lista encolheu de {n0} para {len(doms)} domínios; "
+            eventos.registrar("lista_recusada", None, origem="regras", detail=f"{categoria}|lista encolheu de {n0} para {len(doms)} domínios; "
                               "publicação recusada até alguém aceitar (o DNS segue com a versão anterior)")
         raise HTTPException(503, f"lista {categoria} encolheu de {n0} para {len(doms)}; publicação recusada")
     with db.conn() as c:
@@ -1140,7 +1140,8 @@ def lista_aceitar(categoria: str, by: str = ""):
         n = len(listas.dominios(c, categoria))
         c.execute("UPDATE list_fetches SET last_n = %s, recusada_at = NULL, recusada_n = NULL WHERE category = %s", (n, categoria))
     from . import eventos
-    eventos.registrar("decisao", None, detail=f"{categoria}|{by or 'manual'}: aceitou publicar a lista {categoria} com {n} domínios")
+    eventos.registrar("decisao", None, detail=f"{categoria}|{by or 'manual'}: aceitou publicar a lista {categoria} com {n} domínios",
+                      origem="f5:ti")
     return {"ok": True, "dominios": n}
 
 
@@ -1237,7 +1238,7 @@ def listas_mover(body: MoverIn):
 def _decisao(dominio: str, cat: str, texto: str, by: str = "") -> None:
     """Decisão manual na coluna "Decisão" do IA ao vivo."""
     from . import eventos
-    eventos.lista("decisao", dominio, cat, (f"{by}: " if by else "manual: ") + texto)
+    eventos.lista("decisao", dominio, cat, (f"{by}: " if by else "manual: ") + texto, origem="f5:ti")
 
 
 class AprovarIn(BaseModel):
@@ -1630,10 +1631,10 @@ def dominio_historico(name: str):
             if t["override_classification"]:
                 tl.append({"at": t["override_at"], "tipo": "decisao", "titulo": f"{t['name']} ajustou para {t['override_classification']}",
                            "texto": t["override_by"] or ""})
-        for e in c.execute("SELECT created_at, kind, classification, detail FROM ai_events WHERE name = %s "
+        for e in c.execute("SELECT created_at, kind, classification, detail, origem FROM ai_events WHERE name = %s "
                            "AND kind NOT IN ('llm_done', 'rules_final') ORDER BY id", (reg,)):
             det = e["detail"] or ""
-            titulo = _EVENTO_TITULO.get(e["kind"], e["kind"])
+            titulo = _EVENTO_TITULO.get(e["kind"], e["kind"]) + (f" · por {ORIGEM[e['origem']]}" if e["origem"] in ORIGEM else "")
             if e["kind"] == "lista_local":
                 titulo = f"Fase {det.split('|', 1)[0]} · IA local: lista"
             elif e["kind"] in ("whois_done", "search_done") and e["classification"]:
@@ -1661,7 +1662,10 @@ def dominio_historico(name: str):
             "linha_do_tempo": tl}
 
 
-_EVENTO_TITULO = {"whois_start": "Fase 2 · consultando WHOIS", "whois_done": "Fase 2 · WHOIS + IA local",
+ORIGEM = {"f1:local": "Fase 1 · IA local", "f2:local": "Fase 2 · IA local", "f3:local": "Fase 3 · IA local",
+          "local": "IA local", "f4:online": "Fase 4 · IA online", "f5:ti": "Fase 5 · equipe de TI",
+          "auto": "bloqueio automático", "regras": "regras (feeds/travas)", "catalogo": "catálogo"}
+_EVENTO_TITULO = {"aprovado": "liberado (Aprovados)", "whois_start": "Fase 2 · consultando WHOIS", "whois_done": "Fase 2 · WHOIS + IA local",
                   "whois_error": "Fase 2 · WHOIS indisponível", "search_start": "Fase 3 · buscando na web",
                   "search_done": "Fase 3 · busca na web + IA local", "search_error": "Fase 3 · busca indisponível",
                   "llm_start": "Fase 1 · IA local analisando", "llm_error": "Fase 1 · falha da IA local",

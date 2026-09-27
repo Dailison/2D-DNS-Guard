@@ -617,7 +617,7 @@ def test_cascata_por_confianca(env, monkeypatch):
         listas_ia.salvar(c, ids["cascata-a.com"], "jogos", 0.6, "talvez", "", "local")
         listas_ia.salvar(c, ids["cascata-b.com"], "jogos", 0.95, "jogo online", "", "local")
         listas_ia.salvar(c, ids["cascata-c.com"], "nenhuma", 0.95, "loja", "", "local")
-        listas_ia.salvar(c, ids["cascata-e.com"], "nenhuma", 0.95, "portal de RH", "", "local")
+        listas_ia.salvar(c, ids["cascata-e.com"], "nenhuma", 0.95, "portal de RH", "", "local", 2)
         ap = listas_ia.aplicar(c)
         em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain LIKE 'cascata-%%'")}
         a = c.execute("SELECT lista_duvida, (" + listas_ia.incerta_sql() + ") AS incerta FROM domains WHERE id = %s",
@@ -629,6 +629,12 @@ def test_cascata_por_confianca(env, monkeypatch):
     assert ("jogos", "cascata-b.com") not in em and b["lista_duvida"], "lista com confiança alta: a IA online valida"
     assert ("para_revisar", "cascata-c.com") in em and cc["lista_duvida"], "tirar de Decisões: a IA online valida"
     assert not e["lista_duvida"] and e["revisado_at"], "nenhuma com confiança alta, fora de listas: a IA local decide"
+    with db.conn() as c:   # coluna "Decisão" do IA ao vivo: quem decidiu
+        org = c.execute("SELECT origem FROM ai_events WHERE kind = 'aprovado' AND name = 'cascata-e.com'").fetchone()
+    assert org and org["origem"] == "f2:local", org
+    ev = env.get("/ai/events", headers=H).json()
+    assert any(x.get("name") == "cascata-e.com" and x.get("origem") == "f2:local" for x in ev.get("events", ev) if isinstance(x, dict)), \
+        "a API entrega a origem"
     with db.conn() as c:   # fases 2 e 3 sem dados úteis: agora vai p/ a fase 4
         c.execute("UPDATE domains SET whois_at = now(), web_search_at = now(), lista_aplicada_at = NULL WHERE id = %s",
                   (ids["cascata-a.com"],))

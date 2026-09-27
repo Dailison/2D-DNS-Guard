@@ -371,7 +371,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     # que decidir"): com lista ameaca entra direto em Ameaças; sem certeza, Decisões.
     cat = obj.get("categoria") if obj.get("categoria") in categorias else None
     servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:300]
-    salvar(c, d["id"], lista, conf, motivo, servico, fonte)
+    salvar(c, d["id"], lista, conf, motivo, servico, fonte, 4)
     c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, online_resp = %s, "
               "revisado_at = now(), reanalise_pedida = false WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
     reconhecido = bool(obj.get("reconhecido")) and cls != "DESCONHECIDO" and conf >= settings().online_confianca_min

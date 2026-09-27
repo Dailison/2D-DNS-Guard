@@ -107,7 +107,7 @@ def aplicar(c) -> dict:
         if motivo:
             listas.contexto(c, "whitelist (trava)", motivo)
             c.execute("DELETE FROM whitelist_domains WHERE category = %s AND domain = %s", (r["category"], nome))
-            eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"saiu da whitelist: {motivo}")
+            eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"saiu da whitelist: {motivo}", origem="regras")
             out["saiu"].append(nome)
     # 2) entradas: IA online com certeza (TRABALHO, reconhecido, nenhuma lista) + protegidos do catálogo
     ja = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains")}
@@ -138,14 +138,15 @@ def aplicar(c) -> dict:
                      (cat, nome, por)).rowcount:
             c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE id = %s", (r["id"],))
             ja.add(nome)
-            out["entrou"].append((nome, cat))
+            out["entrou"].append((nome, cat, "catalogo" if por == CATALOGO_BY else "f4:online"))
     if out["entrou"] or out["saiu"]:
         log.info("whitelist: %d entraram, %d saíram", len(out["entrou"]), len(out["saiu"]))
         if len(out["entrou"]) <= 50:
-            for nome, cat in out["entrou"]:
-                eventos.lista("lista_add", nome, f"wl:{cat}", "whitelist: " + CATEGORIAS[cat])
+            for nome, cat, org in out["entrou"]:
+                eventos.lista("lista_add", nome, f"wl:{cat}", "whitelist: " + CATEGORIAS[cat], origem=org)
         else:
-            eventos.registrar("decisao", None, detail=f"wl|whitelist: {len(out['entrou'])} sites de trabalho liberados")
+            eventos.registrar("decisao", None, detail=f"wl|whitelist: {len(out['entrou'])} sites de trabalho liberados",
+                              origem="f4:online")
     return out
 
 

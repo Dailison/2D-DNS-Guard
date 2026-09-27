@@ -180,7 +180,8 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
         if motivo:   # não bloqueia sozinho: Decisões (sem global_reviews: segue candidato, sem repetir evento)
             if c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
                          "ON CONFLICT DO NOTHING", (r["name"], f"{por} · {motivo}")).rowcount:
-                eventos.lista("fase5", r["name"], r["category"], f"bloqueio automático barrado · {motivo}", r["id"], "auto")
+                eventos.lista("fase5", r["name"], r["category"], f"bloqueio automático barrado · {motivo}", r["id"], "auto",
+                              r["classification"])
             continue
         if online_ok and not ((r["lista_fonte"] or "").startswith("online") and r["lista_ia"] == r["category"]
                               and (r["lista_conf"] or 0) >= settings().online_confianca_min):
@@ -192,7 +193,8 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
         c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
                   "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
         feitos.append(r)
-        eventos.lista("lista_add", r["name"], r["category"], "bloqueio automático (recomendação da IA: bloquear)", r["id"], "auto")
+        eventos.lista("lista_add", r["name"], r["category"], "bloqueio automático (recomendação da IA: bloquear)", r["id"], "auto",
+                      r["classification"])
     if feitos:
         log.info("bloqueio automático: %d site(s) nas listas por categoria: %s", len(feitos),
                  ", ".join(f"{r['name']} ({r['category']})" for r in feitos[:20]))

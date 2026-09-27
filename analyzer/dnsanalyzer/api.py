@@ -1235,7 +1235,12 @@ def listas_mover(body: MoverIn):
 def _decisao(dominio: str, cat: str, texto: str, by: str = "") -> None:
     """Decisão manual na coluna "Decisão" do IA ao vivo."""
     from . import eventos
-    eventos.lista("decisao", dominio, cat, (f"{by}: " if by else "manual: ") + texto, origem="f5:ti")
+    try:
+        with db.conn() as c:
+            cls = (c.execute("SELECT classification FROM domains WHERE name = %s", (dominio,)).fetchone() or {}).get("classification")
+    except Exception:  # noqa: BLE001 — o evento não pode derrubar a decisão
+        cls = None
+    eventos.lista("decisao", dominio, cat, (f"{by}: " if by else "manual: ") + texto, origem="f5:ti", classificacao=cls)
 
 
 class AprovarIn(BaseModel):

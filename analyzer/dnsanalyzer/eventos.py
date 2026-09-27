@@ -26,5 +26,7 @@ def registrar(kind: str, name: str | None = None, domain_id: int | None = None, 
         log.debug("falha ao gravar evento: %s", e)
 
 
-def lista(kind: str, dominio: str, cat: str | None, texto: str, domain_id: int | None = None, origem: str | None = None) -> None:
-    registrar(kind, dominio, domain_id, detail=f"{cat or ''}|{texto}", origem=origem)
+def lista(kind: str, dominio: str, cat: str | None, texto: str, domain_id: int | None = None, origem: str | None = None,
+          classificacao: str | None = None) -> None:
+    """Evento da coluna "Decisão": detail = "<lista>|<texto>" (wl:<cat> = whitelist); classificacao = trabalho ou não."""
+    registrar(kind, dominio, domain_id, classificacao, detail=f"{cat or ''}|{texto}", origem=origem)

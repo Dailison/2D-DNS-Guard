@@ -366,7 +366,7 @@ def aplicar(c, limite: int = 3000) -> dict:
         listas.contexto(c, por, f"liberado: {whitelist.CATEGORIAS[wl]} · {_fonte(r)}")
         c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES (%s, %s, %s, false) "
                   "ON CONFLICT DO NOTHING", (wl, r["name"], por))
-        eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{whitelist.CATEGORIAS[wl]} · {_fonte(r)}", r["id"], origem(r))
+        eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{whitelist.CATEGORIAS[wl]} · {_fonte(r)}", r["id"], origem(r), cls)
 
     def para_decisoes(r, cat, motivo=None):
         listas.contexto(c, DUVIDA_BY, motivo or "nenhuma fase teve certeza")
@@ -374,7 +374,7 @@ def aplicar(c, limite: int = 3000) -> dict:
                   (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})" + (f" · {motivo}" if motivo else "")))
         out["revisar"].append((r["name"], cat))
         eventos.lista("fase5", r["name"], cat, (motivo or "nenhuma fase teve certeza")
-                      + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"], origem(r))
+                      + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"], origem(r), cls)
 
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
@@ -430,7 +430,7 @@ def aplicar(c, limite: int = 3000) -> dict:
                 listas.contexto(c, _fonte(r), "IA online: não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
                 out["resolvidos"].append(r["name"])
-                eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r))
+                eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r), cls)
             if not (set(em) - set(tirar)):   # não sobrou lista de bloqueio: vai p/ a whitelist
                 liberar(r, cls)
             continue
@@ -461,7 +461,7 @@ def aplicar(c, limite: int = 3000) -> dict:
                 out["direto"].append((r["name"], cat))
                 eventos.lista("lista_add", r["name"], cat, _fonte(r)
                               + (f" · saiu de {', '.join(x for x in moveis if x in em)}" if any(x in em for x in moveis) else ""),
-                              r["id"], origem(r))
+                              r["id"], origem(r), cls)
             tirar = [x for x in moveis if x in em and x != cat]
             if tirar:
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))

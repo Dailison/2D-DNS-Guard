@@ -82,6 +82,13 @@
   }
   function origemTag(ev){ var o = ORIGEM[origemDe(ev)]; return o ? el('span', 'org ' + o[1], o[0]) : null; }
   function rot(cats){ return (cats || '').split(',').filter(Boolean).map(function(c){ return LROT[c] || c; }).join(', ') || 'nenhuma lista'; }
+  var WROT = {{ WL_ROT|tojson }};
+  var TRAB = {TRABALHO: 'trabalho', NAO_TRABALHO: 'não é de trabalho', SUSPEITO: 'suspeito', MALICIOSO: 'malicioso', DESCONHECIDO: 'desconhecido'};
+  function destino(cat){   // "wl:<categoria>" = whitelist; senão lista(s) de bloqueio
+    if (!cat) return null;
+    if (cat.indexOf('wl:') === 0) return ['✅ Whitelist · ' + (WROT[cat.slice(3)] || cat.slice(3)), 'sai'];
+    return ['⛔ Blocklist · ' + rot(cat), ''];
+  }
   function partes(ev){ var d = ev.detail || '', i = d.indexOf('|'); return i < 0 ? ['', d] : [d.slice(0, i), d.slice(i + 1)]; }
 
   function el(tag, cls, txt){ var e = document.createElement(tag); if(cls) e.className = cls; if(txt != null) e.textContent = txt; return e; }
@@ -147,21 +154,24 @@
       body.appendChild(badge(ev.classification));
       if (ev.seconds != null) body.appendChild(el('span', 'd', ' ' + Math.round(ev.seconds) + 's'));
       if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail.replace(/^fase 4 · /, ''))); }
-    } else if (k === 'lista_add' || k === 'lista_rem' || k === 'fase5' || k === 'decisao') {
-      var p = partes(ev);
-      ic.textContent = {lista_add: '⛔', lista_rem: '✅', fase5: '🧑‍💻', decisao: '✋'}[k];
-      if (ev.name) { body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' ')); }
-      if (k === 'lista_add') { body.appendChild(document.createTextNode('entrou em ')); body.appendChild(el('span', 'lst', rot(p[0]))); }
-      else if (k === 'lista_rem') { body.appendChild(document.createTextNode('saiu de ')); body.appendChild(el('span', 'lst sai', rot(p[0]))); }
-      else if (k === 'fase5') { body.appendChild(document.createTextNode('foi para a ')); body.appendChild(el('span', 'lst dec', 'Decisão Humana'));
-        if (p[0]) body.appendChild(el('span', 'd', ' · sugestão: ' + rot(p[0]))); }
-      else { body.appendChild(el('span', 'lst ' + (/manteve liberado|nenhuma lista|tirou/.test(p[1]) ? 'sai' : ''), 'decisão manual')); }
-      if (p[1]) { body.appendChild(el('br')); body.appendChild(el('span', 'd', p[1])); }
-    } else if (k === 'aprovado') {   // decidiu liberar: fora de listas (Aprovados)
-      var pa = partes(ev); ic.textContent = '👍';
-      body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' '));
-      body.appendChild(el('span', 'lst sai', 'liberado · Aprovados'));
-      if (pa[1]) { body.appendChild(el('br')); body.appendChild(el('span', 'd', pa[1])); }
+    } else if (k === 'lista_add' || k === 'lista_rem' || k === 'fase5' || k === 'decisao' || k === 'aprovado') {
+      // só o que foi feito: para qual lista (bloqueio ou whitelist e a categoria) e se é de trabalho; o motivo fica no hover
+      var p = partes(ev), dst = destino(p[0]);
+      li.title = p[1] || '';
+      if (!ev.name) { ic.textContent = '✋'; body.appendChild(el('span', 'd', p[1])); return li; }
+      body.appendChild(link(ev.name));
+      if (k === 'fase5') {
+        ic.textContent = '🧑‍💻'; body.appendChild(document.createTextNode(' → ')); body.appendChild(el('span', 'lst dec', 'Decisão Humana'));
+      } else if (k === 'decisao' && /nova análise/.test(p[1])) {
+        ic.textContent = '🔁'; body.appendChild(document.createTextNode(' → nova análise (fase 1)'));
+      } else if (k === 'lista_rem' || (k === 'decisao' && /manteve liberado|nenhuma lista|tirou/.test(p[1]))) {
+        ic.textContent = '↩️'; body.appendChild(document.createTextNode(/deixou de valer no DNS/.test(p[1]) ? ' saiu do DNS: ' : ' saiu de '));
+        body.appendChild(el('span', 'lst ' + (dst ? dst[1] : ''), dst ? dst[0] : rot(p[0])));
+      } else {
+        ic.textContent = dst && dst[1] === 'sai' ? '✅' : '⛔'; body.appendChild(document.createTextNode(' → '));
+        body.appendChild(el('span', 'lst ' + (dst ? dst[1] : ''), dst ? dst[0] : rot(p[0])));
+      }
+      if (TRAB[ev.classification] && k !== 'lista_rem') body.appendChild(el('span', 'd', ' · ' + TRAB[ev.classification]));
     } else if (k === 'lista_recusada') {
       var pr = partes(ev); ic.textContent = '🛑';
       body.appendChild(el('span', 'lst', rot(pr[0]))); body.appendChild(el('span', 'd', ' ' + pr[1]));

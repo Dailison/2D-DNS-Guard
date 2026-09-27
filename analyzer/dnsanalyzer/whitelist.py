@@ -173,11 +173,13 @@ def aplicar(c) -> dict:
         if motivo:
             listas.contexto(c, "whitelist (trava)", motivo)
             c.execute("DELETE FROM whitelist_domains WHERE category = %s AND domain = %s", (r["category"], nome))
-            eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"saiu da whitelist: {motivo}", origem="regras")
+            eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"saiu da whitelist: {motivo}", origem="regras",
+                          classificacao=r["classification"])
             out["saiu"].append(nome)
         elif so_lista:
             c.execute("UPDATE whitelist_domains SET publicar = false WHERE category = %s AND domain = %s", (r["category"], nome))
-            eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"deixou de valer no DNS (fica na lista): {so_lista}", origem="regras")
+            eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"deixou de valer no DNS (fica na lista): {so_lista}", origem="regras",
+                          classificacao=r["classification"])
     # 2) entradas: protegidos do catálogo (Essenciais) + IA online com 2 modelos de acordo (TRABALHO, reconhecido, whitelist)
     ja = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, bool_or(publicar) AS publicar FROM whitelist_domains GROUP BY domain")}
     cands = c.execute(
@@ -215,13 +217,13 @@ def aplicar(c) -> dict:
             c.execute("UPDATE whitelist_domains SET publicar = true WHERE domain = %s", (nome,))
         c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE id = %s", (r["id"],))
         ja[nome] = pub
-        out["entrou"].append((nome, cat, "catalogo" if por == CATALOGO_BY else "f4:online", pub))
+        out["entrou"].append((nome, cat, "catalogo" if por == CATALOGO_BY else "f4:online", pub, r["classification"]))
     if out["entrou"] or out["saiu"]:
         log.info("whitelist: %d entraram/publicados, %d saíram", len(out["entrou"]), len(out["saiu"]))
         if len(out["entrou"]) <= 50:
-            for nome, cat, org, pub in out["entrou"]:
+            for nome, cat, org, pub, cls in out["entrou"]:
                 eventos.lista("lista_add", nome, f"wl:{cat}", "whitelist: " + CATEGORIAS[cat] + ("" if pub else " (só na lista: sinal em subdomínio)"),
-                              origem=org)
+                              origem=org, classificacao=cls)
         else:
             eventos.registrar("decisao", None, detail=f"wl|whitelist: {len(out['entrou'])} sites de trabalho liberados",
                               origem="f4:online")

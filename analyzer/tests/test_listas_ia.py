@@ -691,8 +691,8 @@ def test_todo_site_vai_p_uma_fila_whitelist(env, monkeypatch):
         pub = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, publicar FROM whitelist_domains WHERE domain LIKE '%%-wlf.com.br'")}
         assert pub == {"banco-wlf.com.br": False, "escola-wlf.com.br": True}, pub
         assert "banco-wlf.com.br" not in whitelist.dominios(c, "financas") and "escola-wlf.com.br" in whitelist.dominios(c, "educacao")
-        ev = c.execute("SELECT detail, origem FROM ai_events WHERE kind = 'aprovado' AND name = 'banco-wlf.com.br'").fetchone()
-        assert ev["origem"] == "f2:local" and ev["detail"].startswith("wl:financas|Bancos"), ev
+        ev = c.execute("SELECT detail, origem, classification FROM ai_events WHERE kind = 'aprovado' AND name = 'banco-wlf.com.br'").fetchone()
+        assert ev["origem"] == "f2:local" and ev["detail"].startswith("wl:financas|Bancos") and ev["classification"] == "TRABALHO", ev
         # Decisão Humana: aprovar a sugestão "wl:..." libera na whitelist (publicada) e registra a decisão
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'decidir-wlf.com.br', 'IA com dúvida (nenhuma)')")
         listas_ia.salvar(c, ids["decidir-wlf.com.br"], "wl:logistica", 0.6, "transportadora", "Transp Z", "online:gemini", 4)

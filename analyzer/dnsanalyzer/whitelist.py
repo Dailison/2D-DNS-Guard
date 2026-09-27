@@ -24,17 +24,53 @@ from .config import settings
 log = logging.getLogger(__name__)
 CATEGORIAS = {
     "essenciais": "Essenciais (catálogo)",
-    "produtividade": "Produtividade e negócios",
+    "produtividade": "Produtividade e escritório",
     "comunicacao": "Comunicação corporativa",
-    "financas": "Bancos e finanças",
-    "governo": "Governo",
+    "erp_gestao": "ERP, gestão e fiscal",
+    "financas": "Bancos, pagamentos e maquininhas",
+    "governo": "Governo e órgãos públicos",
+    "juridico": "Jurídico, cartórios e conselhos",
+    "rh_beneficios": "RH, folha e benefícios",
+    "vendas_crm": "Vendas, CRM e atendimento",
+    "logistica": "Logística, transporte e entregas",
+    "fornecedores": "Fornecedores, indústria e B2B",
+    "institucional": "Sites institucionais de empresas",
+    "telecom": "Telecom e internet",
     "infraestrutura": "Infraestrutura e sistemas",
     "seguranca": "Segurança",
     "desenvolvimento": "TI e desenvolvimento",
-    "educacao": "Educação",
+    "educacao": "Educação e cursos",
     "saude": "Saúde",
     "utilidades": "Utilidades (conversores, PDF, tradutores)",
+    "servicos": "Serviços do dia a dia (mapas, clima, viagens)",
     "outros_trabalho": "Outros de trabalho",
+    "outros_liberados": "Outros liberados (não é trabalho, sem lista de bloqueio)",
+    "sem_resposta": "Sem resposta (não resolve no DNS)",   # pelo log do Technitium, antes da IA; nunca publicado
+}
+SEM_RESPOSTA = "sem_resposta"
+# o que cada whitelist abrange — vai no prompt das IAs (fases 1-4 escolhem a categoria de quem é liberado)
+DESCRICOES = {
+    "produtividade": "Microsoft 365/Office, Google Workspace, e-mail, documentos, agenda, armazenamento da empresa, SaaS de escritório",
+    "comunicacao": "videoconferência e telefonia corporativa (Teams, Zoom, Meet, Webex, PABX em nuvem), e-mail corporativo",
+    "erp_gestao": "ERP e sistemas de gestão (TOTVS, SAP, Omie, Bling, Sankhya), contabilidade, emissão de NF-e, sistemas fiscais",
+    "financas": "bancos, fintechs, meios de pagamento, maquininhas (Ton, Stone, Cielo), boletos, cartões, investimentos tradicionais",
+    "governo": "gov.br, Receita, SEFAZ, prefeituras, eSocial, INSS, tribunais, órgãos públicos",
+    "juridico": "cartórios, OAB, conselhos de classe (CRC, CREA, CRM), sindicatos, associações, escritórios de advocacia",
+    "rh_beneficios": "folha, ponto, benefícios (VR, Alelo, Pluxee, Caju), recrutamento, planos de saúde corporativos",
+    "vendas_crm": "CRM, automação de marketing, atendimento e helpdesk (RD Station, HubSpot, Salesforce, Zendesk), loja da própria empresa",
+    "logistica": "transportadoras, rastreio, Correios, fretes, entregas, gestão de frota, rastreamento de veículos",
+    "fornecedores": "fabricantes, distribuidores, indústria, atacado B2B, catálogos de produtos, portais de compras corporativas",
+    "institucional": "site institucional de empresa, cliente ou parceiro (apresenta a empresa, sem ser loja nem sistema)",
+    "telecom": "operadoras de telefonia e internet, provedores regionais",
+    "infraestrutura": "nuvem para sistemas, APIs, atualizações de sistema e drivers, certificados, telemetria técnica",
+    "seguranca": "antivírus, EDR, firewall, bloqueadores de anúncio, gerenciadores de senha, autenticação, VPN corporativa",
+    "desenvolvimento": "ferramentas de TI e desenvolvimento, repositórios, documentação técnica, suporte técnico",
+    "educacao": "escolas, faculdades, cursos, plataformas de ensino, enciclopédias, dados educacionais",
+    "saude": "hospitais, clínicas, laboratórios, planos de saúde, sistemas de saúde",
+    "utilidades": "ferramentas online legítimas: conversores de arquivo, PDF, tradutores, calculadoras, encurtadores",
+    "servicos": "mapas, trânsito, clima, viagens, mobilidade, serviços do dia a dia",
+    "outros_trabalho": "trabalho, mas nenhuma das categorias acima",
+    "outros_liberados": "não é de trabalho e não se encaixa em nenhuma lista de bloqueio (religião, cultura, ONGs, pessoal)",
 }
 AUTO_BY = "IA whitelist"
 CATALOGO_BY = "catálogo (protegido)"
@@ -58,7 +94,8 @@ _SERVICO_RUIM = re.compile(r"(cdn|distribui[çc][ãa]o de conte[úu]do|est[áa]t
 def _dois_modelos(r) -> bool:
     antes = r.get("antes") or {}
     try:
-        return (antes.get("lista") in (None, "nenhuma") and antes.get("classificacao") == "TRABALHO"
+        return ((antes.get("lista") in (None, "nenhuma") or str(antes.get("lista") or "").startswith("wl:"))
+                and antes.get("classificacao") == "TRABALHO"
                 and float(antes.get("confianca") or 0) >= _CONF and float(r.get("lista_conf") or 0) >= _CONF)
     except (TypeError, ValueError):
         return False
@@ -68,8 +105,15 @@ def _cara_de_bloqueio(nome: str, servico: str | None) -> bool:
     return bool(_NOME_RUIM.search(nome.split(".")[0]) or _SERVICO_RUIM.search(servico or ""))
 
 
-def _categoria(cat_ia: str | None) -> str:
-    return cat_ia if cat_ia in CATEGORIAS and cat_ia != "essenciais" else "outros_trabalho"
+_DE_SITE = {"servicos_pessoais": "servicos"}   # categoria de site (classificação) -> whitelist
+
+
+def _categoria(cat_ia: str | None, classificacao: str | None = None) -> str:
+    """Whitelist de quem é liberado sem categoria de whitelist escolhida pela IA (respostas antigas)."""
+    cat_ia = _DE_SITE.get(cat_ia or "", cat_ia)
+    if cat_ia in CATEGORIAS and cat_ia not in ("essenciais", "outros_trabalho", "outros_liberados"):
+        return cat_ia
+    return "outros_liberados" if classificacao == "NAO_TRABALHO" else "outros_trabalho"
 
 
 def _compartilhado(nome: str, evidencia: list | None) -> bool:
@@ -96,7 +140,7 @@ def aplicar(c) -> dict:
     # 1) saídas: acerto em feed/SUSPEITO/MALICIOSO (qualquer entrada); conflito com bloqueio (só as automáticas)
     for r in c.execute("SELECT w.category, w.domain, w.added_by, d.ti_signature, d.classification FROM whitelist_domains w "
                        "LEFT JOIN domains d ON d.name = w.domain").fetchall():
-        nome, auto = r["domain"], (r["added_by"] or "").startswith((AUTO_BY, CATALOGO_BY))
+        nome, auto = r["domain"], (r["added_by"] or "").startswith(("IA", CATALOGO_BY))
         motivo = None
         if r["ti_signature"]:
             motivo = f"apareceu em feed de ameaça ({r['ti_signature']})"
@@ -110,35 +154,38 @@ def aplicar(c) -> dict:
             eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"saiu da whitelist: {motivo}", origem="regras")
             out["saiu"].append(nome)
     # 2) entradas: IA online com certeza (TRABALHO, reconhecido, nenhuma lista) + protegidos do catálogo
-    ja = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains")}
+    ja = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, bool_or(publicar) AS publicar FROM whitelist_domains GROUP BY domain")}
     cands = c.execute(
         "SELECT d.id, d.name, d.category, d.evidence, d.online_resp->>'categoria' AS cat_online, d.topic, "
         " d.online_resp->>'servico' AS servico, d.online_resp->'_meta'->'antes' AS antes, "
         " d.online_resp->>'classificacao' AS cls_online, (d.online_resp->>'reconhecido')::boolean AS rec, "
-        " d.lista_conf, d.lista_ia, d.lista_fonte, d.classification FROM domains d "
+        " d.lista_conf, d.lista_ia, d.lista_wl, d.lista_fonte, d.classification FROM domains d "
         "WHERE d.kind = 'public' AND coalesce(d.ti_signature, '') = '' AND d.classification NOT IN ('SUSPEITO', 'MALICIOSO') "
         " AND ((d.lista_fonte LIKE 'online%%' AND d.lista_ia IS NULL AND d.lista_conf >= %s "
         "       AND d.online_resp->>'classificacao' = 'TRABALHO' AND (d.online_resp->>'reconhecido')::boolean) "
         "      OR d.classified_by = 'catalog')", (cfg.online_confianca_min,)).fetchall()
     for r in cands:
         nome = r["name"]
-        if nome in ja or _compartilhado(nome, r["evidence"]) or listas._em_lista(nome, em) or nome in pais:
-            continue
+        if ja.get(nome) or _compartilhado(nome, r["evidence"]) or listas._em_lista(nome, em) or nome in pais:
+            continue   # (já publicado; plataforma compartilhada; conflita com bloqueio)
         e = catalog.match(nome)
         if e and e.get("protected"):
             cat, por, motivo = "essenciais", CATALOGO_BY, f"catálogo: {e.get('topic') or 'protegido'}"
         elif (r["lista_fonte"] or "").startswith("online") and _dois_modelos(r) \
                 and not _cara_de_bloqueio(nome, f"{r['servico'] or ''} {r['topic'] or ''}"):
-            cat, por, motivo = (_categoria(r["cat_online"] or r["category"]), AUTO_BY,
+            cat, por, motivo = (r["lista_wl"] or _categoria(r["cat_online"] or r["category"], r["cls_online"]), AUTO_BY,
                                 "IA online (2 modelos): trabalho, sem lista de bloqueio")
         else:
             continue
         listas.contexto(c, por, motivo)
-        if c.execute("INSERT INTO whitelist_domains (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                     (cat, nome, por)).rowcount:
-            c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE id = %s", (r["id"],))
-            ja.add(nome)
-            out["entrou"].append((nome, cat, "catalogo" if por == CATALOGO_BY else "f4:online"))
+        if nome in ja:   # já estava na whitelist sem publicar (posto pela IA): passa a valer no DNS, na categoria escolhida
+            c.execute("UPDATE whitelist_domains SET publicar = true WHERE domain = %s", (nome,))
+        elif not c.execute("INSERT INTO whitelist_domains (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                           (cat, nome, por)).rowcount:
+            continue
+        c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE id = %s", (r["id"],))
+        ja[nome] = True
+        out["entrou"].append((nome, cat, "catalogo" if por == CATALOGO_BY else "f4:online"))
     if out["entrou"] or out["saiu"]:
         log.info("whitelist: %d entraram, %d saíram", len(out["entrou"]), len(out["saiu"]))
         if len(out["entrou"]) <= 50:
@@ -151,4 +198,7 @@ def aplicar(c) -> dict:
 
 
 def dominios(c, cat: str) -> list[str]:
-    return [r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE category = %s ORDER BY domain", (cat,))]
+    """Publicados no DNS (/whitelist/<cat>.txt): pessoa, catálogo ou dois modelos online. O que só a IA pôs fica na
+    categoria sem publicar — fora de listas de bloqueio o site já está liberado; a whitelist vence qualquer bloqueio."""
+    return [r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE category = %s AND publicar "
+                                           "ORDER BY domain", (cat,))]

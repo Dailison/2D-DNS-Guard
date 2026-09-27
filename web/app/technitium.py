@@ -252,12 +252,20 @@ SECOES_LISTA = [
 ]
 CATEGORIAS_LISTA = [x for _, itens in SECOES_LISTA for x in itens]
 # whitelists por categoria (analisador: whitelist.py) — assinadas por TODOS os grupos (vencem qualquer bloqueio)
-CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividade", "Produtividade e negócios"),
-                        ("comunicacao", "Comunicação corporativa"), ("financas", "Bancos e finanças"), ("governo", "Governo"),
-                        ("infraestrutura", "Infraestrutura e sistemas"), ("seguranca", "Segurança"),
-                        ("desenvolvimento", "TI e desenvolvimento"), ("educacao", "Educação"), ("saude", "Saúde"),
+CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividade", "Produtividade e escritório"),
+                        ("comunicacao", "Comunicação corporativa"), ("erp_gestao", "ERP, gestão e fiscal"),
+                        ("financas", "Bancos, pagamentos e maquininhas"), ("governo", "Governo e órgãos públicos"),
+                        ("juridico", "Jurídico, cartórios e conselhos"), ("rh_beneficios", "RH, folha e benefícios"),
+                        ("vendas_crm", "Vendas, CRM e atendimento"), ("logistica", "Logística, transporte e entregas"),
+                        ("fornecedores", "Fornecedores, indústria e B2B"), ("institucional", "Sites institucionais de empresas"),
+                        ("telecom", "Telecom e internet"), ("infraestrutura", "Infraestrutura e sistemas"), ("seguranca", "Segurança"),
+                        ("desenvolvimento", "TI e desenvolvimento"), ("educacao", "Educação e cursos"), ("saude", "Saúde"),
                         ("utilidades", "Utilidades (conversores, PDF, tradutores)"),
-                        ("outros_trabalho", "Outros de trabalho")]
+                        ("servicos", "Serviços do dia a dia (mapas, clima, viagens)"), ("outros_trabalho", "Outros de trabalho"),
+                        ("outros_liberados", "Outros liberados (não é trabalho, sem lista de bloqueio)"),
+                        ("sem_resposta", "Sem resposta (não resolve no DNS)")]
+# as que vão p/ o DNS (allowListUrls): "Sem resposta" só organiza (nunca é publicada)
+CATEGORIAS_WHITELIST_DNS = [x for x in CATEGORIAS_WHITELIST if x[0] != "sem_resposta"]
 _WL_RE = re.compile(r"/whitelist/([a-z_]+)\.txt$")
 CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas"}   # ⚡ (só destaque visual)
 CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # a IA não põe sozinha
@@ -562,7 +570,7 @@ def _aplica_politica(g, lists, services, bloqueados=()):
     g["blockListUrls"] = (outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(lists)]
                           + [url_liberacao(s) for s in sorted(set(bloqueados) - set(services))])
     outras = [u for u in (g.get("allowListUrls") or []) if not _LIB_RE.search(str(u)) and not _WL_RE.search(str(u))]
-    g["allowListUrls"] = (outras + [url_whitelist(c) for c, _ in CATEGORIAS_WHITELIST]
+    g["allowListUrls"] = (outras + [url_whitelist(c) for c, _ in CATEGORIAS_WHITELIST_DNS]
                           + [url_liberacao(s) for s in sorted(set(services))])
 
 

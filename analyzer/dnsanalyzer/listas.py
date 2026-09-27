@@ -111,28 +111,53 @@ def expirar_ameacas(c, dias: int = 7) -> list[dict]:
     return rows
 
 
+NAO_RESOLVE_SQL = (   # pelo log do Technitium: ≥ 95% NXDOMAIN, ou ≥ 95% das consultas A sem IP (NoError vazio/SERVFAIL)
+    "SELECT domain_id FROM query_agg WHERE bucket >= now() - interval '7 days' GROUP BY domain_id "
+    "HAVING (sum(queries) >= 3 AND sum(nxdomain) >= 0.95 * sum(queries)) OR (sum(ip_q) >= 3 AND sum(sem_ip) >= 0.95 * sum(ip_q))")
+
+
+def sem_resposta(c, nomes: list[str], motivo: str) -> None:
+    """Não resolve no DNS: fora da IA e da Decisão Humana; entra na whitelist "Sem resposta" (Domínios liberados; não
+    publicada) — a menos que esteja numa lista de bloqueio (fica bloqueado)."""
+    from . import eventos, whitelist
+    if not nomes:
+        return
+    contexto(c, "regras (DNS)", motivo)
+    c.execute("DELETE FROM category_lists WHERE category = 'para_revisar' AND domain = ANY(%s)", (nomes,))
+    entrou = [r["domain"] for r in c.execute(
+        "INSERT INTO whitelist_domains (category, domain, added_by, publicar) SELECT %s, n, 'regras (DNS)', false "
+        "FROM unnest(%s::text[]) n WHERE NOT EXISTS (SELECT 1 FROM category_lists l WHERE l.domain = n) "
+        "ON CONFLICT DO NOTHING RETURNING domain", (whitelist.SEM_RESPOSTA, nomes))]
+    c.execute("UPDATE domains SET lista_wl = %s, revisado_at = now() WHERE name = ANY(%s)", (whitelist.SEM_RESPOSTA, entrou))
+    for n in entrou[:50]:
+        eventos.lista("aprovado", n, "wl:" + whitelist.SEM_RESPOSTA, motivo, origem="regras")
+
+
 def marcar_inexistentes(c) -> dict:
-    """Domínio que não existe (≥ 95% das consultas com NXDOMAIN em 7 dias, ≥ 3 consultas; erro de digitação,
-    equipamento mal configurado, nome local vazado): kind = 'inexistente' — sai da fila da IA e de Decisões.
-    Em feed de ameaça fica no fluxo (DGA de malware também dá NXDOMAIN; tem o alerta dga_burst). Se passar a
-    resolver (último dia com < 50% de NXDOMAIN), volta a 'public' e é analisado de novo."""
-    from . import eventos
+    """Domínio que não resolve (7 dias, ≥ 3 consultas: ≥ 95% NXDOMAIN, ou ≥ 95% das consultas A sem IP — NoError
+    vazio, SERVFAIL; erro de digitação, site desativado, nome local vazado): kind = 'inexistente' — sai da fila da IA
+    e da Decisão Humana e vai p/ a whitelist "Sem resposta". Em feed de ameaça fica no fluxo (DGA de malware também não
+    resolve; tem o alerta dga_burst). Voltou a resolver (último dia com ≥ 3 respostas com IP) -> fase 1 de novo."""
+    from . import eventos, whitelist
     novos = c.execute(
         "UPDATE domains d SET kind = 'inexistente', llm_pending = false, lista_duvida = false, needs_analysis = false "
-        "WHERE d.kind = 'public' AND coalesce(d.ti_signature, '') = '' AND d.id IN (SELECT domain_id FROM query_agg "
-        " WHERE bucket >= now() - interval '7 days' GROUP BY domain_id HAVING sum(queries) >= 3 "
-        " AND sum(nxdomain) >= 0.95 * sum(queries)) RETURNING d.id, d.name").fetchall()
+        "WHERE d.kind = 'public' AND coalesce(d.ti_signature, '') = '' AND d.id IN (" + NAO_RESOLVE_SQL + ") "
+        "RETURNING d.id, d.name").fetchall()
     if novos:
-        contexto(c, "inexistente (NXDOMAIN)", "o domínio não existe: ≥ 95% das consultas com NXDOMAIN em 7 dias")
-        c.execute("DELETE FROM category_lists WHERE category = 'para_revisar' AND domain = ANY(%s)", ([r["name"] for r in novos],))
-        eventos.registrar("decisao", None, detail="|" + f"{len(novos)} domínio(s) inexistentes (NXDOMAIN) fora da IA e de Decisões: "
+        sem_resposta(c, [r["name"] for r in novos], "não resolve no DNS (7 dias: NXDOMAIN ou resposta sem IP)")
+        eventos.registrar("decisao", None, detail="|" + f"{len(novos)} domínio(s) que não resolvem no DNS fora da IA: "
                           + ", ".join(r["name"] for r in novos[:15]) + (" …" if len(novos) > 15 else ""), origem="regras")
     voltaram = c.execute(
-        "UPDATE domains d SET kind = 'public', needs_analysis = true WHERE d.kind = 'inexistente' AND d.id IN ("
+        "UPDATE domains d SET kind = 'public', needs_analysis = true, revisado_at = NULL, lista_wl = NULL, "
+        " reanalise_pedida = dominio_decidido(d.id) WHERE d.kind = 'inexistente' AND d.id IN ("
         " SELECT domain_id FROM query_agg WHERE bucket >= now() - interval '1 day' GROUP BY domain_id "
-        " HAVING sum(queries) - sum(nxdomain) >= 3 AND sum(nxdomain) < 0.5 * sum(queries)) RETURNING d.name").fetchall()
+        " HAVING sum(ip_q) - sum(sem_ip) >= 3 AND sum(nxdomain) < 0.5 * sum(queries)) RETURNING d.name").fetchall()
+    if voltaram:
+        contexto(c, "regras (DNS)", "voltou a resolver: volta à fase 1")
+        c.execute("DELETE FROM whitelist_domains WHERE category = %s AND domain = ANY(%s)",
+                  (whitelist.SEM_RESPOSTA, [r["name"] for r in voltaram]))
     if novos or voltaram:
-        log.info("inexistentes: %d marcados, %d voltaram a resolver", len(novos), len(voltaram))
+        log.info("não resolvem: %d marcados, %d voltaram a resolver", len(novos), len(voltaram))
     return {"inexistentes": [r["name"] for r in novos], "voltaram": [r["name"] for r in voltaram]}
 
 
@@ -182,6 +207,7 @@ DETALHE_SQL = (
     "SELECT d.name AS domain, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
     " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "
     " d.lista_ia, d.lista_conf, d.lista_motivo, d.lista_servico, d.lista_fonte, d.lista_at, d.online_at, d.lista_duvida, "
+    " d.lista_wl, d.lista_fase, d.online_resp->'_meta'->>'model' AS on_modelo, d.online_resp->>'classificacao' AS on_cls, "
     " d.ti_signature, d.ti_cleared_at, "
     " g.status AS g_status, g.reviewed_by AS g_by, g.reviewed_at AS g_at, "
     " t.n_decisoes, t.n_ajustes, t.ult_status, t.ult_por, t.ult_em "
@@ -222,6 +248,8 @@ def _sugestao(r: dict) -> str:
     """Lista sugerida pela etapa "lista" ('_nenhuma' = a IA disse que não é de lista; '_sem' = ainda não viu)."""
     if r.get("lista_ia"):
         return r["lista_ia"]
+    if r.get("lista_wl"):
+        return "wl:" + r["lista_wl"]
     return "_nenhuma" if r.get("lista_at") and r.get("lista_fonte") != "falhou" else "_sem"
 
 
@@ -300,7 +328,7 @@ def detalhes(c, cat: str, tid: int | None = None, fase5: bool = False, **filtros
 
 
 def detalhes_whitelist(c, cat: str, **filtros) -> dict:
-    rows = c.execute("SELECT domain, added_by, added_at FROM whitelist_domains WHERE category=%s", (cat,)).fetchall()
+    rows = c.execute("SELECT domain, added_by, added_at, publicar FROM whitelist_domains WHERE category=%s", (cat,)).fetchall()
     emp = _empresas(c, [r["domain"] for r in rows])
     rows = _detalhar(c, rows)
     for r in rows:

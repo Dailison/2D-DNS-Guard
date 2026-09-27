@@ -31,7 +31,7 @@ from psycopg.types.json import Jsonb
 from . import db, webintel
 from .config import settings
 from . import listas_ia
-from .listas_ia import LISTAS_IA, NENHUMA, _contexto, salvar
+from .listas_ia import LISTAS_IA, NENHUMA, WL, _contexto, e_wl, salvar
 
 log = logging.getLogger(__name__)
 CLASSES = ["TRABALHO", "NAO_TRABALHO", "SUSPEITO", "MALICIOSO", "DESCONHECIDO"]
@@ -46,19 +46,25 @@ Para o domínio, diga:
   NAO_TRABALHO (lazer: redes sociais, streaming, jogos, apostas, adulto, pirataria, publicidade), SUSPEITO, MALICIOSO
   (só com indício forte de golpe/malware) ou DESCONHECIDO;
 - "categoria": uma das categorias de site abaixo;
-- "lista": a lista de filtro a que o site pertence — O QUE ELE É, não se é de trabalho (uma loja é "compras" mesmo que
+- "lista": para onde o site vai — TODO site vai para uma fila: uma LISTA DE BLOQUEIO (o que ele é) ou, se não é de
+  nenhuma delas, uma WHITELIST ("wl:..."), na categoria que melhor o descreve. A lista de bloqueio diz
+  O QUE ELE É, não se é de trabalho (uma loja é "compras" mesmo que
   empresas comprem nela; um CMP de cookies é "publicidade" mesmo sendo compliance). DOMÍNIOS TÉCNICOS (CDN, arquivos
   estáticos, imagens, API, app) DE UM SERVIÇO vão para a lista DO SERVIÇO: primeiro descubra de quem é o domínio
   (ex.: slatic.net = arquivos da Lazada = compras; alicdn.com = Alibaba/AliExpress = compras; mlstatic.com = Mercado Livre =
   compras; fbcdn.net = Facebook = redes_sociais; ytimg.com = YouTube = streaming; akamaihd.net de um jogo = jogos).
-  "nenhuma" só para ferramentas de trabalho, bancos, governo, fornecedores e infraestrutura GENÉRICA (Cloudflare, Akamai,
-  AWS, Azure, Google Cloud, certificados, atualizações de sistema);
+  Whitelist só para o que NÃO é de nenhuma lista de bloqueio: ferramentas de trabalho, bancos, governo, fornecedores,
+  infraestrutura GENÉRICA (Cloudflare, Akamai, AWS, Azure, Google Cloud, certificados, atualizações de sistema) etc.
+  Domínio que imita marca famosa com letras trocadas (ffacebook, g00gle) e não é o oficial = "ameaca";
 - "confianca": 1.0 só se tem certeza; 0.7 provável; 0.4 ou menos se está chutando;
-- "motivo": uma frase.
+- "motivo": 1 a 3 frases para a equipe de TI decidir: o que é o site/empresa, qual evidência você usou (seu
+  conhecimento, WHOIS/CNPJ, página, busca na web) e por que esta lista (ou por que não tem certeza).
 
-Listas:
+Listas de bloqueio:
 {listas}
-- nenhuma: não é nenhuma das anteriores
+
+Whitelists (sites liberados):
+{whitelists}
 
 Categorias de site: {categorias}
 
@@ -200,7 +206,8 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
     cfg = settings()
     modelo = modelo or cfg.gemini_modelos[0][0]
     listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
-    sistema = SYSTEM.format(listas=listas, categorias=", ".join(categorias))
+    wls = "\n".join(f"- {k}: {v}" for k, v in WL.items())
+    sistema = SYSTEM.format(listas=listas, whitelists=wls, categorias=", ".join(categorias))
     sug = ""
     if d.get("lista_ia"):   # validação: a IA online confirma ou corrige a sugestão da IA local
         sug = (f"\nSugestão da IA local (modelo pequeno, pode errar): lista '{d['lista_ia']}'"
@@ -279,7 +286,12 @@ def _certo(obj: dict) -> bool:
 
 def _candidato_whitelist(obj: dict) -> bool:
     """Trabalho, reconhecido, sem lista: pode ir p/ a whitelist (vence qualquer bloqueio) — só com 2 modelos de acordo."""
-    return obj.get("lista") in (None, NENHUMA) and obj.get("classificacao") == "TRABALHO" and bool(obj.get("reconhecido"))
+    return _libera(obj) and obj.get("classificacao") == "TRABALHO" and bool(obj.get("reconhecido"))
+
+
+def _libera(obj: dict) -> bool:
+    """A resposta manda o site p/ uma whitelist (ou "nenhuma", das respostas antigas)."""
+    return obj.get("lista") in (None, NENHUMA) or e_wl(obj.get("lista"))
 
 
 def _buscas_no_mes(c) -> int:
@@ -334,7 +346,7 @@ def fase(categorias: list[str]) -> str:
                 and not (revalidar and not meta.get("nivel_reforco")) \
                 and not (obj.get("lista") in listas_ia._DOIS_MODELOS and not meta.get("nivel_reforco")) \
                 and not (_candidato_whitelist(obj) and not meta.get("nivel_reforco")) \
-                and not (d.get("em_infra") and obj.get("lista") in (None, NENHUMA) and not meta.get("nivel_reforco")):
+                and not (d.get("em_infra") and _libera(obj) and not meta.get("nivel_reforco")):
             break
         if obj is not None and meta.get("nivel_reforco") and nivel is not busca:
             break
@@ -350,7 +362,7 @@ def fase(categorias: list[str]) -> str:
         if obj is None:   # nenhum modelo respondeu (cota/sobrecarga): tenta de novo depois
             c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (d["id"],))
             return "unavailable"
-        if d.get("em_infra") and obj.get("lista") in (None, NENHUMA) and not meta.get("nivel_reforco") and reforco:
+        if d.get("em_infra") and _libera(obj) and not meta.get("nivel_reforco") and reforco:
             log.info("IA online: %s sem a 2ª opinião (Infraestrutura); tenta de novo em 10 min", d["name"])
             return "done"   # fica reservado (online_claimed_at): a fila o pega de novo em 10 min
         gravar(c, d, obj, meta, categorias)
@@ -361,7 +373,7 @@ _SISTEMA = ("para_revisar", "outros_bloqueios", "infra_bloqueio")   # listas "se
 
 
 def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str = FONTE) -> None:
-    lista = obj.get("lista") if obj.get("lista") in LISTAS_IA else NENHUMA
+    lista = obj.get("lista") if obj.get("lista") in LISTAS_IA or e_wl(obj.get("lista")) else NENHUMA
     try:
         conf = max(0.0, min(1.0, float(obj.get("confianca") or 0)))
     except (TypeError, ValueError):
@@ -370,7 +382,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     # MALICIOSO com certeza da IA online, depois das fases 1-3, vale (pedido do usuário 2026-09-26: "não tem mais o
     # que decidir"): com lista ameaca entra direto em Ameaças; sem certeza, Decisões.
     cat = obj.get("categoria") if obj.get("categoria") in categorias else None
-    servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:300]
+    servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:500]
     salvar(c, d["id"], lista, conf, motivo, servico, fonte, 4)
     c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, online_resp = %s, "
               "revisado_at = now(), reanalise_pedida = false WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
@@ -384,7 +396,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
                   "VALUES (%s, %s, %s, %s, %s, 'online', %s, %s)",
                   (d["id"], cls, conf, servico[:80], Jsonb(razoes), meta.get("model"),
                    ("fontes: " + ", ".join(meta.get("fontes") or []))[:500] or None))
-    elif d["classification"] == "DESCONHECIDO" and lista == NENHUMA and not c.execute(
+    elif d["classification"] == "DESCONHECIDO" and lista not in LISTAS_IA and not c.execute(
             "SELECT 1 FROM category_lists WHERE domain = %s AND category <> ALL(%s)", (d["name"], list(_SISTEMA))).fetchone():
         # (já numa lista de conteúdo/segurança: a IA não identificar não muda nada, não vai p/ Decisões)
         from . import listas as _listas

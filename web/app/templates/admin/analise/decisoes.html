@@ -2,24 +2,7 @@
 {% import "admin/analise/_macros.html" as m with context %}
 {% block an %}
 <div class="card">
-  <h2 style="margin-bottom:.3rem">Fase 5 · Decisão Humana <span class="mut" style="font-size:.85rem;font-weight:400">· classificação manual pela equipe de TI da 2D</span></h2>
-  <p class="hint" style="margin:.2rem 0 .6rem">Todo site novo passa pela IA sozinho: <b>1</b> IA local → <b>2</b> WHOIS + IA local → <b>3</b> busca na web + IA local → <b>4</b> IA online (Gemini).
-    A IA online <b>valida</b> a sugestão da IA local: com confiança, o site vai direto para a lista certa (ou para nenhuma). Aqui ficam só os que nem ela resolveu com confiança, com a lista sugerida.
-    <b>✓ Aprovar sugestão da IA</b> põe cada site na lista sugerida; <b>⛔ Pôr em lista…</b> escolhe outra; <b>✅ Manter liberado</b> tira daqui sem bloquear. Tudo fica registrado como decisão.</p>
-  {% if fases %}
-  <div style="display:flex;flex-wrap:wrap;gap:.4rem;font-size:.82rem">
-    <span class="tag">1 · IA local: {{ fases.ia or 0 }} na fila</span>
-    <span class="tag">2 · WHOIS: {{ fases.whois or 0 }}</span>
-    <span class="tag">3 · busca na web: {{ fases.busca or 0 }}</span>
-    <span class="tag">listas (IA local): {{ fases.lista or 0 }}</span>
-    <span class="tag">4 · IA online: {{ fases.online or 0 }}{{ '' if fases.online_on else ' (desligada)' }}</span>
-    <a class="tag" href="{{ url_for('analise.ia_ao_vivo') }}" style="text-decoration:none">IA ao vivo →</a>
-  </div>
-  {% endif %}
-</div>
-<div class="card">
-  <h2>{{ det.total }} site(s) aguardando decisão{% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem;font-weight:400">de {{ det.total_geral }}</span>{% endif %}
-    {% if det.aguardando_ia %}<span class="mut" style="font-size:.8rem;font-weight:400"> · mais {{ det.aguardando_ia }} ainda com a IA (fases 1 a 4) — só aparecem aqui se a IA online não tiver certeza</span>{% endif %}</h2>
+  <h2>Fase 5 · Decisão Humana <span class="mut" style="font-size:.85rem;font-weight:400">· {{ det.total }} aguardando</span></h2>
   {% with modo = 'decisoes' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>
 {% endblock %}

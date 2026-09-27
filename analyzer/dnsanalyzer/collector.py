@@ -24,6 +24,17 @@ from .tenants import TenantResolver, auto_network_for, slugify
 log = logging.getLogger(__name__)
 CURSOR_KEY = "ingest_cursor"
 BLOCKED_TYPES = {"Blocked", "UpstreamBlocked", "CacheBlocked"}
+SEM_IP_RCODES = {"NxDomain", "ServerFailure", "Refused"}
+
+
+def sem_ip(e: dict) -> tuple[bool, bool]:
+    """(consulta de endereço que conta, voltou sem IP). Só tipo A (IPv4) não bloqueada: AAAA vazio é normal (muito site
+    não tem IPv6) e bloqueio não diz se o nome resolve. Sem IP = NXDOMAIN, SERVFAIL, REFUSED ou NoError sem resposta
+    (o nome existe mas não tem endereço)."""
+    if e.get("qtype") != "A" or e.get("responseType") in BLOCKED_TYPES:
+        return False, False
+    rc = e.get("rcode")
+    return True, rc in SEM_IP_RCODES or (rc == "NoError" and not str(e.get("answer") or "").strip())
 
 
 @dataclass
@@ -31,13 +42,17 @@ class Agg:
     queries: int = 0
     blocked: int = 0
     nxdomain: int = 0
+    ip_q: int = 0      # consultas tipo A não bloqueadas
+    sem_ip: int = 0    # dessas, as que voltaram sem IP
     first: datetime | None = None
     last: datetime | None = None
 
-    def add(self, ts: datetime, blocked: bool, nx: bool) -> None:
+    def add(self, ts: datetime, blocked: bool, nx: bool, ip_q: bool = False, sem_ip: bool = False) -> None:
         self.queries += 1
         self.blocked += int(blocked)
         self.nxdomain += int(nx)
+        self.ip_q += int(ip_q)
+        self.sem_ip += int(sem_ip)
         self.first = ts if self.first is None or ts < self.first else self.first
         self.last = ts if self.last is None or ts > self.last else self.last
 
@@ -79,7 +94,7 @@ def aggregate(entries, start: datetime, end: datetime, excluded=()) -> dict[tupl
         ag = out.get(key)
         if ag is None:
             ag = out[key] = Agg()
-        ag.add(ts, e.get("responseType") in BLOCKED_TYPES, e.get("rcode") == "NxDomain")
+        ag.add(ts, e.get("responseType") in BLOCKED_TYPES, e.get("rcode") == "NxDomain", *sem_ip(e))
     return out
 
 
@@ -201,7 +216,7 @@ def store(c, aggs: dict[tuple, Agg]) -> dict:
             continue
         cid = cli_id[(tid, ip)]
         did = dom_id[infos[fq].registrable]
-        qa.append((tid, cid, did, fq_id[fq], bucket, ag.queries, ag.blocked, ag.nxdomain, ag.first, ag.last))
+        qa.append((tid, cid, did, fq_id[fq], bucket, ag.queries, ag.blocked, ag.nxdomain, ag.ip_q, ag.sem_ip, ag.first, ag.last))
         k = (tid, cid, did)
         x = cd.get(k)
         cd[k] = [min(x[0], ag.first), max(x[1], ag.last), x[2] + ag.queries, x[3] + ag.blocked,
@@ -213,10 +228,11 @@ def store(c, aggs: dict[tuple, Agg]) -> dict:
     with c.cursor() as cur:
         cur.executemany(
             "INSERT INTO query_agg (tenant_id, client_id, domain_id, fqdn_id, bucket, queries, blocked, "
-            "nxdomain, first_seen, last_seen) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "nxdomain, ip_q, sem_ip, first_seen, last_seen) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT (tenant_id, client_id, fqdn_id, bucket) DO UPDATE SET "
             "queries=query_agg.queries+EXCLUDED.queries, blocked=query_agg.blocked+EXCLUDED.blocked, "
-            "nxdomain=query_agg.nxdomain+EXCLUDED.nxdomain, "
+            "nxdomain=query_agg.nxdomain+EXCLUDED.nxdomain, ip_q=query_agg.ip_q+EXCLUDED.ip_q, "
+            "sem_ip=query_agg.sem_ip+EXCLUDED.sem_ip, "
             "first_seen=LEAST(query_agg.first_seen, EXCLUDED.first_seen), "
             "last_seen=GREATEST(query_agg.last_seen, EXCLUDED.last_seen)",
             qa,

@@ -660,3 +660,59 @@ def test_cascata_por_confianca(env, monkeypatch):
     with db.conn() as c:
         ev = c.execute("SELECT detail FROM ai_events WHERE kind = 'lista_local' AND name = 'cascata-d.com'").fetchone()
     assert ev and ev["detail"].startswith("2|lista jogos 60% · Portal X — parece jogo") and "segue p/ a fase 3" in ev["detail"], ev
+
+
+def test_todo_site_vai_p_uma_fila_whitelist(env, monkeypatch):
+    """Liberar = entrar numa whitelist por categoria. IA sozinha: na categoria, sem publicar no DNS; dois modelos
+    online, catálogo ou pessoa: publicado (/whitelist/<cat>.txt)."""
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import config, db, listas_ia, whitelist
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    assert "wl:financas" in listas_ia._schema()["properties"]["lista"]["enum"] and "nenhuma" not in listas_ia._schema()["properties"]["lista"]["enum"]
+    with db.conn() as c:
+        ids = {}
+        for n, cls, cat in (("banco-wlf.com.br", "TRABALHO", "financas"), ("escola-wlf.com.br", "TRABALHO", "educacao"),
+                            ("decidir-wlf.com.br", "TRABALHO", "outros")):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
+                               "VALUES (%s, %s, %s, now(), 5) RETURNING id", (n, cls, cat)).fetchone()["id"]
+        listas_ia.salvar(c, ids["banco-wlf.com.br"], "wl:financas", 0.95, "banco digital", "Banco X", "local", 2)
+        listas_ia.salvar(c, ids["escola-wlf.com.br"], "wl:educacao", 0.9, "escola", "Escola Y", "online:gemini", 4)
+        c.execute("UPDATE domains SET online_resp = %s WHERE id = %s", (Jsonb({"classificacao": "TRABALHO", "reconhecido": True,
+                  "categoria": "educacao", "_meta": {"antes": {"lista": "wl:educacao", "confianca": 0.95, "classificacao": "TRABALHO"}}}),
+                  ids["escola-wlf.com.br"]))
+        listas_ia.aplicar(c)
+        wl = {r["domain"]: r for r in c.execute("SELECT domain, category, publicar, added_by FROM whitelist_domains WHERE domain LIKE '%%-wlf.com.br'")}
+        assert wl["banco-wlf.com.br"]["category"] == "financas" and not wl["banco-wlf.com.br"]["publicar"], wl
+        assert wl["banco-wlf.com.br"]["added_by"] == "IA local (fase 2)"
+        assert wl["escola-wlf.com.br"]["category"] == "educacao" and not wl["escola-wlf.com.br"]["publicar"]
+        whitelist.aplicar(c)   # dois modelos online de acordo (TRABALHO, whitelist): passa a valer no DNS
+        pub = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, publicar FROM whitelist_domains WHERE domain LIKE '%%-wlf.com.br'")}
+        assert pub == {"banco-wlf.com.br": False, "escola-wlf.com.br": True}, pub
+        assert "banco-wlf.com.br" not in whitelist.dominios(c, "financas") and "escola-wlf.com.br" in whitelist.dominios(c, "educacao")
+        ev = c.execute("SELECT detail, origem FROM ai_events WHERE kind = 'aprovado' AND name = 'banco-wlf.com.br'").fetchone()
+        assert ev["origem"] == "f2:local" and ev["detail"].startswith("wl:financas|Bancos"), ev
+        # Decisão Humana: aprovar a sugestão "wl:..." libera na whitelist (publicada) e registra a decisão
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'decidir-wlf.com.br', 'IA com dúvida (nenhuma)')")
+        listas_ia.salvar(c, ids["decidir-wlf.com.br"], "wl:logistica", 0.6, "transportadora", "Transp Z", "online:gemini", 4)
+    r = env.post("/listas-aprovar", json={"domains": ["decidir-wlf.com.br"], "de": "para_revisar", "by": "tec@2d"}, headers=H).json()
+    assert r["liberados"] == {"logistica": ["decidir-wlf.com.br"]}, r
+    # pessoa liberando noutra categoria: muda de categoria (uma só) e fica publicado
+    assert env.post("/whitelist/rh_beneficios", json={"domains": ["banco-wlf.com.br"], "by": "tec@2d"}, headers=H).status_code == 200
+    with db.conn() as c:
+        wl = {(r["domain"], r["category"]): r["publicar"] for r in c.execute("SELECT domain, category, publicar FROM whitelist_domains WHERE domain LIKE '%%-wlf.com.br'")}
+        g = c.execute("SELECT status FROM global_reviews g JOIN domains d ON d.id = g.domain_id WHERE d.name = 'decidir-wlf.com.br'").fetchone()
+        rev = c.execute("SELECT 1 FROM category_lists WHERE category = 'para_revisar' AND domain = 'decidir-wlf.com.br'").fetchone()
+    assert wl[("decidir-wlf.com.br", "logistica")] is True and not rev and g["status"] == "allowed", (wl, g)
+    assert ("banco-wlf.com.br", "financas") not in wl and wl[("banco-wlf.com.br", "rh_beneficios")] is True, wl
+
+
+def test_coletor_conta_respostas_sem_ip():
+    """Pelo log do Technitium: só consulta A não bloqueada conta; sem IP = NXDOMAIN, SERVFAIL, REFUSED ou NoError vazio."""
+    from dnsanalyzer.collector import sem_ip
+    assert sem_ip({"qtype": "A", "responseType": "Recursive", "rcode": "NoError", "answer": ""}) == (True, True)   # hbgamesnm.com
+    assert sem_ip({"qtype": "A", "responseType": "Recursive", "rcode": "NoError", "answer": "1.2.3.4"}) == (True, False)
+    assert sem_ip({"qtype": "A", "responseType": "Recursive", "rcode": "ServerFailure", "answer": ""}) == (True, True)
+    assert sem_ip({"qtype": "AAAA", "responseType": "Recursive", "rcode": "NoError", "answer": ""}) == (False, False), "sem IPv6 é normal"
+    assert sem_ip({"qtype": "A", "responseType": "Blocked", "rcode": "NoError", "answer": "0.0.0.0"}) == (False, False)

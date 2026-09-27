@@ -16,7 +16,7 @@ import time
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from . import catalog, corporate, db, eventos, listas
+from . import catalog, corporate, db, eventos, listas, whitelist
 from .config import settings
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
 
@@ -53,19 +53,34 @@ LISTAS_IA = {
 }
 NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
+# destino de quem é liberado: uma whitelist por categoria ("wl:financas"); todo site vai p/ alguma fila
+WL = {f"wl:{k}": v for k, v in whitelist.DESCRICOES.items()}
+
+
+def e_wl(lista: str | None) -> bool:
+    return bool(lista) and lista.startswith("wl:") and lista[3:] in whitelist.CATEGORIAS
 # o site precisa ser coerente com a classificação principal p/ entrar sozinho (senão: Para revisar)
 _EXIGE_NAO_TRABALHO = {"vpn_proxy", "adulto", "apostas", "jogos", "redes_sociais", "streaming", "publicidade", "pirataria",
                        "noticias", "adware", "cripto_trading"}   # site TRABALHO nessas = contradição -> revisão (Compras conta como trabalho)
 
-SYSTEM = """Você organiza sites em LISTAS de filtro de DNS para empresas brasileiras.
-A lista diz O QUE O SITE É — não se ele é de trabalho (cada empresa escolhe depois quais listas bloqueia).
+SYSTEM = """Você organiza sites em LISTAS de filtro de DNS para empresas brasileiras. Todo site vai para UMA lista:
+uma LISTA DE BLOQUEIO (o que o site é — cada empresa escolhe depois quais bloqueia) ou, se não é de nenhuma delas, uma
+WHITELIST (sites liberados), na categoria que melhor o descreve.
 Domínios técnicos de um serviço (CDN, API, imagens, apps) vão para a lista do serviço (ex.: fbcdn.net = redes_sociais, ytimg.com = streaming, whatsapp.net = mensageiros).
-Se o site não é nenhuma destas coisas (ferramenta de trabalho, banco, governo, ERP, fornecedor, fabricante, sistema, infraestrutura técnica, educação, saúde), a lista é "nenhuma".
 
-Listas:
+Listas de bloqueio:
 {listas}
 
-"confianca": 1.0 só quando você sabe exatamente que serviço é e ele se encaixa claramente na lista; 0.7 se é provável; 0.4 ou menos se está chutando. Não invente: se as informações não bastam, confiança baixa.
+Whitelists (sites liberados):
+{whitelists}
+
+Atenção a estes erros comuns:
+- Domínio que IMITA uma marca famosa com letras trocadas, dobradas ou erro de digitação (ffacebook, feceboock, g00gle, paypa1) e que NÃO é o domínio oficial dela é golpe: "ameaca" — nunca a lista da marca imitada. Pista: marca famosa fora do top 1M de popularidade.
+- Quem BLOQUEIA anúncios, rastreadores ou ameaças (AdGuard, uBlock, Adblock Plus, antivírus, VPN corporativa) é ferramenta de segurança: "wl:seguranca" — não é publicidade nem adware (só o DNS público da AdGuard é doh_dns).
+- SDK e plataforma técnica: analytics de marketing, atribuição e anúncios de apps (app-measurement, branch.io, AppsFlyer, SDK de anúncios) = "publicidade"; logs/telemetria técnica e APIs = "wl:infraestrutura"; voz e vídeo em tempo real, login, pagamentos, notificações para apps = "wl:desenvolvimento", mesmo que o site fale em IA ou chat. "ia_chatbots" é só o assistente de IA que a pessoa usa.
+- Placar, resultados e estatísticas esportivas = "noticias"; "apostas" só quando o site oferece apostar.
+
+"confianca": 1.0 SÓ para o site oficial de um serviço que você conhece pelo nome e que se encaixa claramente na lista; se você deduz pelo nome do domínio, pelo WHOIS ou por resultados de busca, no máximo 0.7; 0.4 ou menos se está chutando.
 Responda só o JSON, em português, numa linha."""
 
 
@@ -79,9 +94,9 @@ class ListaResult(BaseModel):
 def _schema() -> dict:
     return {"type": "object",
             "properties": {"servico": {"type": "string", "maxLength": 60},
-                           "lista": {"type": "string", "enum": [*LISTAS_IA, NENHUMA]},
+                           "lista": {"type": "string", "enum": [*LISTAS_IA, *WL]},
                            "confianca": {"type": "number", "minimum": 0, "maximum": 1},
-                           "motivo": {"type": "string", "maxLength": 80}},
+                           "motivo": {"type": "string", "maxLength": 160}},
             "required": ["servico", "lista", "confianca", "motivo"]}
 
 
@@ -99,17 +114,19 @@ def _contexto(d: dict) -> str:
     for e in d.get("evidence") or []:
         if e.get("kind") in ("catalog", "site", "websearch", "whois", "wikidata", "cert", "platform", "ti"):
             linhas.append(f"- {e.get('text', '')[:260]}")
-    return "\n".join(linhas[:14])
+    r = d.get("popularity_rank")
+    return "\n".join(linhas[:14] + ["Popularidade: " + (f"top {r} no ranking Tranco" if r else "fora do top 1M (pouco acessado no mundo)")])
 
 
 def perguntar(client: OllamaClient, d: dict) -> tuple[ListaResult, dict]:
-    listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items()) + f"\n- {NENHUMA}: não é nenhuma das anteriores"
+    listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
+    wls = "\n".join(f"- {k}: {v}" for k, v in WL.items())
     options = {"temperature": 0, "seed": 42, "num_ctx": client.num_ctx, "num_predict": 160}
     if client.num_thread:
         options["num_thread"] = client.num_thread
     payload = {"model": client.model, "stream": False, "think": False, "keep_alive": client.keep_alive,
                "format": _schema(), "options": options,
-               "messages": [{"role": "system", "content": SYSTEM.format(listas=listas)},
+               "messages": [{"role": "system", "content": SYSTEM.format(listas=listas, whitelists=wls)},
                             {"role": "user", "content": _contexto(d) + "\n\nA qual lista este site pertence? /no_think"}]}
     t0 = time.monotonic()
     try:
@@ -124,7 +141,7 @@ def perguntar(client: OllamaClient, d: dict) -> tuple[ListaResult, dict]:
         res = ListaResult.model_validate(json.loads(content))
     except (json.JSONDecodeError, ValidationError) as e:
         raise LLMBadOutput(f"{e}: {content[:300]}") from e
-    if res.lista not in LISTAS_IA and res.lista != NENHUMA:
+    if res.lista not in LISTAS_IA and res.lista != NENHUMA and not e_wl(res.lista):
         raise LLMBadOutput(f"lista inválida: {res.lista}")
     return res, {"model": client.model, "seconds": round(time.monotonic() - t0, 1), "extra": client.extra}
 
@@ -142,7 +159,7 @@ def _reservar(c) -> dict | None:
         "RETURNING " + _COLUNAS).fetchone()
 
 
-_COLUNAS = "id, name, topic, classification, category, corp_reason, reasons, evidence, whois_at, web_search_at"
+_COLUNAS = "id, name, topic, classification, category, corp_reason, reasons, evidence, whois_at, web_search_at, popularity_rank"
 _FASE_TXT = {1: "fase 1 · IA local", 2: "fase 2 · WHOIS + IA local", 3: "fase 3 · busca na web + IA local"}
 
 
@@ -207,16 +224,18 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
     eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), meta.get("seconds"),
                       detail=f"{fase_n}|lista {res.lista} {float(res.confianca or 0) * 100:.0f}%"
                       + (f" · {res.servico}" if res.servico else "") + (f" — {res.motivo}" if res.motivo else "")
-                      + ((" · confiança alta: a IA local decide" if res.lista == NENHUMA else
+                      + ((" · confiança alta: a IA local decide" if res.lista == NENHUMA or e_wl(res.lista) else
                           " · confiança alta: vai p/ a IA online validar (fase 4)") if alta else
                          f" · confiança baixa: segue p/ a fase {prox}" + (" (IA online)" if prox == 4 else "")))
     return "done"
 
 
 def salvar(c, domain_id: int, lista: str, conf: float, motivo: str, servico: str, fonte: str, fase: int | None = None) -> None:
-    c.execute("UPDATE domains SET lista_ia = %s, lista_conf = %s, lista_motivo = %s, lista_servico = %s, "
+    wl = lista[3:] if e_wl(lista) else None
+    c.execute("UPDATE domains SET lista_ia = %s, lista_wl = %s, lista_conf = %s, lista_motivo = %s, lista_servico = %s, "
               "lista_fonte = %s, lista_fase = %s, lista_at = now(), lista_claimed_at = NULL WHERE id = %s",
-              (None if lista == NENHUMA else lista, conf, (motivo or "")[:300], (servico or "")[:200], fonte, fase, domain_id))
+              (None if lista == NENHUMA or wl else lista, wl, conf, (motivo or "")[:500], (servico or "")[:200], fonte, fase,
+               domain_id))
 
 
 def origem(r: dict) -> str:
@@ -321,7 +340,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
-        " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.lista_fase, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
+        " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.lista_fase, d.lista_wl, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
         " d.online_resp->'_meta'->'antes' AS antes, coalesce((d.online_resp->'_meta'->>'nivel_reforco')::boolean, false) AS reforco, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
@@ -334,6 +353,20 @@ def aplicar(c, limite: int = 3000) -> dict:
     out = {"direto": [], "revisar": [], "resolvidos": [], "online": []}
     from . import online as _online
     online_ok = _online.habilitado()
+
+    def liberar(r, cls):
+        """Decisão final de liberar: o site entra numa whitelist (Domínios liberados), na categoria escolhida pela IA.
+        Não é publicado no DNS (fora de listas de bloqueio já está liberado; a whitelist vence qualquer bloqueio em
+        todas as empresas) — whitelist.aplicar publica o que tiver pessoa, catálogo ou dois modelos online."""
+        if c.execute("SELECT 1 FROM whitelist_domains WHERE domain = %s", (r["name"],)).fetchone():
+            return
+        on = (r["lista_fonte"] or "").startswith("online")
+        wl = r["lista_wl"] or whitelist._categoria(r["cat_online"] if on else r["category"], cls)
+        por = "IA online" if on else f"IA local (fase {r['lista_fase']})" if r["lista_fase"] else "IA local"
+        listas.contexto(c, por, f"liberado: {whitelist.CATEGORIAS[wl]} · {_fonte(r)}")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES (%s, %s, %s, false) "
+                  "ON CONFLICT DO NOTHING", (wl, r["name"], por))
+        eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{whitelist.CATEGORIAS[wl]} · {_fonte(r)}", r["id"], origem(r))
 
     def para_decisoes(r, cat, motivo=None):
         listas.contexto(c, DUVIDA_BY, motivo or "nenhuma fase teve certeza")
@@ -368,7 +401,7 @@ def aplicar(c, limite: int = 3000) -> dict:
             # tirar de uma continua com a validação da IA online: na prova de 27/09 (50 domínios, fases 1-3 x IA online)
             # a IA local acertou 4/4 "liberar", mas 6/8 "bloquear" (typosquat do Facebook -> redes_sociais em vez de
             # ameaça; adguard.com -> adware 100% mesmo com o WHOIS) — o critério do usuário era 100%
-            if certo and not cat and not any(x in em for x in moveis if x != OUTROS):
+            if certo and not cat and not em:
                 local_decide = True
             elif not certo and proxima_fase(r) < 4:
                 c.execute(sem_online, (r["id"],))
@@ -380,7 +413,7 @@ def aplicar(c, limite: int = 3000) -> dict:
         if local_decide:   # avaliado (Aprovados, sem reanálise) e fim da revisão pedida
             c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false, lista_duvida = false WHERE id = %s",
                       (r["id"],))
-            eventos.lista("aprovado", r["name"], None, f"nenhuma lista · {_fonte(r)}", r["id"], origem(r))
+            liberar(r, cls)
             continue
 
         if fixas and (not cat or cat not in em):
@@ -398,8 +431,8 @@ def aplicar(c, limite: int = 3000) -> dict:
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
                 out["resolvidos"].append(r["name"])
                 eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r))
-            elif not em:
-                eventos.lista("aprovado", r["name"], None, f"nenhuma lista · {_fonte(r)}", r["id"], origem(r))
+            if not (set(em) - set(tirar)):   # não sobrou lista de bloqueio: vai p/ a whitelist
+                liberar(r, cls)
             continue
         if online and not certo and not cat and not em and (cls == "NAO_TRABALHO" or r["corp_action"] == "BLOQUEAR"):
             para_decisoes(r, None, "IA online sem certeza: talvez não seja de lista")

@@ -298,18 +298,53 @@ def test_dominios_inexistentes_saem_do_fluxo(api):
         t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
         cl = c.execute("SELECT id FROM clients WHERE tenant_id=%s LIMIT 1", (t,)).fetchone()["id"]
         ids = {}
-        for n, q, nx, ti in (("naoexiste-teste.com", 10, 10, ""), ("existe-teste.com", 10, 1, ""), ("dga-teste.com", 10, 10, "urlhaus")):
+        # (nome, consultas, NXDOMAIN, consultas A, A sem IP, feed) — semip-teste.com = hbgamesnm.com: NoError sem IP
+        for n, q, nx, ipq, semip, ti in (("naoexiste-teste.com", 10, 10, 0, 0, ""), ("existe-teste.com", 10, 1, 5, 1, ""),
+                                         ("dga-teste.com", 10, 10, 0, 0, "urlhaus"), ("semip-teste.com", 10, 0, 6, 6, "")):
             ids[n] = c.execute("INSERT INTO domains (name, classification, ti_signature, llm_pending) VALUES (%s, 'DESCONHECIDO', %s, true) RETURNING id",
                                (n, ti)).fetchone()["id"]
             f = c.execute("INSERT INTO fqdns (name, domain_id) VALUES (%s, %s) RETURNING id", ("x." + n, ids[n])).fetchone()["id"]
-            c.execute("INSERT INTO query_agg (tenant_id, client_id, domain_id, fqdn_id, bucket, queries, blocked, nxdomain, first_seen, last_seen) "
-                      "VALUES (%s,%s,%s,%s,%s,%s,0,%s,%s,%s)", (t, cl, ids[n], f, AGORA, q, nx, AGORA, AGORA))
+            c.execute("INSERT INTO query_agg (tenant_id, client_id, domain_id, fqdn_id, bucket, queries, blocked, nxdomain, ip_q, sem_ip, "
+                      "first_seen, last_seen) VALUES (%s,%s,%s,%s,%s,%s,0,%s,%s,%s,%s,%s)", (t, cl, ids[n], f, AGORA, q, nx, ipq, semip, AGORA, AGORA))
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'naoexiste-teste.com', 'IA com dúvida (x)')")
         r = listas.marcar_inexistentes(c)
         k = {row["name"]: (row["kind"], row["llm_pending"]) for row in c.execute("SELECT name, kind, llm_pending FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
         em = c.execute("SELECT 1 FROM category_lists WHERE domain='naoexiste-teste.com'").fetchone()
-    assert r["inexistentes"] == ["naoexiste-teste.com"] and not em
-    assert k == {"naoexiste-teste.com": ("inexistente", False), "existe-teste.com": ("public", True), "dga-teste.com": ("public", True)}
+    assert sorted(r["inexistentes"]) == ["naoexiste-teste.com", "semip-teste.com"] and not em
+    assert k == {"naoexiste-teste.com": ("inexistente", False), "existe-teste.com": ("public", True), "dga-teste.com": ("public", True),
+                 "semip-teste.com": ("inexistente", False)}
+    with db.conn() as c:   # vão p/ a whitelist "Sem resposta" (Domínios liberados), sem publicar
+        wl = {row["domain"]: row["publicar"] for row in c.execute("SELECT domain, publicar FROM whitelist_domains WHERE category = 'sem_resposta'")}
+        assert wl.get("naoexiste-teste.com") is False and wl.get("semip-teste.com") is False, wl
+        # voltou a resolver (≥ 3 respostas com IP no último dia): sai de "Sem resposta" e volta à fase 1
+        f = c.execute("SELECT id FROM fqdns WHERE name = 'x.semip-teste.com'").fetchone()["id"]
+        c.execute("UPDATE query_agg SET ip_q = ip_q + 5 WHERE fqdn_id = %s", (f,))
+        r2 = listas.marcar_inexistentes(c)
+        d = c.execute("SELECT kind, needs_analysis FROM domains WHERE name = 'semip-teste.com'").fetchone()
+        ainda = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'semip-teste.com'").fetchone()
+    assert "semip-teste.com" in r2["voltaram"] and d["kind"] == "public" and d["needs_analysis"] and not ainda
+
+
+def test_nao_resolve_nem_chega_na_ia(api):
+    """Fase A (regras, antes da IA): domínio novo cujas consultas A voltaram todas sem IP sai do fluxo na hora."""
+    from dnsanalyzer import classifier, db
+    with db.conn() as c:
+        t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
+        cl = c.execute("SELECT id FROM clients WHERE tenant_id=%s LIMIT 1", (t,)).fetchone()["id"]
+        ids = {}
+        for n, ipq, semip in (("novo-semip.com", 2, 2), ("novo-comip.com", 2, 0)):
+            ids[n] = c.execute("INSERT INTO domains (name, kind, needs_analysis, total_queries) VALUES (%s, 'public', true, 2) RETURNING id",
+                               (n,)).fetchone()["id"]
+            f = c.execute("INSERT INTO fqdns (name, domain_id) VALUES (%s, %s) RETURNING id", (n, ids[n])).fetchone()["id"]
+            c.execute("INSERT INTO query_agg (tenant_id, client_id, domain_id, fqdn_id, bucket, queries, blocked, nxdomain, ip_q, sem_ip, "
+                      "first_seen, last_seen) VALUES (%s,%s,%s,%s,%s,%s,0,0,%s,%s,%s,%s)", (t, cl, ids[n], f, AGORA, ipq, ipq, semip, AGORA, AGORA))
+    classifier.phase_a()
+    with db.conn() as c:
+        k = {r["name"]: (r["kind"], r["llm_pending"]) for r in c.execute("SELECT name, kind, llm_pending FROM domains WHERE id = ANY(%s)",
+                                                                         (list(ids.values()),))}
+        wl = c.execute("SELECT category FROM whitelist_domains WHERE domain = 'novo-semip.com'").fetchone()
+    assert k["novo-semip.com"] == ("inexistente", False) and wl and wl["category"] == "sem_resposta", (k, wl)
+    assert k["novo-comip.com"][0] == "public"
 
 
 # ---------------------------------------------------------------- fase 5

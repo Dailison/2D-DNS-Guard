@@ -566,6 +566,15 @@ def listas_lote_dominios():
                 return _json(True, f"{len(doms)} domínio(s) fora da lista {rot[cat]} (decisão: manter liberado)." + _libera_agora(doms, antes))
             _fim_excecao(doms)
             return _json(True, f"{len(doms)} domínio(s) movidos de {rot[cat]} para {', '.join(rot[c] for c in para)}. O DNS atualiza em até 1 h.")
+        if acao == "wl":
+            wl = (d.get("para") or [None])[0]
+            rot_wl = dict(dnslib.CATEGORIAS_WHITELIST)
+            if wl not in rot_wl:
+                return _json(False, "Escolha a whitelist.")
+            antes = _antes(doms)
+            api.post(f"/whitelist/{quote(wl, safe='')}", {"domains": doms, "by": quem})
+            current_app.logger.info("DNS: %s liberou %s na whitelist %s", quem, doms, wl)
+            return _json(True, f"{len(doms)} domínio(s) na whitelist {rot_wl[wl]}." + _libera_agora(doms, antes))
         if acao == "por":
             if not para:
                 return _json(False, "Marque pelo menos uma lista.")

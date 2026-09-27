@@ -168,9 +168,22 @@ def phase_a(limit: int = 2000) -> int:
         rows = c.execute(
             "SELECT * FROM domains WHERE needs_analysis AND NOT locked "
             "ORDER BY total_queries DESC LIMIT %s FOR UPDATE SKIP LOCKED", (limit,)).fetchall()
+        # antes da IA: o log do Technitium diz que o nome não resolve (todas as consultas A sem IP, ou NXDOMAIN)
+        nao_resolve = {r["domain_id"] for r in c.execute(
+            "SELECT domain_id FROM query_agg WHERE domain_id = ANY(%s) AND bucket >= now() - interval '7 days' "
+            "GROUP BY domain_id HAVING (sum(ip_q) >= 1 AND sum(sem_ip) = sum(ip_q)) "
+            " OR (sum(queries) >= 1 AND sum(nxdomain) = sum(queries))", ([r["id"] for r in rows],))}
         for drow in rows:
             dossier = build_dossier(c, drow, with_rdap=False)
             rule = evaluate(dossier)
+            if drow["id"] in nao_resolve and drow["kind"] == "public" and not dossier.get("ti_hits") \
+                    and rule.classification not in ("SUSPEITO", "MALICIOSO"):
+                save(c, drow, dossier, rule, rules_only(rule, False), False, None)
+                c.execute("UPDATE domains SET kind = 'inexistente', llm_pending = false WHERE id = %s", (drow["id"],))
+                listas.sem_resposta(c, [drow["name"]], "não resolve no DNS (log do Technitium): fora da IA")
+                tally["não resolve (Sem resposta)"] += 1
+                n += 1
+                continue
             skip_llm = (not rule.needs_llm) or (cfg.llm_skip_hosting_subdomains and dossier.get("private_suffix"))
             # IA só se for necessária E se as evidências relevantes mudaram desde a última IA
             already = drow["classified_by"] == "llm" and drow["evidence_hash"] == rule.evidence_hash

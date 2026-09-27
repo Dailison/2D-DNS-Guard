@@ -22,6 +22,8 @@
   .dd-ra button{padding:.12rem .4rem;font-size:.78rem;border:1px solid var(--bd);border-radius:6px;background:var(--card);cursor:pointer;line-height:1.3}
   .dd-ra button:hover{border-color:var(--b)} .dd-ra .blk{color:#b91c1c} .dd-ra .lib{color:#15803d}
   a.dd-hist{cursor:pointer}
+  .dd-org{display:inline-block;font-size:.7rem;font-weight:600;padding:.05rem .4rem;border-radius:.6rem;white-space:nowrap}
+  .dd-org.lo{background:#e0f2fe;color:#075985} .dd-org.on{background:#dcfce7;color:#166534}
   .dd-toast{position:fixed;right:18px;bottom:18px;max-width:440px;padding:.7rem .9rem;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);
             font-size:.88rem;z-index:1000;opacity:0;transform:translateY(12px);transition:.2s;pointer-events:none;background:#14532d;color:#fff}
   .dd-toast.erro{background:#991b1b} .dd-toast.on{opacity:1;transform:none;pointer-events:auto}
@@ -49,12 +51,12 @@
   </select></div>
   <div><label>Sugestão da IA</label><select name="sug">
     <option value="">todas</option>
-    {% for k, n in det.facetas.get('sugestao', {})|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.sug }}>{{ {'_nenhuma': 'nenhuma lista', '_sem': 'ainda não vista'}.get(k) or LISTAS_ROT.get(k, k) }} ({{ n }})</option>{% endfor %}
+    {% for k, n in det.facetas.get('sugestao', {})|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.sug }}>{{ {'_nenhuma': 'nenhuma lista', '_sem': 'ainda não vista'}.get(k) or LISTAS_ROT.get(k) or ('✅ ' ~ WL_ROT.get(k[3:], k)) }} ({{ n }})</option>{% endfor %}
   </select></div>
-  <div><label>Recomendação</label><select name="rec">
+  {% if not dec %}<div><label>Recomendação</label><select name="rec">
     <option value="">todas</option>
     {% for k in ('BLOQUEAR', 'LIBERAR', 'REVISAR', '_sem') if k in det.facetas.get('recomendacao', {}) or k == fd.rec %}<option value="{{ k }}" {{ 'selected' if k == fd.rec }}>{{ {'BLOQUEAR': '⛔ Bloquear', 'LIBERAR': '✅ Liberar', 'REVISAR': '👀 Revisar', '_sem': 'sem recomendação'}[k] }} ({{ det.facetas.get('recomendacao', {}).get(k, 0) }})</option>{% endfor %}
-  </select></div>
+  </select></div>{% endif %}
   <div><label>Revisão</label><select name="revisao">
     <option value="">todas</option>
     {% for k in ('ia', 'manual', 'pendente') %}<option value="{{ k }}" {{ 'selected' if k == fd.revisao }}>{{ REV[k] }} ({{ det.facetas.revisao.get(k, 0) }})</option>{% endfor %}
@@ -72,9 +74,10 @@
   <label class="chk" style="margin:0;font-weight:400"><input type="checkbox" id="ddTodos"> <span>todos da página</span></label>
   <span class="mut" id="ddN" style="font-size:.85rem">0 selecionado(s)</span>
   {% if lst %}
-  <button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" data-dd="aprovar" title="cada domínio vai para a lista que a IA sugeriu (sugestão 'nenhuma' = sai desta lista)">✓ Aprovar sugestão da IA</button>
-  <button type="button" class="mini {{ 'danger' if dec else 'primary' }}" data-dd="mover">{{ '⛔ Pôr em lista…' if dec else 'Mover para…' }}</button>
-  <button type="button" class="mini {{ 'ok' if dec else 'danger' }}" data-dd="tirar"{% if dec %} style="background:#16a34a;color:#fff;border:0"{% endif %}>{{ '✅ Manter liberado' if dec else '✕ Tirar da lista' }}</button>
+  <button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" data-dd="aprovar" title="cada domínio vai para a lista que a IA recomendou (bloqueio ou whitelist)">{{ '✓ Aprovar parecer da IA' if dec else '✓ Aprovar sugestão da IA' }}</button>
+  <button type="button" class="mini {{ 'danger' if dec else 'primary' }}" data-dd="mover">{{ '⛔ Blocklist…' if dec else 'Mover para…' }}</button>
+  {% if dec %}<button type="button" class="mini ok" data-dd="wl" style="background:#16a34a;color:#fff;border:0">✅ Whitelist…</button>
+  {% else %}<button type="button" class="mini danger" data-dd="tirar">✕ Tirar da lista</button>{% endif %}
   {% elif wlm %}
   <button type="button" class="mini danger" data-dd="tirar_wl">✕ Tirar da whitelist</button>
   <button type="button" class="mini danger" data-dd="por">⛔ Pôr em lista de bloqueio…</button>
@@ -86,7 +89,7 @@
 </div>
 
 <div class="dd-tw"><table class="dd-t">
-  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>Ações</th><th>IA</th><th>Sugestão da IA</th><th>Recomendação</th><th>Revisão</th><th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if wlm %}<th>Entrou na whitelist</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th>{% endif %}</tr></thead>
+  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>Ações</th><th>IA</th>{% if dec %}<th>Parecer da IA</th>{% else %}<th>Sugestão da IA</th><th>Recomendação</th>{% endif %}<th>Revisão</th><th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if wlm %}<th>Entrou na whitelist</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th>{% endif %}</tr></thead>
   <tbody>
   {% for i in det['items'] %}
     {% set c = CLS.get(i.classification) %}
@@ -96,9 +99,10 @@
       <td><a class="dd-hist" data-dom="{{ i.domain }}" href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}" title="clique: histórico · Ctrl+clique: página completa">{{ i.domain }}</a></td>
       <td><div class="dd-ra">
         {% if lst %}
-          {% if tem_sug and i.lista_ia != cat %}<button type="button" class="lib" data-ra="aprovar" data-dom="{{ i.domain }}" title="aprovar a sugestão da IA: {{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else 'nenhuma lista (sai desta)' }}">✓</button>{% endif %}
-          <button type="button" class="blk" data-ra="mover" data-dom="{{ i.domain }}" title="{{ 'pôr em lista de bloqueio' if dec else 'mover para outra lista' }}">⛔</button>
-          <button type="button" class="lib" data-ra="tirar" data-dom="{{ i.domain }}" title="{{ 'manter liberado' if dec else 'tirar desta lista (manter liberado)' }}">✅</button>
+          {% if tem_sug and i.lista_ia != cat %}<button type="button" class="lib" data-ra="aprovar" data-dom="{{ i.domain }}" title="aprovar o parecer da IA: {{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else ('whitelist ' ~ WL_ROT.get(i.lista_wl, i.lista_wl)) if i.lista_wl else 'nenhuma lista (sai desta)' }}">✓</button>{% endif %}
+          <button type="button" class="blk" data-ra="mover" data-dom="{{ i.domain }}" title="{{ 'blocklist' if dec else 'mover para outra lista' }}">⛔</button>
+          {% if dec %}<button type="button" class="lib" data-ra="wl" data-dom="{{ i.domain }}" title="whitelist">✅</button>
+          {% else %}<button type="button" class="lib" data-ra="tirar" data-dom="{{ i.domain }}" title="tirar desta lista (manter liberado)">✅</button>{% endif %}
         {% elif wlm %}
           <button type="button" class="blk" data-ra="tirar_wl" data-dom="{{ i.domain }}" title="tirar da whitelist">✕</button>
           <button type="button" class="blk" data-ra="por" data-dom="{{ i.domain }}" title="pôr em lista de bloqueio">⛔</button>
@@ -110,15 +114,26 @@
       <td>{% if c %}<span class="dd-cls" style="background:{{ c[1] }};color:{{ c[2] }}">{{ c[0] }}</span>{% else %}<span class="mut">—</span>{% endif %}
         {% if i.cat_ia %}<div class="dd-sub">{{ scats.get(i.cat_ia, i.cat_ia) }}{% if i.confidence %} · {{ (i.confidence * 100)|round|int }}%{% endif %}</div>{% endif %}
         {% if cat == 'ameaca' %}<div class="dd-sub">{% if i.ti_signature %}🛡 nos feeds: {{ i.ti_signature }}{% elif i.ti_cleared_at %}saiu dos feeds em {{ i.ti_cleared_at|dt_sp('%d/%m/%y') }}{% else %}fora dos feeds{% endif %}</div>{% endif %}</td>
-      <td style="font-size:.84rem;max-width:16rem">
+      {% if dec %}
+      {% set on = (i.lista_fonte or '').startswith('online') %}{% set fz = 4 if on else i.lista_fase %}
+      <td style="font-size:.84rem;min-width:18rem;max-width:30rem">
         {% if tem_sug %}
-          <b>{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else 'nenhuma lista' }}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}
+          <span class="dd-org {{ 'on' if on else 'lo' }}">{{ ('Fase %s · ' % fz) if fz else '' }}{{ 'IA online' if on else 'IA local' }}{{ (' · ' ~ i.on_modelo) if on and i.on_modelo else '' }}</span>
+          → <b>{% if i.lista_ia %}⛔ {{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) }}{% elif i.lista_wl %}✅ {{ WL_ROT.get(i.lista_wl, i.lista_wl) }}{% else %}nenhuma lista{% endif %}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}
+          {% if i.lista_servico %}<div class="dd-sub">{{ i.lista_servico }}{% if on and i.on_cls %} · {{ i.on_cls }}{% endif %}</div>{% endif %}
+          {% if i.lista_motivo %}<div style="font-size:.8rem;margin-top:.15rem">{{ i.lista_motivo }}</div>{% endif %}
+        {% else %}<span class="mut">—</span>{% endif %}
+      </td>
+      {% else %}      <td style="font-size:.84rem;max-width:16rem">
+        {% if tem_sug %}
+          <b>{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else ('✅ ' ~ WL_ROT.get(i.lista_wl, i.lista_wl)) if i.lista_wl else 'nenhuma lista' }}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}
           {% if i.lista_ia and lst and i.lista_ia == cat %} <span class="dd-sub">✓ esta</span>{% endif %}
           <div class="dd-sub">{{ i.lista_servico or '' }}{% if i.lista_motivo %} — {{ i.lista_motivo|truncate(90) }}{% endif %}{% if (i.lista_fonte or '').startswith('online') %} · fase 4 (IA online){% endif %}</div>
         {% else %}<span class="mut">—</span>{% endif %}
       </td>
       <td style="font-size:.84rem;max-width:20rem">{{ REC.get(i.corp_action, i.corp_action or '—') }}
         {% if i.corp_reason %}<div class="dd-sub">{{ i.corp_reason|truncate(140) }}</div>{% endif %}</td>
+      {% endif %}
       <td style="font-size:.84rem">
         <b>{{ REV[i.revisao] }}</b>
         {% if i.revisao == 'manual' %}
@@ -134,7 +149,7 @@
       <td class="num">{{ i.total_queries or 0 }}</td>
       {% if dec %}<td style="font-size:.82rem">{% for e in (i.empresas or [])[:3] %}<a href="{{ url_for('analise.dominio', nome=i.domain, t=e.id) }}">{{ e.name }}</a>{{ ', ' if not loop.last }}{% else %}<span class="mut">nenhuma (nunca acessado)</span>{% endfor %}{% if (i.empresas or [])|length > 3 %} <span class="dd-sub">+{{ i.empresas|length - 3 }}</span>{% endif %}</td>{% endif %}
       {% if lst or wlm %}
-      <td class="dd-sub" style="white-space:nowrap">{{ i.added_by or '—' }}<br>{{ i.added_at|dt_sp('%d/%m/%y %H:%M') }}</td>
+      <td class="dd-sub" style="white-space:nowrap">{{ i.added_by or '—' }}<br>{{ i.added_at|dt_sp('%d/%m/%y %H:%M') }}{% if wlm %}<br>{{ '🌐 no DNS' if i.publicar else 'só na lista' }}{% endif %}</td>
       {% endif %}
     </tr>
   {% else %}
@@ -164,6 +179,13 @@
     <div style="display:flex;gap:.5rem"><button type="button" onclick="document.getElementById('dlgDD').close()">Cancelar</button>
       <button type="button" class="danger" id="ddOk">Confirmar</button></div>
   </div>
+</dialog>
+<dialog id="dlgWL" class="dlg" style="max-width:480px;width:calc(100vw - 32px)">
+  <h2 style="margin:0 0 .5rem" id="wlTit">Whitelist</h2>
+  <select id="wlCat">{% for k, v in WL_ROT.items() if k not in ('essenciais', 'sem_resposta') %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
+    <button type="button" onclick="document.getElementById('dlgWL').close()">Cancelar</button>
+    <button type="button" class="primary" id="wlOk">Confirmar</button></div>
 </dialog>
 <div id="ddToast" class="dd-toast" role="status"></div>
 <aside id="histPainel" aria-label="Histórico do domínio">
@@ -225,12 +247,15 @@
     const n = doms.length, d = info(), DEC = !!d.dec, nomeCat = d.nomecat, q = n === 1 ? doms[0] : n + " domínio(s)";
     if (!n) { toast("Selecione pelo menos um domínio.", false); return; }
     if (acao === "tirar") {
-      if (confirm(DEC ? `Manter liberado ${q}? Sai de Decisões sem entrar em nenhuma lista (decisão registrada).`
-                      : `Tirar ${q} da lista ${nomeCat}? Fica registrado como “manter liberado” e vale na hora.`)) envia("tirar", [], doms);
+      if (confirm(`Tirar ${q} da lista ${nomeCat}? Fica registrado como “manter liberado” e vale na hora.`)) envia("tirar", [], doms);
     } else if (acao === "tirar_wl") {
       if (confirm(`Tirar ${q} da whitelist? Voltam a valer as listas de bloqueio (o DNS atualiza em até 1 h).`)) envia("tirar_wl", [], doms);
     } else if (acao === "aprovar") {
-      if (n === 1 || confirm(`Aprovar a sugestão da IA para ${q}? Cada um vai para a lista sugerida (sugestão "nenhuma" = sai de ${nomeCat}).`)) envia("aprovar", [], doms);
+      if (n === 1 || confirm(`Aprovar o parecer da IA para ${q}? Cada um vai para a lista recomendada (bloqueio ou whitelist).`)) envia("aprovar", [], doms);
+    } else if (acao === "wl") {
+      acaoDlg = acao; domsDlg = doms;
+      document.getElementById("wlTit").textContent = `Whitelist para ${q}`;
+      document.getElementById("dlgWL").showModal();
     } else if (acao === "reanalisar") {
       if (n === 1 || confirm(`Pedir nova análise da IA para ${q}?`)) envia("reanalisar", [], doms);
     } else {
@@ -317,6 +342,9 @@
     if (e.target.id === "hpIrmaos") { irmaos(e.target.dataset.dom); return; }
     if (e.target.id === "hpIrmTodos") { document.querySelectorAll(".hpIrm").forEach(i => { i.checked = e.target.checked; }); return; }
     if (e.target.id === "hpIrmPor") { pedir("por", [...document.querySelectorAll(".hpIrm:checked")].map(i => i.value)); return; }
+    if (e.target.id === "wlOk") {
+      document.getElementById("dlgWL").close(); envia("wl", [document.getElementById("wlCat").value], domsDlg); return;
+    }
     if (e.target.id === "ddOk") {
       const para = [...document.querySelectorAll("#dlgDD .ddL:checked")].map(c => c.value);
       if (!para.length) { toast("Marque pelo menos uma lista.", false); return; }

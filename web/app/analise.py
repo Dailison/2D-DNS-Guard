@@ -200,13 +200,7 @@ def decisoes():
     if request.headers.get("X-Partial"):
         return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="decisoes", det=det, fd=fd, cat="para_revisar",
                                categorias=dnslib.CATEGORIAS_LISTA, scats=_rotulos_cat(), pag_url=_pag_url, tid=ctx["tid"])
-    fases = {}
-    try:
-        ev = api.get("/ai/events", limit=1)
-        fases = ev.get("queue") or {}
-    except AnalyzerError:
-        pass
-    return render_template("admin/analise/decisoes.html", det=det, fd=fd, cat="para_revisar", fases=fases,
+    return render_template("admin/analise/decisoes.html", det=det, fd=fd, cat="para_revisar",
                            categorias=dnslib.CATEGORIAS_LISTA, scats=_rotulos_cat(), pag_url=_pag_url,
                            aba="decisoes", **ctx)
 

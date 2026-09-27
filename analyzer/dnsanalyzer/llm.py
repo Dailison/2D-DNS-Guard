@@ -47,6 +47,10 @@ class LLMResult(BaseModel):
     recommended_action: str
     corp_action: str = ""        # BLOQUEAR | LIBERAR | REVISAR (ambiente corporativo)
     corp_reason: str = Field(default="", max_length=300)
+    # etapa local única (27/09): a mesma pergunta já diz a lista (bloqueio ou wl:...) — vazio na classificação antiga
+    lista: str = ""
+    lista_confianca: float = Field(default=0.0, ge=0, le=1)
+    lista_motivo: str = Field(default="", max_length=300)
 
     @field_validator("corp_action")
     @classmethod
@@ -63,10 +67,15 @@ class LLMResult(BaseModel):
         return v
 
 
-def json_schema(categories: list[str], site_categories: list[str] | None = None) -> dict:
+def json_schema(categories: list[str], site_categories: list[str] | None = None, listas: list[str] | None = None) -> dict:
     # Limites de tamanho = menos tokens gerados (a geração em CPU é o gargalo).
     # A ORDEM importa: o modelo gera os campos nesta ordem, então "service" (o que é o
     # serviço) vem antes da decisão — um raciocínio curto que melhora a consistência.
+    extra, req = {}, []
+    if listas:   # etapa local única: a lista vem na mesma resposta (depois da classificação)
+        extra = {"lista": {"type": "string", "enum": listas}, "lista_confianca": {"type": "number", "minimum": 0, "maximum": 1},
+                 "lista_motivo": {"type": "string", "maxLength": 160}}
+        req = ["lista", "lista_confianca", "lista_motivo"]
     return {
         "type": "object",
         "properties": {
@@ -88,9 +97,10 @@ def json_schema(categories: list[str], site_categories: list[str] | None = None)
             "recommended_action": {"type": "string", "enum": ACTIONS},
             "corp_action": {"type": "string", "enum": CORP_ACTIONS},
             "corp_reason": {"type": "string", "maxLength": 80},
+            **extra,
         },
         "required": ["service", "recognized", "category", "classification", "topic", "risk_score", "work_score",
-                     "confidence", "reasons", "recommended_action", "corp_action", "corp_reason"],
+                     "confidence", "reasons", "recommended_action", "corp_action", "corp_reason"] + req,
     }
 
 
@@ -145,14 +155,16 @@ Responda apenas com o JSON pedido, em português, COMPACTO (numa linha, sem inde
 
 
 def build_messages(dossier_name: str, evidence: list[dict], categories: list[dict],
-                   site_categories: list[dict] | None = None) -> list[dict]:
+                   site_categories: list[dict] | None = None, regras_lista: str | None = None) -> list[dict]:
     cats = "\n".join(f"- {c['code']}: {c['description']}" for c in categories)
     scats = "\n".join(f"- {c['code']}: {c['label']} ({c['description']})" for c in (site_categories or []))
     lines = [f"{e['id']}: {e['text']}" for e in evidence]
     user = (f"Domínio a classificar: {dossier_name}\n\nEvidências:\n" + "\n".join(lines) +
             "\n\nClassifique o domínio seguindo as regras. /no_think")
-    return [{"role": "system", "content": SYSTEM_PROMPT.format(categories=cats, site_categories=scats)},
-            {"role": "user", "content": user}]
+    sistema = SYSTEM_PROMPT.format(categories=cats, site_categories=scats)
+    if regras_lista:   # (fixo p/ todo domínio: o Ollama reaproveita esse começo da pergunta entre um domínio e outro)
+        sistema += "\n\n" + regras_lista
+    return [{"role": "system", "content": sistema}, {"role": "user", "content": user}]
 
 
 class OllamaClient:
@@ -180,16 +192,18 @@ class OllamaClient:
             return False, f"Ollama indisponível: {e}"
 
     def classify(self, name: str, evidence: list[dict], categories: list[dict],
-                 site_categories: list[dict] | None = None) -> tuple[LLMResult, dict]:
+                 site_categories: list[dict] | None = None, regras_lista: str | None = None,
+                 listas: list[str] | None = None) -> tuple[LLMResult, dict]:
+        """regras_lista/listas: etapa local única — a mesma resposta traz a lista (lista, lista_confianca, lista_motivo)."""
         codes = [c["code"] for c in categories]
         scodes = [c["code"] for c in (site_categories or [])] or None
-        options = {"temperature": 0, "seed": 42, "num_ctx": self.num_ctx, "num_predict": 480}
+        options = {"temperature": 0, "seed": 42, "num_ctx": self.num_ctx, "num_predict": 640 if listas else 480}
         if self.num_thread:
             options["num_thread"] = self.num_thread
         payload = {
             "model": self.model,
-            "messages": build_messages(name, evidence, categories, site_categories),
-            "format": json_schema(codes, scodes),
+            "messages": build_messages(name, evidence, categories, site_categories, regras_lista if listas else None),
+            "format": json_schema(codes, scodes, listas),
             "stream": False,
             "think": False,
             "keep_alive": self.keep_alive,

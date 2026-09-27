@@ -1104,3 +1104,44 @@ def test_ia_local_nao_poe_sozinha_em_nao_identificados(env, monkeypatch):
         ni = c.execute("SELECT count(*) AS n FROM category_lists WHERE category = 'nao_identificado' AND domain = 'q1z7p.com'").fetchone()["n"]
         segue = c.execute("SELECT lista_segue FROM domains WHERE id = %s", (did,)).fetchone()["lista_segue"]
     assert ni == 0 and segue
+
+
+def test_etapa_local_unica(env, monkeypatch):
+    """LOCAL_ETAPA_UNICA (27/09): a fase 1 junta site + busca + WHOIS numa pergunta que já diz a lista; com certeza a IA
+    local decide, sem certeza vai direto p/ a IA online (fases 2 e 3 já feitas)."""
+    from dnsanalyzer import classifier, config, db
+    from dnsanalyzer.llm import LLMResult
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "local_etapa_unica", True)
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    pedidos, real = [], classifier.build_dossier
+    monkeypatch.setattr(classifier, "build_dossier", lambda c, drow, **kw: pedidos.append(kw) or real(c, drow))
+
+    class IA:
+        model, extra = "gemma4:26b", False
+
+        def __init__(self, lista, conf):
+            self.lista, self.conf, self.listas = lista, conf, None
+
+        def classify(self, name, ev, cats, scats, regras=None, listas=None):
+            self.listas, self.regras = listas, regras
+            return LLMResult(service="Cassino 81G", category="", classification="NAO_TRABALHO", recognized=True, topic="cassino",
+                             risk_score=20, work_score=0, confidence=0.9, reasons=[{"evidence_id": "E0", "text": "cassino"}],
+                             recommended_action="BLOCK_CANDIDATE", corp_action="BLOQUEAR", lista=self.lista,
+                             lista_confianca=self.conf, lista_motivo="página de slots"), {"model": self.model, "seconds": 1.0}
+    with db.conn() as c:
+        ids = {n: c.execute("INSERT INTO domains (name, tld, classification, llm_pending, total_queries) VALUES (%s, 'com', "
+                            "'DESCONHECIDO', true, 5) RETURNING id", (n,)).fetchone()["id"] for n in ("81g-certo.com", "81g-duvida.com")}
+    for nome, ia in (("81g-certo.com", IA("apostas", 0.95)), ("81g-duvida.com", IA("apostas", 0.6))):
+        with db.conn() as c:
+            d = c.execute("SELECT * FROM domains WHERE id = %s", (ids[nome],)).fetchone()
+        assert classifier._refine(ia, [{"code": "NAO_TRABALHO", "description": "x"}], d) == "done"
+        assert "apostas" in ia.listas and "wl:outros_liberados" in ia.listas and "Listas de bloqueio" in ia.regras
+    assert pedidos[0].get("with_search") and pedidos[0].get("with_whois"), "site + busca + WHOIS na mesma etapa"
+    with db.conn() as c:
+        r = {x["name"]: x for x in c.execute("SELECT name, lista_ia, lista_fase, lista_duvida, web_search_at IS NOT NULL AS busca, "
+                                             "whois_at IS NOT NULL AS whois FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
+        em = {x["domain"] for x in c.execute("SELECT domain FROM category_lists WHERE category = 'apostas' AND domain LIKE '81g-%%'")}
+    assert r["81g-certo.com"]["lista_ia"] == "apostas" and r["81g-certo.com"]["lista_fase"] == 1 and em == {"81g-certo.com"}
+    assert r["81g-duvida.com"]["busca"] and r["81g-duvida.com"]["whois"] and r["81g-duvida.com"]["lista_duvida"], \
+        "sem certeza: direto p/ a IA online (fase 4)"

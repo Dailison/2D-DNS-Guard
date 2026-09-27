@@ -225,16 +225,42 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
             c.execute("UPDATE domains SET lista_ia = NULL, lista_conf = NULL, lista_motivo = %s, lista_fonte = 'falhou', "
                       "lista_at = now(), lista_claimed_at = NULL WHERE id = %s", (str(e)[:200], d["id"]))
         return "done"
-    with db.conn() as c:
-        salvar(c, d["id"], res.lista, res.confianca, res.motivo, res.servico, FONTE_LOCAL, fase_n, getattr(client, "model", None))
-        fim = aplicar(c, ids=[d["id"]])["local"].get(d["id"])   # na hora (o ciclo de 5 min é a rede de segurança)
-    log.debug("lista %s -> %s (%.2f, %.1fs)", d["name"], res.lista, res.confianca, meta["seconds"])
-    alta = (res.confianca or 0) >= settings().lista_confianca_min
-    eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), meta.get("seconds"),
-                      detail=f"{fase_n}|lista {res.lista} {float(res.confianca or 0) * 100:.0f}%"
-                      + (f" · {res.servico}" if res.servico else "") + (f" — {res.motivo}" if res.motivo else "")
-                      + _proximo(fim, alta))
+    gravar_local(d, res.lista, res.confianca, res.motivo, res.servico, fase_n, getattr(client, "model", None), meta.get("seconds"))
     return "done"
+
+
+def gravar_local(d: dict, lista: str, conf: float, motivo: str, servico: str, fase_n: int, modelo: str | None,
+                 segundos: float | None) -> None:
+    """Resposta de lista da IA local (pergunta própria ou etapa única): grava, aplica na hora e registra o evento."""
+    with db.conn() as c:
+        salvar(c, d["id"], lista, conf, motivo, servico, FONTE_LOCAL, fase_n, modelo)
+        fim = aplicar(c, ids=[d["id"]])["local"].get(d["id"])   # na hora (o ciclo de 5 min é a rede de segurança)
+    log.debug("lista %s -> %s (%.2f)", d["name"], lista, conf or 0)
+    alta = (conf or 0) >= settings().lista_confianca_min
+    eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), segundos,
+                      detail=f"{fase_n}|lista {lista} {float(conf or 0) * 100:.0f}%"
+                      + (f" · {servico}" if servico else "") + (f" — {motivo}" if motivo else "")
+                      + _proximo(fim, alta))
+
+
+def lista_valida(lista: str | None) -> bool:
+    return bool(lista) and (lista in LISTAS_IA or lista == NENHUMA or (e_wl(lista) and lista[3:] in whitelist.CATEGORIAS
+                                                                      and lista[3:] != whitelist.SEM_RESPOSTA))
+
+
+def codigos_lista() -> list[str]:
+    return list(LISTAS_IA) + [f"wl:{k}" for k in whitelist.DESCRICOES]
+
+
+def regras_lista() -> str:
+    """Parte fixa da etapa local única: como escolher a lista + as listas e whitelists (mesmas regras da fase 4)."""
+    from . import online
+    s = online.SYSTEM
+    regra = s[s.index('- "lista":'):s.index('- "confianca":')].replace("{{", "{").replace("}}", "}")
+    return ("ALÉM da classificação, diga para onde o site vai (campos lista, lista_confianca, lista_motivo). "
+            "lista_confianca 1.0 só com certeza; 0.7 provável; 0.4 ou menos se está chutando.\n" + regra
+            + "\nListas de bloqueio:\n" + "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
+            + "\n\nWhitelists (sites liberados):\n" + "\n".join(f"- {k}: {v}" for k, v in WL.items()))
 
 
 def _proximo(fim: tuple | None, alta: bool) -> str:

@@ -284,9 +284,20 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
         event("search_start", name, did, detail=f"fase 3 · busca na web · {drow['total_queries']} consultas")
     if etapa3:
         event("whois_start", name, did, detail=f"fase 2 · WHOIS/RDAP · {drow['total_queries']} consultas")
+    # etapa local única (LOCAL_ETAPA_UNICA): na fase 1 já junta site + busca na web + WHOIS numa pergunta só, que
+    # também diz a lista; sem certeza vai direto p/ a IA online (fases 2 e 3 ficam p/ quem veio do fluxo antigo)
+    unica = cfg.local_etapa_unica and not etapa2 and not etapa3
     with db.conn() as c:
+        if unica:
+            try:
+                dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=True, with_whois=True)
+            except (httpx.HTTPError, webintel.BuscaIndisponivel, webintel.BuscaOcupada, whois.WhoisIndisponivel) as e:
+                log.info("etapa única %s: segue sem o que falhou (%s)", name, e.__class__.__name__)
+                dossier = build_dossier(c, drow, with_rdap=True, with_web=True)
+            c.execute("UPDATE domains SET web_search_at = now(), whois_at = coalesce(whois_at, now()) WHERE id=%s", (did,))
         try:
-            dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=etapa2, with_whois=etapa3)
+            dossier = dossier if unica else build_dossier(c, drow, with_rdap=True, with_web=True, with_search=etapa2,
+                                                          with_whois=etapa3)
         except (httpx.HTTPError, webintel.BuscaIndisponivel) as e:   # SearXNG fora/bloqueado: depois
             c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
             event("search_error", name, did, detail=f"busca indisponível: {e.__class__.__name__}")
@@ -324,7 +335,7 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
                 event("search_done", name, did, drow["classification"],
                       detail="fase 3: nenhum resultado na web — IA local não reavaliou; segue p/ a fase 4 (IA online)")
                 return "done"
-        elif cfg.web_search_before_llm and _buscar_antes(dossier):
+        elif not unica and cfg.web_search_before_llm and _buscar_antes(dossier):
             # fora do top 1M e sem Wikidata/certificado: a IA sozinha "não reconhece" em ~98%
             # dos casos. Busca ANTES e chama a IA uma vez só (ou nenhuma, se não há nada na web).
             try:
@@ -371,7 +382,8 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     with db.conn() as c:
         scats = site_categories(c)
     try:
-        res, meta = client.classify(name, ev, cats, scats)
+        res, meta = (client.classify(name, ev, cats, scats, listas_ia.regras_lista(), listas_ia.codigos_lista()) if unica
+                     else client.classify(name, ev, cats, scats))
     except LLMUnavailable as e:
         with db.conn() as c:
             c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
@@ -390,7 +402,13 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     fin = combine(rule, res, ev)
     with db.conn() as c:
         save(c, drow, dossier, rule, fin, False, meta["model"], meta)
-    if fin.classification != "DESCONHECIDO":   # a lista faz parte da fase (antes era uma fila separada, "Listas")
+    if unica and listas_ia.lista_valida(res.lista):   # a lista veio na mesma resposta (etapa única)
+        try:
+            listas_ia.gravar_local({**drow, "classification": fin.classification}, res.lista, res.lista_confianca,
+                                   res.lista_motivo, res.service, 1, meta["model"], meta.get("seconds"))
+        except Exception:  # noqa: BLE001 — a fila de listas pega depois
+            log.exception("lista (etapa única) para %s", name)
+    elif fin.classification != "DESCONHECIDO" or unica:   # a lista faz parte da fase (antes era uma fila separada, "Listas")
         try:
             listas_ia.sugerir(client, did, 2 if etapa3 else 3 if etapa2 else 1)
         except Exception:  # noqa: BLE001 — a fila de listas pega depois

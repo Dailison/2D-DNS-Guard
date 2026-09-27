@@ -229,12 +229,30 @@ def test_whitelist_automatica_e_travas(api):
                 "google-analytics-teste.com", "imgcdn-trab.com"} & set(wl), wl
     # apareceu em feed de ameaça -> sai; conflito com lista de bloqueio -> sai (automática)
     with db.conn() as c:
-        c.execute("UPDATE domains SET ti_signature = 'urlhaus' WHERE name = 'banco-wl.com.br'")
+        c.execute("UPDATE domains SET ti_signature = 'urlhaus', ti_hits = '[{\"source\": \"urlhaus\", \"confidence\": \"high\"}]' "
+                  "WHERE name = 'banco-wl.com.br'")
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('compras', 'microsoft.com', 'op')")
         whitelist.aplicar(c)
         wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains")}
         rev = c.execute("SELECT count(*) AS n FROM list_audit WHERE category LIKE 'wl:%%' AND acao = 'remove'").fetchone()["n"]
     assert "banco-wl.com.br" not in wl and "microsoft.com" not in wl and rev >= 2
+    # sinal de baixa confiança num subdomínio (google.com: dns.google.com na lista de contorno, golpe em sites.google.com):
+    # protegido entra nas Essenciais só na lista (publicar liberaria os subdomínios); publicado automático sai do DNS
+    from psycopg.types.json import Jsonb
+    baixa = Jsonb([{"source": "hagezi_bypass", "confidence": "low", "matched": "dns.google.com"}])
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, classification, classified_by, kind, ti_signature, ti_hits) "
+                  "VALUES ('google.com', 'TRABALHO', 'catalog', 'public', 'hagezi_bypass', %s) ON CONFLICT (name) DO UPDATE SET "
+                  "ti_hits = EXCLUDED.ti_hits, ti_signature = EXCLUDED.ti_signature, classified_by = 'catalog'", (baixa,))
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES ('infraestrutura', 'google.com', 'IA online', false)")
+        c.execute("INSERT INTO domains (name, classification, kind, ti_signature, ti_hits) VALUES ('escola-sinal.com.br', 'TRABALHO', "
+                  "'public', 'phishing_db', %s)", (Jsonb([{"source": "phishing_db", "confidence": "low"}]),))
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES ('educacao', 'escola-sinal.com.br', 'IA whitelist', true)")
+        whitelist.aplicar(c)
+        g = {(r["category"], r["publicar"]) for r in c.execute("SELECT category, publicar FROM whitelist_domains WHERE domain = 'google.com'")}
+        e = c.execute("SELECT publicar FROM whitelist_domains WHERE domain = 'escola-sinal.com.br'").fetchone()
+    assert g == {("essenciais", False)}, g
+    assert e and e["publicar"] is False, "sinal em subdomínio: sai do DNS, fica na lista"
     # Sites Revisados ficam fora da reanálise periódica
     with db.conn() as c:
         c.execute("UPDATE domains SET revisado_at = now(), analyzed_at = now() - interval '90 days', needs_analysis = false "

@@ -132,20 +132,42 @@ def _bloqueio(c) -> tuple[set[str], set[str]]:
     return em, pais
 
 
+_AMEACA = ("high", "medium")   # feeds de ameaça (URLhaus, ThreatFox, HaGeZi TIF); "low" = sinal (bypass, phishing_db…)
+
+
+def _sinais(hits) -> tuple[list[str], list[str]]:
+    """(fontes de ameaça — confiança alta/média —, fontes de sinal — baixa; em geral num SUBDOMÍNIO: dns.google.com na
+    lista de contorno, página de golpe em sites.google.com)."""
+    amea, sinal = set(), set()
+    for h in hits or []:
+        (amea if h.get("confidence") in _AMEACA else sinal).add(h.get("source") or "?")
+    return sorted(amea), sorted(sinal)
+
+
+def _protegido(nome: str) -> bool:
+    return bool((catalog.match(nome) or {}).get("protected"))
+
+
 def aplicar(c) -> dict:
-    """Um ciclo: tira o que caiu numa trava e põe o que passou a merecer whitelist."""
+    """Um ciclo: tira o que caiu numa trava e põe o que passou a merecer whitelist.
+    Publicar no DNS vale p/ o domínio E TODOS os subdomínios: com qualquer sinal em feed (mesmo de baixa confiança, num
+    subdomínio) a entrada fica só na lista (publicar = false) — senão liberaria dns.google.com (DoH) ou sites.google.com
+    (golpe). Sai da whitelist só com feed de ameaça (alta/média) ou SUSPEITO/MALICIOSO; protegido do catálogo nunca sai."""
     cfg = settings()
     out = {"entrou": [], "saiu": []}
     em, pais = _bloqueio(c)
-    # 1) saídas: acerto em feed/SUSPEITO/MALICIOSO (qualquer entrada); conflito com bloqueio (só as automáticas)
-    for r in c.execute("SELECT w.category, w.domain, w.added_by, d.ti_signature, d.classification FROM whitelist_domains w "
+    # 1) saídas
+    for r in c.execute("SELECT w.category, w.domain, w.added_by, w.publicar, d.ti_hits, d.classification FROM whitelist_domains w "
                        "LEFT JOIN domains d ON d.name = w.domain").fetchall():
         nome, auto = r["domain"], (r["added_by"] or "").startswith(("IA", CATALOGO_BY))
-        motivo = None
-        if r["ti_signature"]:
-            motivo = f"apareceu em feed de ameaça ({r['ti_signature']})"
-        elif r["classification"] in ("SUSPEITO", "MALICIOSO"):
-            motivo = f"classificação mudou para {r['classification']}"
+        amea, sinal = _sinais(r["ti_hits"])
+        risco = f"feed de ameaça ({', '.join(amea)})" if amea else (
+            f"classificação {r['classification']}" if r["classification"] in ("SUSPEITO", "MALICIOSO") else None)
+        motivo = so_lista = None
+        if risco and not _protegido(nome):
+            motivo = risco
+        elif r["publicar"] and (risco or (auto and sinal)):
+            so_lista = risco or f"sinal de baixa confiança em subdomínio ({', '.join(sinal)})"
         elif auto and (listas._em_lista(nome, em) or nome in pais):
             motivo = "conflita com uma lista de bloqueio"
         if motivo:
@@ -153,14 +175,17 @@ def aplicar(c) -> dict:
             c.execute("DELETE FROM whitelist_domains WHERE category = %s AND domain = %s", (r["category"], nome))
             eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"saiu da whitelist: {motivo}", origem="regras")
             out["saiu"].append(nome)
-    # 2) entradas: IA online com certeza (TRABALHO, reconhecido, nenhuma lista) + protegidos do catálogo
+        elif so_lista:
+            c.execute("UPDATE whitelist_domains SET publicar = false WHERE category = %s AND domain = %s", (r["category"], nome))
+            eventos.lista("lista_rem", nome, f"wl:{r['category']}", f"deixou de valer no DNS (fica na lista): {so_lista}", origem="regras")
+    # 2) entradas: protegidos do catálogo (Essenciais) + IA online com 2 modelos de acordo (TRABALHO, reconhecido, whitelist)
     ja = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, bool_or(publicar) AS publicar FROM whitelist_domains GROUP BY domain")}
     cands = c.execute(
-        "SELECT d.id, d.name, d.category, d.evidence, d.online_resp->>'categoria' AS cat_online, d.topic, "
+        "SELECT d.id, d.name, d.category, d.evidence, d.ti_hits, d.online_resp->>'categoria' AS cat_online, d.topic, "
         " d.online_resp->>'servico' AS servico, d.online_resp->'_meta'->'antes' AS antes, "
         " d.online_resp->>'classificacao' AS cls_online, (d.online_resp->>'reconhecido')::boolean AS rec, "
         " d.lista_conf, d.lista_ia, d.lista_wl, d.lista_fonte, d.classification FROM domains d "
-        "WHERE d.kind = 'public' AND coalesce(d.ti_signature, '') = '' AND d.classification NOT IN ('SUSPEITO', 'MALICIOSO') "
+        "WHERE d.kind = 'public' AND d.classification NOT IN ('SUSPEITO', 'MALICIOSO') "
         " AND ((d.lista_fonte LIKE 'online%%' AND d.lista_ia IS NULL AND d.lista_conf >= %s "
         "       AND d.online_resp->>'classificacao' = 'TRABALHO' AND (d.online_resp->>'reconhecido')::boolean) "
         "      OR d.classified_by = 'catalog')", (cfg.online_confianca_min,)).fetchall()
@@ -168,29 +193,35 @@ def aplicar(c) -> dict:
         nome = r["name"]
         if ja.get(nome) or _compartilhado(nome, r["evidence"]) or listas._em_lista(nome, em) or nome in pais:
             continue   # (já publicado; plataforma compartilhada; conflita com bloqueio)
-        e = catalog.match(nome)
-        if e and e.get("protected"):
-            cat, por, motivo = "essenciais", CATALOGO_BY, f"catálogo: {e.get('topic') or 'protegido'}"
-        elif (r["lista_fonte"] or "").startswith("online") and _dois_modelos(r) \
+        amea, sinal = _sinais(r["ti_hits"])
+        if _protegido(nome):
+            cat, por, motivo = "essenciais", CATALOGO_BY, f"catálogo: {(catalog.match(nome) or {}).get('topic') or 'protegido'}"
+        elif not amea and (r["lista_fonte"] or "").startswith("online") and _dois_modelos(r) \
                 and not _cara_de_bloqueio(nome, f"{r['servico'] or ''} {r['topic'] or ''}"):
             cat, por, motivo = (r["lista_wl"] or _categoria(r["cat_online"] or r["category"], r["cls_online"]), AUTO_BY,
                                 "IA online (2 modelos): trabalho, sem lista de bloqueio")
         else:
             continue
+        pub = not (amea or sinal)   # com sinal num subdomínio: só na lista (publicar liberaria o subdomínio)
+        if nome in ja and not pub and cat != "essenciais":
+            continue   # já está na lista (sem publicar) e continua sem poder publicar
         listas.contexto(c, por, motivo)
-        if nome in ja:   # já estava na whitelist sem publicar (posto pela IA): passa a valer no DNS, na categoria escolhida
+        if cat == "essenciais" or nome not in ja:   # protegido: vai p/ Essenciais (sai da categoria que a IA escolheu)
+            c.execute("DELETE FROM whitelist_domains WHERE domain = %s AND category <> %s", (nome, cat))
+            c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES (%s, %s, %s, %s) "
+                      "ON CONFLICT (category, domain) DO UPDATE SET publicar = EXCLUDED.publicar, added_by = EXCLUDED.added_by",
+                      (cat, nome, por, pub))
+        else:   # já estava na whitelist sem publicar (posto pela IA): passa a valer no DNS, na categoria escolhida
             c.execute("UPDATE whitelist_domains SET publicar = true WHERE domain = %s", (nome,))
-        elif not c.execute("INSERT INTO whitelist_domains (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                           (cat, nome, por)).rowcount:
-            continue
         c.execute("UPDATE domains SET revisado_at = coalesce(revisado_at, now()) WHERE id = %s", (r["id"],))
-        ja[nome] = True
-        out["entrou"].append((nome, cat, "catalogo" if por == CATALOGO_BY else "f4:online"))
+        ja[nome] = pub
+        out["entrou"].append((nome, cat, "catalogo" if por == CATALOGO_BY else "f4:online", pub))
     if out["entrou"] or out["saiu"]:
-        log.info("whitelist: %d entraram, %d saíram", len(out["entrou"]), len(out["saiu"]))
+        log.info("whitelist: %d entraram/publicados, %d saíram", len(out["entrou"]), len(out["saiu"]))
         if len(out["entrou"]) <= 50:
-            for nome, cat, org in out["entrou"]:
-                eventos.lista("lista_add", nome, f"wl:{cat}", "whitelist: " + CATEGORIAS[cat], origem=org)
+            for nome, cat, org, pub in out["entrou"]:
+                eventos.lista("lista_add", nome, f"wl:{cat}", "whitelist: " + CATEGORIAS[cat] + ("" if pub else " (só na lista: sinal em subdomínio)"),
+                              origem=org)
         else:
             eventos.registrar("decisao", None, detail=f"wl|whitelist: {len(out['entrou'])} sites de trabalho liberados",
                               origem="f4:online")

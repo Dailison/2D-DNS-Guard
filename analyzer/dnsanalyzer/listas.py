@@ -204,7 +204,7 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
 # ------------------------------------------------------------------ detalhes p/ o console
 # O que a IA achou de cada domínio + se alguém já revisou à mão. "manual" = classificação travada,
 # decisão (global ou de empresa), ajuste de empresa ou entrada posta na lista por um operador.
-_ORIGEM_NAO_MANUAL = (AUTO_BY, "IA automática", "IA com dúvida", "IA sem certeza", "migração", "serviço ", "catálogo", "classificação da IA")
+_ORIGEM_NAO_MANUAL = (AUTO_BY, "IA automática", "IA com dúvida", "IA recomenda", "IA sem certeza", "migração", "serviço ", "catálogo", "classificação da IA")
 DETALHE_SQL = (
     "SELECT d.name AS domain, d.classification, d.category AS cat_ia, d.corp_action, d.corp_reason, "
     " d.classified_by, d.analyzed_at, d.llm_pending, d.confidence, d.total_queries, d.last_seen, d.locked, "

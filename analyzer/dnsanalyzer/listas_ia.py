@@ -240,6 +240,8 @@ def _proximo(fim: tuple | None, alta: bool) -> str:
         return " · lista atual mantida"
     if fim[0] == "humano":
         return " · decisão humana mantida (liberado)"
+    if fim[0] == "humano_revisar":
+        return f" · confiança alta, contraria decisão humana ({fim[1]}): vai p/ a Decisão Humana"
     conf = "confiança alta" + (f", trava: {fim[-1]}" if fim[-1] else "") if alta else "confiança baixa"
     return f" · {conf}: segue p/ a fase {fim[1]}" if fim[0] == "segue" else f" · {conf}: vai p/ a fase 4 (IA online)"
 
@@ -280,6 +282,7 @@ OUTROS = "outros_bloqueios"        # como Para revisar: com certeza, o site sai 
 # suspeita (liberaria o site p/ todas as empresas que aplicam a lista); o resto vai p/ Decisões
 INFRA = "infra_bloqueio"
 DUVIDA_BY = "IA com dúvida"        # foi para Para revisar com a sugestão
+REVER_BY = "IA recomenda"          # com confiança alta, contraria uma decisão humana: Para revisar com o parecer
 PARA_REVISAR = "para_revisar"
 
 
@@ -405,10 +408,10 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                   "ON CONFLICT DO NOTHING", (wl, r["name"], por))
         eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{whitelist.CATEGORIAS[wl]} · {_fonte(r)}", r["id"], origem(r), cls)
 
-    def para_decisoes(r, cat, motivo=None):
-        listas.contexto(c, DUVIDA_BY, motivo or "nenhuma fase teve certeza")
+    def para_decisoes(r, cat, motivo=None, por=DUVIDA_BY):
+        listas.contexto(c, por, motivo or "nenhuma fase teve certeza")
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                  (PARA_REVISAR, r["name"], f"{DUVIDA_BY} ({cat or 'nenhuma'})" + (f" · {motivo}" if motivo else "")))
+                  (PARA_REVISAR, r["name"], f"{por} ({cat or 'nenhuma'})" + (f" · {motivo}" if motivo else "")))
         out["revisar"].append((r["name"], cat))
         eventos.lista("fase5", r["name"], cat, (motivo or "nenhuma fase teve certeza")
                       + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"], origem(r), cls)
@@ -425,9 +428,17 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         cls = r["cls_online"] if online and r["cls_online"] else r["classification"]
         humano_contra = bool(cat) and cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
 
-        if humano_contra:
-            out["local"][r["id"]] = ("humano",)
-            continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
+        # resposta em que dá p/ confiar (IA online, ou modelo local aprovado e coerente) que contraria uma decisão humana:
+        # vai p/ a Decisão Humana com o parecer da IA — a pessoa revê (pedido do usuário 27/09); a IA não muda sozinha
+        confiavel = certo and (online or (decide_sozinho(r["lista_modelo"]) and (not cat or _coerente(cat, cls, r["category"]))))
+        recomenda = cat or (f"wl:{r['lista_wl']}" if r["lista_wl"] else "whitelist")
+        if humano_contra:   # alguém decidiu "manter liberado" e a IA recomenda uma lista de bloqueio
+            if confiavel and cat not in em and PARA_REVISAR not in em:
+                para_decisoes(r, recomenda, "contraria decisão humana (liberado)", REVER_BY)
+                out["local"][r["id"]] = ("humano_revisar", "liberado")
+            else:
+                out["local"][r["id"]] = ("humano",)
+            continue
         local_decide = False
         if not online and online_ok:   # IA local (fases 1-3)
             # resposta nova da IA local: a ida p/ a IA online de uma rodada anterior não vale mais
@@ -437,6 +448,9 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                 if cat and cat in em and certo and decide_sozinho(r["lista_modelo"]):   # já estava na lista: confirmou
                     out["local"][r["id"]] = ("decide",)
                     eventos.lista("lista_add", r["name"], cat, f"confirmou (já estava na lista) · {_fonte(r)}", r["id"], origem(r), cls)
+                elif confiavel and PARA_REVISAR not in em:   # pessoa/migração pôs noutra lista: a pessoa revê
+                    para_decisoes(r, recomenda, f"contraria decisão humana ({', '.join(sorted(fixas))})", REVER_BY)
+                    out["local"][r["id"]] = ("humano_revisar", ", ".join(sorted(fixas)))
                 else:
                     out["local"][r["id"]] = ("mantida",)
                 continue
@@ -469,7 +483,9 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                       (r["id"],))
 
         if fixas and (not cat or cat not in em):
-            continue   # alguém pôs noutra lista: fica
+            if online and confiavel and PARA_REVISAR not in em:   # alguém pôs noutra lista: fica, e a pessoa revê
+                para_decisoes(r, recomenda, f"contraria decisão humana ({', '.join(sorted(fixas))})", REVER_BY)
+            continue
         if certo and not cat and (online or local_decide):
             # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs). Da
             # Infraestrutura só com a resposta do modelo maior (ou dois modelos) e sem suspeita; senão, Decisões

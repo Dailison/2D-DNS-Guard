@@ -510,7 +510,7 @@ def test_revisao_da_infraestrutura(env):
     assert "omnichat-infra.net" not in em, "resposta do modelo maior: sai"
     assert em.get("suspeito-infra.net") == {"infra_bloqueio", "para_revisar"}, "suspeito: não libera"
     assert em.get("duvida-infra.net") == {"infra_bloqueio", "para_revisar"}, "sem certeza: Decisões, não fica sem destino"
-    assert em.get("pessoa-infra.net") == {"infra_bloqueio"}, "posto por pessoa: intocado"
+    assert em.get("pessoa-infra.net") == {"infra_bloqueio", "para_revisar"}, "posto por pessoa: fica, e a pessoa revê o parecer"
 
 
 def test_nenhuma_da_ia_local_na_infraestrutura_vai_p_validacao(env, monkeypatch):
@@ -833,4 +833,41 @@ def test_decisao_da_ia_local_que_nao_muda_nada_aparece_e_o_log_diz_a_verdade(env
     assert "confirmou" in ev[("ja-wl.com", "aprovado")] and wl["ja-wl.com"] == ("produtividade", "IA online"), ev
     assert wl["prov-wl.com"] == ("produtividade", "IA local (fase 1)") and ("prov-wl.com", "aprovado") in ev, wl
     assert "confirmou" in ev[("ja-bl.com", "lista_add")] and ap["local"][ids["ja-bl.com"]] == ("decide",)
-    assert ap["local"][ids["humano-lib.com"]] == ("humano",) and listas_ia._proximo(("humano",), True) == " · decisão humana mantida (liberado)"
+    assert ap["local"][ids["humano-lib.com"]] == ("humano_revisar", "liberado"), ap["local"]
+    assert listas_ia._proximo(("humano",), True) == " · decisão humana mantida (liberado)"
+
+
+def test_ia_que_contraria_decisao_humana_vai_p_decisao_humana(env, monkeypatch):
+    """Pedido do usuário 27/09: a IA não muda sozinha o que uma pessoa decidiu, mas com confiança alta e recomendação
+    diferente o domínio vai p/ a Decisão Humana com o parecer; aprovar o bloqueio vira a decisão global p/ "bloqueado"."""
+    from dnsanalyzer import config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        ids = {}
+        for n in ("lib-pessoa.com", "bl-pessoa.com", "lib-incerto.com", "lib-online.com"):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
+                               "VALUES (%s, 'NAO_TRABALHO', 'outros', now() - interval '1 minute', 5, now(), now()) RETURNING id",
+                               (n,)).fetchone()["id"]
+        c.execute("INSERT INTO policies (scope, lists) VALUES ('pol-rever', ARRAY['publicidade', 'jogos'])")
+        for n in ("lib-pessoa.com", "lib-incerto.com", "lib-online.com"):
+            c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'allowed', 'ti@empresa')", (ids[n],))
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'bl-pessoa.com', 'ti@empresa')")
+        listas_ia.salvar(c, ids["lib-pessoa.com"], "publicidade", 0.95, "rede de anúncios", "", "local", 1, "gemma4:26b")
+        listas_ia.salvar(c, ids["bl-pessoa.com"], "wl:produtividade", 0.95, "editor online", "", "local", 1, "gemma4:26b")
+        listas_ia.salvar(c, ids["lib-incerto.com"], "publicidade", 0.6, "talvez", "", "local", 1, "gemma4:26b")
+        listas_ia.salvar(c, ids["lib-online.com"], "jogos", 0.95, "jogo", "", "online:gemini", 4)
+        c.execute("UPDATE domains SET online_resp = '{\"classificacao\": \"NAO_TRABALHO\"}' WHERE id = %s", (ids["lib-online.com"],))
+        ap = listas_ia.aplicar(c)
+        rev = {r["domain"]: r["added_by"] for r in c.execute("SELECT domain, added_by FROM category_lists WHERE category = 'para_revisar'")}
+        bl = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE category <> 'para_revisar'")}
+    assert rev["lib-pessoa.com"].startswith("IA recomenda (publicidade)") and ("publicidade", "lib-pessoa.com") not in bl, rev
+    assert rev["bl-pessoa.com"].startswith("IA recomenda (wl:produtividade) · contraria decisão humana (jogos)") \
+        and ("jogos", "bl-pessoa.com") in bl, rev
+    assert "lib-incerto.com" not in rev and ap["local"][ids["lib-incerto.com"]] == ("humano",), "sem confiança: nada muda"
+    assert rev["lib-online.com"].startswith("IA recomenda (jogos)") and ("jogos", "lib-online.com") not in bl, rev
+    assert "Decisão Humana" in listas_ia._proximo(ap["local"][ids["lib-pessoa.com"]], True)
+    r = env.post("/listas-aprovar", json={"domains": ["lib-pessoa.com"], "de": "para_revisar", "by": "ti@empresa"}, headers=H)
+    assert r.status_code == 200 and r.json()["movidos"] == {"publicidade": ["lib-pessoa.com"]}, r.text
+    with db.conn() as c:
+        g = c.execute("SELECT status, reviewed_by FROM global_reviews WHERE domain_id = %s", (ids["lib-pessoa.com"],)).fetchone()
+    assert g["status"] == "blocked" and g["reviewed_by"] == "ti@empresa", g

@@ -1222,7 +1222,7 @@ def listas_mover(body: MoverIn):
         listas.contexto(c, body.by or "manual", (f"pôs em {', '.join(body.para)}" if body.para else "manter liberado")
                         + f" (saiu de {body.de})")
         if body.para:
-            _tira_da_whitelist(c, doms)
+            _tira_da_whitelist(c, doms, body.by)
         for cat in body.para:
             c.execute("INSERT INTO category_lists (category, domain, added_by) SELECT %s, d, %s FROM unnest(%s::text[]) d "
                       "ON CONFLICT DO NOTHING", (cat, body.by or None, doms))
@@ -1271,7 +1271,7 @@ def listas_aprovar(body: AprovarIn):
                 continue
             alvo = r["lista_ia"]
             if alvo and alvo in listas.CATEGORIAS and alvo != body.de:
-                _tira_da_whitelist(c, [d])
+                _tira_da_whitelist(c, [d], body.by)
                 c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                           (alvo, d, body.by or None))
                 out["movidos"].setdefault(alvo, []).append(d)
@@ -1635,9 +1635,12 @@ def whitelist_remover(body: WhitelistIn):
     return {"ok": True, "removidos": n}
 
 
-def _tira_da_whitelist(c, doms: list[str]) -> None:
-    """Pessoa pôs numa lista de bloqueio: sai da whitelist (senão a whitelist venceria o bloqueio)."""
+def _tira_da_whitelist(c, doms: list[str], by: str = "") -> None:
+    """Pessoa pôs numa lista de bloqueio: sai da whitelist (senão a whitelist venceria o bloqueio) e a decisão global
+    "liberado" de antes vira "bloqueado" por ela (ex.: aprovou o parecer da IA que contrariava a decisão humana)."""
     c.execute("DELETE FROM whitelist_domains WHERE domain = ANY(%s)", (doms,))
+    c.execute("UPDATE global_reviews g SET status = 'blocked', reviewed_by = %s, reviewed_at = now() FROM domains d "
+              "WHERE g.domain_id = d.id AND d.name = ANY(%s) AND g.status = 'allowed'", (by or "manual", doms))
 
 
 _FONTE = {"llm": "Fase 1 · IA local", "web": "Fase 3 · busca na web + IA local", "online": "Fase 4 · IA online",
@@ -1822,7 +1825,7 @@ def lista_add(categoria: str, body: ListaIn):
         raise HTTPException(400, "domínio inválido")
     with db.conn() as c:
         listas.contexto(c, body.by or "manual", f"pôs em {categoria}")
-        _tira_da_whitelist(c, [d])
+        _tira_da_whitelist(c, [d], body.by)
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                   (categoria, d, body.by or None))
     _decisao(d, categoria, f"pôs em {categoria}", body.by)
@@ -1849,7 +1852,7 @@ def listas_lote(body: ListasLoteIn):
     doms = sorted({x for x in map(_dom_ok, body.domains) if x})
     with db.conn() as c, c.cursor() as cur:
         listas.contexto(c, body.by or "manual", f"pôs em {', '.join(body.cats)}")
-        _tira_da_whitelist(c, doms)
+        _tira_da_whitelist(c, doms, body.by)
         cur.executemany("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                         [(cat, d, body.by or None) for cat in body.cats for d in doms])
     if len(doms) <= 200:   # (migrações em massa não enchem o feed)

@@ -41,7 +41,7 @@ def _upsert_alert(c, tenant_id, kind, severity, title, dedup, details, client_id
     return bool(r and r["inserted"])
 
 
-_AUTO = ("IA automática", "IA com dúvida", "IA sem certeza", "bloqueio automático")
+_AUTO = ("IA automática", "IA com dúvida", "IA recomenda", "IA sem certeza", "bloqueio automático")
 _USO_MISTO = {"mensageiros", "ia_chatbots", "nuvem_remoto", "doh_dns"}   # (DoH: bloquear é o objetivo da lista)
 
 

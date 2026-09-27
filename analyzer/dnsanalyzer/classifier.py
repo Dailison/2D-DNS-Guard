@@ -622,6 +622,8 @@ def run_forever(stop=lambda: False) -> None:
                     listas_ia.aplicar(c)
                 with db.conn() as c:
                     whitelist.aplicar(c)
+                with db.conn() as c:   # nada fica solto: quem terminou sem lista vai p/ a whitelist ou a Decisão Humana
+                    listas.sem_destino(c)
             if time.monotonic() - last_stale > 3600:
                 with db.conn() as c:   # domínios que não existem (NXDOMAIN) saem da IA e de Decisões
                     listas.marcar_inexistentes(c)

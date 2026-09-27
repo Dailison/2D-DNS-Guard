@@ -860,12 +860,8 @@ def listas_liberacao():
             p.pop("offset"), p.pop("limit")
             ctx = {"servico": None, "todas": todas, "wl": wl, "fd": fd, "scats": _site_cats(), "pag_url": _pag_url,
                    "det": api.get(f"/whitelist/{quote(wl, safe='')}/detalhes", offset=(fd["pag"] - 1) * fd["pp"], limit=fd["pp"], **p)}
-        elif slug == "_trabalho":   # só consulta: não é lista, não vai p/ o Technitium
-            fd = _det_filtros("consultas")
-            ctx = {"servico": None, "todas": todas, "trabalho": True, "fd": fd, "det": api.get("/sem-lista", **_det_params(fd)),
-                   "scats": _site_cats(), "pag_url": _pag_url}
-        else:
-            slug = slug or (avulsas[0]["slug"] if avulsas else "")
+        else:   # ("Aprovados", slug=_trabalho, deixou de existir em 27/09: nada fica sem lista)
+            slug = (slug if slug != "_trabalho" else "") or (avulsas[0]["slug"] if avulsas else "")
             ctx = _servico_ctx(slug) if slug else {"servico": None, "todas": todas}
     except AnalyzerError as e:
         flash(f"Falha ao carregar as listas de liberação: {e}", "erro")

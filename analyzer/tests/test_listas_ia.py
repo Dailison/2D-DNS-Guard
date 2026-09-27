@@ -986,3 +986,29 @@ def test_pai_de_algo_bloqueado_fica_na_whitelist_sem_publicar(env):
         w = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, publicar FROM whitelist_domains "
                                                           "WHERE domain IN ('plataforma-pai.com', 'plataforma-pai2.com', 'bloqueado-e-wl.com')")}
     assert w == {"plataforma-pai.com": False, "plataforma-pai2.com": False}, w
+
+
+def test_nada_fica_solto_sem_destino(env):
+    """27/09: "Aprovados" deixou de existir — quem terminou a análise sem lista vai p/ a whitelist (liberado por pessoa;
+    só na lista, não vai ao DNS) ou p/ a Decisão Humana (suspeito, ou sem decisão humana)."""
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        ids = {}
+        for n, cls, cat, wl in (("solto-trab.com.br", "TRABALHO", "produtividade", "erp_gestao"),
+                                ("solto-desc.com", "DESCONHECIDO", "desconhecido", None),
+                                ("solto-susp.com", "SUSPEITO", "outros", None),
+                                ("solto-ninguem.com", "NAO_TRABALHO", "jogos", None)):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at, "
+                               "lista_wl, lista_at, lista_fonte, lista_conf, online_at) VALUES (%s, %s, %s, now() - interval '1 hour', 3, now(), now(), "
+                               "%s, now(), 'online:gemini', 0.9, now()) RETURNING id", (n, cls, cat, wl)).fetchone()["id"]
+        for n in ("solto-trab.com.br", "solto-desc.com", "solto-susp.com"):
+            c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'allowed', 'op@2d')", (ids[n],))
+        antes = {x["domain"] for x in listas.sem_lista(c, limit=5000)["items"]}
+        assert set(ids) <= antes, antes
+        listas.sem_destino(c)
+        wl = {r["domain"]: (r["category"], r["publicar"]) for r in c.execute("SELECT domain, category, publicar FROM whitelist_domains")}
+        rev = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'para_revisar'")}
+        depois = {x["domain"] for x in listas.sem_lista(c, limit=5000)["items"]}
+    assert wl["solto-trab.com.br"] == ("erp_gestao", False) and wl["solto-desc.com"] == ("outros_liberados", False), wl
+    assert {"solto-susp.com", "solto-ninguem.com"} <= rev and "solto-susp.com" not in wl, rev
+    assert not set(ids) & depois, depois

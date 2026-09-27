@@ -1566,10 +1566,9 @@ def whitelist_resumo():
         n = {r["category"]: r for r in c.execute("SELECT category, count(*) AS n, count(*) FILTER (WHERE publicar) AS pub "
                                                   "FROM whitelist_domains GROUP BY 1")}
         revisados = c.execute("SELECT count(*) AS n FROM domains WHERE revisado_at IS NOT NULL").fetchone()["n"]
-        aprovados = listas.sem_lista(c, limit=1)["total"]   # "Aprovados": analisados fora de qualquer lista (~0,3 s)
     return {"categorias": [{"categoria": k, "rotulo": v, "total": (n.get(k) or {}).get("n", 0),
                             "publicados": (n.get(k) or {}).get("pub", 0)} for k, v in whitelist.CATEGORIAS.items()],
-            "revisados": revisados, "aprovados": aprovados}
+            "revisados": revisados}
 
 
 @app.get("/whitelist-dominios", dependencies=[Depends(auth)])

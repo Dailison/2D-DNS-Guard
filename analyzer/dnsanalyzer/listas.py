@@ -357,6 +357,53 @@ def _fora_das_filas_sql() -> str:
     return f"NOT coalesce(({fila4}), false) AND NOT coalesce({fase23}, false) AND NOT coalesce({pergunta}, false)"   # (NULL não exclui)
 
 
+SEM_DESTINO_BY = "decisão humana (liberado)"
+
+
+def sem_destino(c) -> dict:
+    """Nada fica solto (pedido do usuário 27/09: "Aprovados" deixou de existir). Quem terminou a análise sem nenhuma
+    lista vai p/ uma: liberado por pessoa (global, empresa, ajuste p/ trabalho ou travado) -> whitelist (a categoria
+    que a IA sugeriu, ou Outros liberados/de trabalho), só na lista (não vai ao DNS: nada muda no bloqueio); suspeito
+    ou em feed de ameaça (a whitelist não aceita) e quem não tem decisão humana -> Decisão Humana."""
+    from . import eventos, whitelist
+    nomes = [x["domain"] for x in sem_lista(c, limit=5000)["items"]]
+    out = {"whitelist": [], "decisao": []}
+    if not nomes:
+        return out
+    rows = c.execute(
+        "SELECT d.id, d.name, d.classification, d.category, d.lista_wl, d.lista_ia, d.ti_hits, "
+        " (d.locked OR EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed') "
+        "  OR EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id "
+        "             AND (td.review_status = 'allowed' OR td.override_classification = 'TRABALHO'))) AS humano "
+        "FROM domains d WHERE d.name = ANY(%s)", (nomes,)).fetchall()
+    for r in rows:
+        risco = r["classification"] in ("SUSPEITO", "MALICIOSO") or bool(whitelist._sinais(r["ti_hits"])[0])
+        if r["humano"] and not risco:
+            wl = (r["lista_wl"] if r["lista_wl"] in whitelist.CATEGORIAS and r["lista_wl"] != whitelist.SEM_RESPOSTA else
+                  whitelist._categoria(r["category"], r["classification"]) if r["classification"] == "TRABALHO" else "outros_liberados")
+            contexto(c, SEM_DESTINO_BY, f"terminou a análise sem lista: whitelist {whitelist.CATEGORIAS[wl]}")
+            c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES (%s, %s, %s, false) "
+                      "ON CONFLICT DO NOTHING", (wl, r["name"], SEM_DESTINO_BY))
+            out["whitelist"].append((r["name"], f"wl:{wl}", r))
+        else:
+            sug = r["lista_ia"] or (f"wl:{r['lista_wl']}" if r["lista_wl"] else "nenhuma")
+            motivo = ("liberado por pessoa, mas " + ("suspeito" if r["classification"] in ("SUSPEITO", "MALICIOSO")
+                                                     else "em feed de ameaça") if r["humano"] else "terminou a análise sem lista")
+            contexto(c, "IA com dúvida", motivo)
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) ON CONFLICT DO NOTHING",
+                      (r["name"], f"IA com dúvida ({sug}) · {motivo}"))
+            out["decisao"].append((r["name"], sug, r, motivo))
+    if len(rows) <= 50:
+        for nome, wl, r in out["whitelist"]:
+            eventos.lista("aprovado", nome, wl, f"{SEM_DESTINO_BY}: sem lista depois da análise", r["id"], "f5:ti", r["classification"])
+        for nome, sug, r, motivo in out["decisao"]:
+            eventos.lista("fase5", nome, sug, motivo, r["id"], "regras", r["classification"])
+    else:
+        eventos.registrar("decisao", None, detail=f"wl|{len(out['whitelist'])} sem lista foram p/ a whitelist e "
+                                                  f"{len(out['decisao'])} p/ a Decisão Humana", origem="regras")
+    return out
+
+
 def sem_lista(c, **filtros) -> dict:
     """Domínios já analisados que não estão em NENHUMA lista (bloqueio ou liberação, nem por domínio
     pai) nem numa fila da IA ("Aprovados"). Não vão p/ o Technitium: só p/ consulta, pedir nova análise ou pôr numa lista."""

@@ -96,7 +96,6 @@ document.getElementById("lSalvar").addEventListener("click", async (ev) => {
     {% for c, r in cats_wl %}
     <a href="{{ url_for('admin.listas_liberacao', wl=c) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if wl == c else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if wl == c }}">{{ r }} <span class="mut">({{ totwl.get(c, 0) }})</span></a>
     {% endfor %}
-    <a href="{{ url_for('admin.listas_liberacao', slug='_trabalho') }}" title="Avaliados pela IA ou por uma pessoa e liberados, fora de qualquer lista: não vão ao DNS." style="text-decoration:none;padding:.35rem .7rem;border:1px dashed {{ 'var(--b)' if trabalho else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if trabalho }}">👍 Aprovados <span class="mut">({{ whitelists.aprovados if whitelists.aprovados is defined else '–' }})</span></a>
   </div>
 </div>
 {% if wl %}
@@ -108,12 +107,6 @@ document.getElementById("lSalvar").addEventListener("click", async (ev) => {
     <div style="flex:0"><button class="primary">Liberar</button></div>
   </form>
   {% with modo = 'whitelist' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
-</div>
-{% endif %}
-{% if trabalho %}
-<div class="card">
-  <h2 title="Avaliados pela IA (fases 1 a 4) ou por uma pessoa e liberados: fora de qualquer lista de bloqueio, whitelist ou lista de liberação. Não vão para o Technitium e não voltam para a IA sem pedido.">👍 Aprovados <span class="mut" style="font-size:.8rem">· {{ det.total }} domínio(s)</span></h2>
-  {% with modo = 'sem_lista' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>
 {% endif %}
 {% endif %}

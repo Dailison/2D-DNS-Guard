@@ -293,6 +293,9 @@ pytest          # unitários + testes com PostgreSQL real (pgserver): listas pel
 ## Desempenho (referência: 16 vCPU, Qwen3 8B Q4, CPU)
 
 - Fase A (regras): ~500 domínios em ~2 s.
+- Triagem por acesso (`LLM_MIN_QUERIES`/`LLM_MIN_CLIENTS`, 27/09): domínio com menos de 3 consultas de 1
+  computador fica só com as regras, na fila da IA com a prioridade suspensa (`aguarda_recorrencia`),
+  até recorrer. Risco (feed de ameaça, SUSPEITO/MALICIOSO) e análise pedida por pessoa não esperam.
 - IA: ~35 s por domínio (geração ~5 tokens/s — CPU virtualizada é limitada por banda
   de memória). Por isso a resposta é compacta e o catálogo resolve o óbvio.
 - Carga inicial de ~500 domínios: algumas horas em segundo plano; depois, só os

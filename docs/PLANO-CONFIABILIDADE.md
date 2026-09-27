@@ -339,6 +339,69 @@ ameaças, auditoria, pulso, prévia de impacto).
 
 ---
 
+## Fase 6 — Performance (avaliação de 2026-09-27 na VM em produção)
+
+Medido em produção: o llama-server na VM ocupava 22 GB dos 26 GB e toda a CPU para entregar 15%
+das análises locais (34 s por domínio); 4 GB de swap em uso; API com resumo em 0,9 a 2,2 s, logs
+agrupados em 2,8 s, gráficos em 1,3 s; poll da IA ao vivo em 0,4 s; fila da fase 1 com 6.429
+domínios, 83% deles com até 2 consultas.
+
+PC 10.100.50.201 (reforço): AMD RX 9070 com 16 GB. O gemma4:26b Q4_K_M tem 15,8 GB e não cabe
+inteiro com o contexto; parte das camadas fica na CPU e a geração cai para 3,5 a 7,6 tokens/s
+por slot (4 slots). O `size_vram` de 1,9 GB no `ollama ps` é erro de relatório. Decisão do
+Dailison em 27/09: fica como está; a alternativa é um quant menor (~10 a 11 GB) do mesmo modelo.
+
+Feito em 27/09: `LLM_VM_RESERVA=true` na VM (Ollama local só se o PC cair; modelo descarregado);
+PostgreSQL com `shared_buffers` 2 GB, `effective_cache_size` 6 GB, `work_mem` 32 MB,
+`pg_stat_statements` e `log_min_duration_statement = 500ms` (a VM tem memória dinâmica no
+Hyper-V: `free` mostra 4 GB quando ociosa e cresce sob demanda); triagem por acesso
+(migração 060, `LLM_MIN_QUERIES`/`LLM_MIN_CLIENTS`).
+
+### 6.1 Consultas da API (medir antes, com `pg_stat_statements`)
+
+- `SELECT query, calls, mean_exec_time FROM pg_stat_statements ORDER BY total_exec_time DESC
+  LIMIT 20` depois de 24 h de uso: atacar as 5 primeiras.
+- Índice `(tenant_id, bucket)` nas partições de `query_agg` (criar em `collector.ensure_partitions`
+  para as partições novas e numa migração para as existentes). Hoje só há `pkey`, `bucket` e
+  `(domain_id, bucket)`; resumo, gráficos, logs agrupados e prévia de impacto filtram por empresa
+  e período.
+- `/ai/events` (poll da IA ao vivo): as quatro contagens de fila chamam `dominio_decidido()` por
+  linha em `domains`. Guardar as contagens em memória por 15 s (módulo `api`, `time.monotonic`)
+  e reescrever com `NOT EXISTS` em `global_reviews`/`tenant_domains` em vez da função.
+- `/tenants/{tid}/summary`: três agregações separadas sobre `query_agg` (não trabalho, risco,
+  todos) e a CTE de computadores. Unir numa agregação por domínio com `FILTER` e cachear o
+  resultado por empresa por 60 s. Mesmo cache para `/charts`.
+- Rollup diário `query_day (tenant_id, domain_id, dia, queries, blocked, clients)` alimentado
+  pelo coletor a cada janela (upsert do dia corrente). Resumo, gráficos, logs agrupados por
+  domínio e prévia de impacto passam a ler dele quando o período é de dias inteiros;
+  `query_agg` fica para a última hora e para o detalhe por FQDN.
+
+### 6.2 Console
+
+- `technitium.indice_bloqueio` e `dominios_das_listas`: cache de módulo com 60 s (hoje é por
+  requisição, refeito em toda página), invalidado por qualquer ação que grave lista.
+- `listas.detalhes`, `sem_lista` e `detalhes_whitelist` carregam todos os itens e filtram e
+  facetam em Python. Está em 0,3 s com 13 mil domínios; mover filtros e facetas para SQL
+  quando passar de 50 mil, ou paginar no banco.
+
+### 6.3 IA local
+
+- Custo do prompt na CPU: 620 a 710 tokens por domínio. Se a VM voltar a inferir, encurtar as
+  evidências e revisar `SYSTEM_PROMPT` em `llm.py`.
+- No PC, `OLLAMA_NUM_PARALLEL` igual a `LLM_EXTRA_WORKERS` (4). Se um dia trocar o quant,
+  conferir no log do servidor que todas as camadas ficaram na GPU.
+- Chave `GEMINI_API_KEY_3` responde 401 ("service account deleted or disabled") desde 27/09:
+  trocar ou remover da `analyzer.env`; cada tentativa pausa aquele modelo por 10 min.
+
+### 6.4 Operação
+
+- `journalctl` do classificador mostrou `httpx.RemoteProtocolError` do Ollama quando a VM
+  estava em swap; reavaliar depois de uma semana com a VM em reserva.
+- Alertar no 2D-Monitoramento quando `/health` trouxer `listas_recusadas` não vazio (a lista
+  `infra_bloqueio` ficou recusada da noite de 26/09 até ser aceita).
+
+---
+
 ## Fora deste plano (decisão do Dailison antes de implementar)
 
 - **Quarentena de 24 h** para entradas automáticas (`category_lists.effective_at`).

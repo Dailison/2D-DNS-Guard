@@ -60,7 +60,8 @@ Para o domínio, diga:
   Domínio que imita marca famosa com letras trocadas (ffacebook, g00gle) e não é o oficial = "ameaca";
   Página com SINAL de camuflagem (imita erro do navegador sem estar fora do ar, prende o botão Voltar) = SUSPEITO, "ameaca"
   (ou "apostas" se a página mostrar cassino/slots);
-  Variação/espelho de uma marca (mesmo nome com sufixo diferente, ex.: cs8sp.com da marca de cassino CS8) = a lista da marca;
+  Variação/espelho de uma marca (mesmo nome com sufixo diferente) vai para a lista do que a marca é (ex.: cs8sp.com é espelho
+  do cassino CS8, então "lista": "apostas"); "lista" é SEMPRE um dos códigos abaixo, nunca um domínio;
   Portal/buscador com notícias (nacional ou estrangeiro: Naver, Yahoo, UOL, Baidu, Yandex) = "noticias"; loja estrangeira = "compras".
   "wl:outros_liberados" só para o que foi identificado e não cabe em NENHUMA lista (religião, cultura, ONG, pessoal);
   Domínio que você NÃO consegue identificar (nome aleatório, sem presença na web, registro recente/titular oculto) =

@@ -349,3 +349,21 @@ def test_dominio_novo_passa_na_frente_do_backlog_de_reanalise(api):
     with db.conn() as c:
         ordem = [classifier._claim_llm(c)["name"] for _ in range(3)]
     assert ordem == ["suspeito-velho.net", "novo-hoje.com.br", "backlog-velho.com"], ordem
+
+
+def test_cada_reforco_com_o_seu_modelo_e_rodizio(monkeypatch):
+    """27/09: 2º reforço (RTX 5070 Ti) com gemma4:26b IQ3_S: OLLAMA_EXTRA_URLS aceita "url=modelo"; as fases 2/3 alternam."""
+    from dnsanalyzer import classifier, config, llm
+    monkeypatch.setenv("OLLAMA_EXTRA_URLS", "http://pc1:11434, http://pc2:11434/=gemma4:26b-iq3s")
+    monkeypatch.setenv("OLLAMA_EXTRA_MODEL", "gemma4:26b")
+    monkeypatch.setattr(config, "_settings", None)
+    try:
+        cfg = config.settings()
+        assert cfg.ollama_extra_urls == ["http://pc1:11434", "http://pc2:11434"]
+        assert llm.OllamaClient("http://pc1:11434").model == "gemma4:26b"
+        assert llm.OllamaClient("http://pc2:11434").model == "gemma4:26b-iq3s"
+        monkeypatch.setattr(llm.OllamaClient, "available", lambda self: (True, "ok"))
+        r = classifier._Reforco(llm.OllamaClient())
+        assert [r.cliente().url for _ in range(3)] == ["http://pc1:11434", "http://pc2:11434", "http://pc1:11434"]
+    finally:
+        config._settings = None

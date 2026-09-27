@@ -475,19 +475,22 @@ def _claim_etapa3(c) -> dict | None:
 
 
 class _Reforco:
-    """Escolhe o cliente da IA: o reforço com GPU quando responde (checado a cada 60 s); senão a VM."""
+    """Escolhe o cliente da IA: um reforço com GPU que responde (checado a cada 60 s), em rodízio entre eles (com duas
+    GPUs, as fases 2/3 e a pergunta de lista não pesam numa só); nenhum no ar: a VM."""
 
     def __init__(self, vm: OllamaClient):
-        self.vm, self.ok = vm, {}
+        self.vm, self.ok, self.vez = vm, {}, 0
         self.extras = [OllamaClient(u) for u in settings().ollama_extra_urls]
 
     def cliente(self) -> OllamaClient:
-        for x in self.extras:
+        for i in range(len(self.extras)):
+            x = self.extras[(self.vez + i) % len(self.extras)]
             t, ok = self.ok.get(x.url, (0.0, False))
             if time.monotonic() - t > 60:
                 ok = x.available()[0]
                 self.ok[x.url] = (time.monotonic(), ok)
             if ok:
+                self.vez = (self.vez + i + 1) % len(self.extras)
                 return x
         return self.vm
 

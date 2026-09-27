@@ -74,6 +74,7 @@ class Settings:
     llm_keep_alive: str
     llm_workers: int
     ollama_extra_urls: list[str]
+    ollama_extra_modelos: dict   # url -> modelo daquele reforço ("url=modelo" em OLLAMA_EXTRA_URLS)
     llm_extra_workers: int
     llm_extra_timeout: int
     llm_max_attempts: int
@@ -168,7 +169,10 @@ def load_settings() -> Settings:
         llm_workers=max(_int("LLM_WORKERS", 1), 1),
         # reforço opcional (ex.: PC com GPU): outros Ollama que aceleram a fila quando estão no ar.
         # A IA da VM segue sozinha quando eles estão desligados.
-        ollama_extra_urls=[u.rstrip("/") for u in _list("OLLAMA_EXTRA_URLS")],
+        # "http://pc1:11434,http://pc2:11434=gemma4:26b-iq3s": cada reforço pode ter o seu modelo (sem "=": OLLAMA_EXTRA_MODEL)
+        ollama_extra_urls=[u.split("=", 1)[0].rstrip("/") for u in _list("OLLAMA_EXTRA_URLS")],
+        ollama_extra_modelos={u.split("=", 1)[0].rstrip("/"): u.split("=", 1)[1].strip()
+                              for u in _list("OLLAMA_EXTRA_URLS") if "=" in u and u.split("=", 1)[1].strip()},
         llm_extra_workers=max(_int("LLM_EXTRA_WORKERS", 2), 1),
         # GPU responde em segundos: pedido que some (queda do PC/VPN) não pode segurar o domínio 10 min
         llm_extra_timeout=_int("LLM_EXTRA_TIMEOUT_SECONDS", 90),

@@ -430,6 +430,12 @@ def graficos():
 
 @admin_bp.get("/listas-categoria")
 @login_required
+def listas_categoria_antiga():
+    return redirect(url_for("admin.listas_categoria", **request.args), 301)
+
+
+@admin_bp.get("/dominios-bloqueados")
+@login_required
 def listas_categoria():
     """Listas de bloqueio por categoria: o que está em cada uma e quais empresas a aplicam."""
     if not current_app.config.get("ANALYZER_ENABLED"):
@@ -447,7 +453,7 @@ def listas_categoria():
         flash(f"Falha ao carregar as listas: {e}", "erro")
     from app import empresas as emp
     from app import politicas as pol
-    sugestoes, empresas_pol, default_tem = [], [], False
+    empresas_pol, default_tem = [], False
     try:
         por = pol.por_escopo()
         default_tem = cat in ((por.get("default") or {}).get("lists") or [])
@@ -468,14 +474,10 @@ def listas_categoria():
     if request.headers.get("X-Partial"):   # filtros/paginação/ações via Ajax: só a tabela
         return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="lista", cat=cat, det=det, fd=fd,
                                categorias=dnslib.CATEGORIAS_LISTA, scats=_site_cats(), pag_url=_pag_url)
-    try:
-        historico = api.get("/auditoria", category=cat, limit=25)
-    except AnalyzerError:
-        historico = []
     pulso = next((x.get("pulso") for x in resumo.get("categorias", []) if x["categoria"] == cat), None)
-    return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd, historico=historico, pulso=pulso,
+    return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd, pulso=pulso,
                            scats=_site_cats(), pag_url=_pag_url,
-                           categorias=dnslib.CATEGORIAS_LISTA, sugestoes=sugestoes, empresas_pol=empresas_pol,
+                           categorias=dnslib.CATEGORIAS_LISTA, empresas_pol=empresas_pol,
                            default_tem=default_tem, servicos=servicos)
 
 
@@ -524,8 +526,10 @@ def listas_lote_dominios():
     quem = admin_atual().email
     try:
         if acao == "reanalisar":
-            r = api.post("/domains-reanalyze", {"domains": doms, "by": quem})
-            return _json(True, f"{r.get('enviados', 0)} domínio(s) enviados para nova análise (voltam à fase 1)."
+            r = api.post("/domains-reanalyze", {"domains": doms, "by": quem, "de": cat})
+            nome_de = dict(dnslib.CATEGORIAS_LISTA).get(cat) or dict(dnslib.CATEGORIAS_WHITELIST).get(cat[3:] if cat.startswith("wl:") else "")
+            return _json(True, f"{r.get('enviados', 0)} domínio(s) enviados para nova análise (voltam à fase 1)"
+                         + (f" e fora da lista {nome_de}." if nome_de else ".")
                          + (f" {r['ignorados']} ficaram de fora (classificação travada à mão ou nunca acessados)." if r.get("ignorados") else ""))
         if acao == "tirar_wl":
             api.post("/whitelist-remover", {"domains": doms, "by": quem})
@@ -831,6 +835,12 @@ def _servico_ctx(slug: str) -> dict:
 
 
 @admin_bp.get("/listas-liberacao")
+@login_required
+def listas_liberacao_antiga():
+    return redirect(url_for("admin.listas_liberacao", **request.args), 301)
+
+
+@admin_bp.get("/dominios-liberados")
 @login_required
 def listas_liberacao():
     """Listas de liberação avulsas (whitelist): vencem qualquer lista de bloqueio."""

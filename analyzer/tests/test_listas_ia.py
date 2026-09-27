@@ -241,7 +241,7 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
     assert ("jogos", "v-errado.com") in em and ("compras", "v-errado.com") not in em, "corrige o que a IA local pôs"
     assert ("jogos", "playrix.com") in em, "coerência pela classificação da IA online"
     assert ("compras", "slatic.net") in em, "vale a resposta do modelo maior"
-    assert ("para_revisar", "v-sobra.com") not in em and "v-sobra.com" in ap["resolvidos"], "nenhuma com certeza: sai de Decisões"
+    assert ("para_revisar", "v-sobra.com") not in em, "nenhuma com certeza: sai de Decisões (na hora, sem esperar o ciclo)"
     assert ("streaming", "v-talvez.com") in em and ("para_revisar", "v-talvez.com") not in em, "sem certeza: fica onde a IA pôs"
     assert ("publicidade", "cookiefirst.com") in em and ("para_revisar", "cookiefirst.com") not in em, \
         "IA online: TRABALHO + publicidade 0,8 = lista (a lista diz o que o site é)"
@@ -542,6 +542,15 @@ def test_reanalisar_leva_decidido_pela_fase_1(env):
         ev = c.execute("SELECT origem, detail FROM ai_events WHERE kind = 'decisao' AND name = 'decidido-rean.net'").fetchone()
         au = c.execute("SELECT por, motivo FROM list_audit WHERE domain = 'decidido-rean.net' AND acao = 'remove'").fetchone()
     assert ev and ev["origem"] == "f5:ti" and "tec@2d: pediu nova análise" in ev["detail"], ev
+    # pedida numa lista de bloqueio (ou whitelist): sai dela
+    with db.conn() as c:
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'decidido-rean.net', 'op@2d')")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by) VALUES ('educacao', 'decidido-rean.net', 'op@2d')")
+    assert env.post("/domains-reanalyze", json={"domains": ["decidido-rean.net"], "by": "tec@2d", "de": "jogos"}, headers=H).json()["enviados"] == 1
+    assert env.post("/domains-reanalyze", json={"domains": ["decidido-rean.net"], "by": "tec@2d", "de": "wl:educacao"}, headers=H).json()["enviados"] == 1
+    with db.conn() as c:
+        assert not c.execute("SELECT 1 FROM category_lists WHERE category = 'jogos' AND domain = 'decidido-rean.net'").fetchone()
+        assert not c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'decidido-rean.net'").fetchone()
     assert au and au["por"] == "tec@2d" and "nova análise" in au["motivo"], au
     with db.conn() as c:
         c.execute("UPDATE domains SET needs_analysis = false, llm_pending = true WHERE id = %s", (i,))   # (fase A)

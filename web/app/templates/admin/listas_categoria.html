@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Domínios bloqueados{% endblock %}
 {% block content %}
-<h1>Domínios bloqueados <span class="mut" style="font-size:.8rem">· listas por categoria · cada empresa aplica as listas que quiser</span></h1>
+<h1>Domínios bloqueados</h1>
 {% set rot = dict(categorias) %}
 {% set tot = {} %}{% set tipo = {} %}{% for x in resumo.categorias %}{% set _ = tot.update({x.categoria: x.total}) %}{% set _ = tipo.update({x.categoria: x.tipo}) %}{% endfor %}
 <div class="card">
@@ -15,15 +15,7 @@
     </div>
     {% endfor %}
   </div>
-  {% set emp_com = empresas_pol|selectattr('tem')|list %}
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-top:.8rem">
-    <p class="mut" style="font-size:.85rem;margin:0;flex:1;min-width:280px">
-      <b>{{ rot.get(cat, cat) }}</b> —
-      {% if cat == 'outros_bloqueios' %}lista manual. Os sites daqui passam pelas fases da IA: com certeza, saem para a lista certa; sem certeza, ficam aqui (bloqueados) com a sugestão — aprove abaixo.
-      {% elif tipo.get(cat) == 'manual' %}lista manual: a IA não põe sites aqui sozinha (só sugere outra lista quando for o caso).
-      {% else %}a IA põe aqui os sites desta lista quando tem certeza (fases 1 a 3 = IA local com WHOIS e busca na web; fase 4 = IA online); se nenhuma fase tiver certeza, vão para a <a href="{{ url_for('analise.decisoes') }}">Decisão Humana</a> (fase 5). Dá para adicionar e tirar à mão.{{ ' ⚡ = lista de risco.' if cat in LISTAS_RISCO }}{% endif %}
-      <br>Aplicada em: {% if emp_com %}<b>{{ emp_com|map(attribute='nome')|join(', ') }}</b>{% else %}<b>nenhuma empresa</b>{% endif %}{% if default_tem %} + <b>redes sem cadastro</b>{% endif %}. O DNS baixa as listas de novo a cada 1 h{% if pulso and pulso.last_at %} (última busca desta lista: {{ pulso.last_at|dt_sp }}, {{ pulso.last_n }} domínios){% elif emp_com or default_tem %} — <b style="color:#b91c1c">o DNS ainda não buscou esta lista</b>{% endif %}.
-    </p>
+  <div style="display:flex;justify-content:flex-end;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-top:.8rem">
     <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">
       <form method="get" action="{{ url_for('admin.dominios') }}" style="display:flex;gap:.3rem;margin:0" title="abre a página do domínio: todas as listas em que ele está, a análise da IA e o editor de listas">
         <input type="text" name="q" placeholder="abrir domínio (ex.: tiktok.com)" style="width:15rem" required>
@@ -52,39 +44,8 @@
 
 <div class="card">
   <h2>{{ det.total }} domínio(s){% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem">de {{ det.total_geral }} na lista</span>{% endif %}</h2>
-  {% if cat == 'para_revisar' %}<p class="mut" style="font-size:.84rem;margin:-.3rem 0 .6rem">Filtre por <b>Sugestão da IA</b>, marque e use <b>✓ Aprovar sugestão da IA</b> (cada site vai para a lista sugerida), ou <b>Mover para…</b> / <b>Tirar da lista</b> quando discordar. Os <b>Desconhecido</b> podem ir para <b>Pedir nova análise da IA</b>.</p>{% endif %}
   {% with modo = 'lista' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>
-{% if sugestoes %}
-<div class="card">
-  <h2>Sugestões da IA para {{ rot.get(cat, cat) }} <span class="mut" style="font-size:.8rem">· {{ sugestoes|length }} site(s) classificados nesta categoria que ainda não estão na lista</span></h2>
-  <table>
-    <thead><tr><th>Domínio</th><th class="num">Consultas</th><th>Motivo</th><th></th></tr></thead>
-    <tbody>
-    {% for x in sugestoes %}
-      <tr><td><a href="{{ url_for('analise.dominio', nome=x.domain, t=0) }}">{{ x.domain }}</a></td>
-        <td class="num">{{ x.total_queries }}</td><td class="mut" style="font-size:.82rem">{{ x.corp_reason or '—' }}</td>
-        <td style="white-space:nowrap"><form method="post" action="{{ url_for('admin.listas_categoria_add') }}" style="display:inline">
-          <input type="hidden" name="cat" value="{{ cat }}"><input type="hidden" name="dominio" value="{{ x.domain }}">
-          <button class="danger" style="padding:.15rem .5rem;font-size:.78rem">+ pôr na lista</button></form></td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
-{% if historico %}
-<div class="card">
-  <h2>Últimas mudanças nesta lista <span class="mut" style="font-size:.8rem;font-weight:400">· auditoria permanente</span></h2>
-  <table><thead><tr><th>Quando</th><th>Domínio</th><th></th><th>Quem</th><th>Por quê</th></tr></thead><tbody>
-  {% for h in historico %}
-    <tr><td class="mut" style="white-space:nowrap;font-size:.82rem">{{ h.at|dt_sp }}</td>
-      <td><a href="{{ url_for('analise.dominio', nome=h.domain, t=0) }}">{{ h.domain }}</a></td>
-      <td>{{ '➕ entrou' if h.acao == 'add' else '➖ saiu' }}</td>
-      <td style="font-size:.82rem">{{ h.por or '—' }}</td><td class="mut" style="font-size:.82rem">{{ h.motivo or '' }}</td></tr>
-  {% endfor %}
-  </tbody></table>
-</div>
-{% endif %}
 <dialog id="dlgEmp" class="dlg" style="max-width:560px;width:calc(100vw - 32px)">
   <h2 style="margin:0 0 .3rem">Quem aplica a lista {{ rot.get(cat, cat) }}</h2>
   <div style="max-height:55vh;overflow:auto;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:.3rem 0">

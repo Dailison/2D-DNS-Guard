@@ -218,6 +218,7 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
         return "done"
     with db.conn() as c:
         salvar(c, d["id"], res.lista, res.confianca, res.motivo, res.servico, FONTE_LOCAL, fase_n)
+        aplicar(c, ids=[d["id"]])   # na hora (o ciclo de 5 min do classificador é a rede de segurança)
     log.debug("lista %s -> %s (%.2f, %.1fs)", d["name"], res.lista, res.confianca, meta["seconds"])
     alta = (res.confianca or 0) >= settings().lista_confianca_min
     prox = proxima_fase(d)
@@ -328,7 +329,7 @@ def _coerente(cat: str, cls: str | None, categoria: str | None) -> bool:
         not (categoria == "infraestrutura" and cat != "doh_dns")   # infra de sistemas: só com revisão
 
 
-def aplicar(c, limite: int = 3000) -> dict:
+def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
     """Resultados novos da etapa "lista" e da IA online -> listas.
 
     Com a IA online ligada, ela é a VALIDADORA: a sugestão da IA local (com ou sem certeza) espera a
@@ -348,7 +349,8 @@ def aplicar(c, limite: int = 3000) -> dict:
         "         OR td.override_classification = 'TRABALHO')) AS t_allowed, "
         " ARRAY(SELECT l.category || '|' || coalesce(l.added_by, '') FROM category_lists l WHERE l.domain = d.name) AS em "
         "FROM domains d WHERE d.lista_at IS NOT NULL AND d.lista_fonte <> 'falhou' "
-        " AND d.lista_aplicada_at IS DISTINCT FROM d.lista_at ORDER BY d.lista_at LIMIT %s", (limite,)).fetchall()
+        " AND d.lista_aplicada_at IS DISTINCT FROM d.lista_at" + (" AND d.id = ANY(%s)" if ids else "")
+        + " ORDER BY d.lista_at LIMIT %s", (ids, limite) if ids else (limite,)).fetchall()
     aplicadas = {x for r in c.execute("SELECT lists FROM policies") for x in (r["lists"] or [])}
     out = {"direto": [], "revisar": [], "resolvidos": [], "online": []}
     from . import online as _online

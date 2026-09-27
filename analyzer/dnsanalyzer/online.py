@@ -366,6 +366,7 @@ def fase(categorias: list[str]) -> str:
             log.info("IA online: %s sem a 2ª opinião (Infraestrutura); tenta de novo em 10 min", d["name"])
             return "done"   # fica reservado (online_claimed_at): a fila o pega de novo em 10 min
         gravar(c, d, obj, meta, categorias)
+        listas_ia.aplicar(c, ids=[d["id"]])   # na hora: resposta com certeza vai direto p/ a lista (sem esperar o ciclo)
     return "done"
 
 

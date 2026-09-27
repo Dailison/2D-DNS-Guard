@@ -5,6 +5,7 @@
    Tudo sem recarregar a página: filtros, paginação e ações trocam só o bloco #ddBox (a rota devolve só ele com o
    cabeçalho X-Partial; `so_tabela`). Clique no domínio = painel com o histórico completo. #}
 {% set dec = modo == 'decisoes' %}{% set lst = modo in ('lista', 'decisoes') %}{% set wlm = modo == 'whitelist' %}
+{% set gest = modo in ('lista', 'whitelist') %}{# páginas de gestão: mover, tirar, nova análise — não são de avaliação #}
 {% set rot = dict(categorias) %}
 {% set CLS = {'TRABALHO': ('Trabalho', '#dcfce7', '#166534'), 'NAO_TRABALHO': ('Não trabalho', '#fef3c7', '#92400e'),
               'SUSPEITO': ('Suspeito', '#ffedd5', '#9a3412'), 'MALICIOSO': ('Malicioso', '#fee2e2', '#991b1b'),
@@ -36,7 +37,7 @@
   .hp-tl .h{color:var(--mut);font-size:.74rem} .hp-chip{display:inline-block;font-size:.72rem;padding:.05rem .45rem;border-radius:6px;background:#e2e8f0;margin:0 .2rem .2rem 0}
 </style>
 {% endif %}
-<div id="ddBox" data-modo="{{ modo }}" data-cat="{{ cat if lst else '' }}" data-nomecat="{{ rot.get(cat, cat) if lst else '' }}" data-dec="{{ '1' if dec else '' }}">
+<div id="ddBox" data-modo="{{ modo }}" data-cat="{{ cat if lst else ('wl:' ~ wl) if wlm else '' }}" data-nomecat="{{ rot.get(cat, cat) if lst else '' }}" data-dec="{{ '1' if dec else '' }}">
 <form method="get" class="dd-f" style="margin-bottom:.8rem">
   {% if dec %}<input type="hidden" name="t" value="{{ tid }}">{% elif wlm %}<input type="hidden" name="wl" value="{{ wl }}">{% elif lst %}<input type="hidden" name="cat" value="{{ cat }}">{% else %}<input type="hidden" name="slug" value="_trabalho">{% endif %}
   <div style="flex:1"><label>Buscar</label><input type="text" name="q" value="{{ fd.q or '' }}" placeholder="parte do domínio (filtra enquanto digita)" autocomplete="off"></div>
@@ -49,7 +50,7 @@
     <option value="">todas</option>
     {% for k, n in det.facetas.cat_ia|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.cat_ia }}>{{ 'sem categoria' if k == '_sem' else scats.get(k, k) }} ({{ n }})</option>{% endfor %}
   </select></div>
-  <div><label>Sugestão da IA</label><select name="sug">
+{% if not gest %}  <div><label>Sugestão da IA</label><select name="sug">
     <option value="">todas</option>
     {% for k, n in det.facetas.get('sugestao', {})|dictsort(by='value', reverse=true) %}<option value="{{ k }}" {{ 'selected' if k == fd.sug }}>{{ {'_nenhuma': 'nenhuma lista', '_sem': 'ainda não vista'}.get(k) or LISTAS_ROT.get(k) or ('✅ ' ~ WL_ROT.get(k[3:], k)) }} ({{ n }})</option>{% endfor %}
   </select></div>
@@ -61,6 +62,7 @@
     <option value="">todas</option>
     {% for k in ('ia', 'manual', 'pendente') %}<option value="{{ k }}" {{ 'selected' if k == fd.revisao }}>{{ REV[k] }} ({{ det.facetas.revisao.get(k, 0) }})</option>{% endfor %}
   </select></div>
+{% endif %}
   <div><label>Ordem</label><select name="ordem">
     {% for k, l in (('recentes', 'mais recentes'), ('consultas', 'mais acessados'), ('nome', 'nome')) %}<option value="{{ k }}" {{ 'selected' if k == fd.ordem }}>{{ l }}</option>{% endfor %}
   </select></div>
@@ -74,7 +76,7 @@
   <label class="chk" style="margin:0;font-weight:400"><input type="checkbox" id="ddTodos"> <span>todos da página</span></label>
   <span class="mut" id="ddN" style="font-size:.85rem">0 selecionado(s)</span>
   {% if lst %}
-  <button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" data-dd="aprovar" title="cada domínio vai para a lista que a IA recomendou (bloqueio ou whitelist)">{{ '✓ Aprovar parecer da IA' if dec else '✓ Aprovar sugestão da IA' }}</button>
+  {% if dec %}<button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" data-dd="aprovar" title="cada domínio vai para a lista que a IA recomendou (bloqueio ou whitelist)">✓ Aprovar parecer da IA</button>{% endif %}
   <button type="button" class="mini {{ 'danger' if dec else 'primary' }}" data-dd="mover">{{ '⛔ Blocklist…' if dec else 'Mover para…' }}</button>
   {% if dec %}<button type="button" class="mini ok" data-dd="wl" style="background:#16a34a;color:#fff;border:0">✅ Whitelist…</button>
   {% else %}<button type="button" class="mini danger" data-dd="tirar">✕ Tirar da lista</button>{% endif %}
@@ -89,7 +91,7 @@
 </div>
 
 <div class="dd-tw"><table class="dd-t">
-  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>Ações</th><th>IA</th>{% if dec %}<th>Parecer da IA</th>{% else %}<th>Sugestão da IA</th><th>Recomendação</th>{% endif %}<th>Revisão</th><th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if wlm %}<th>Entrou na whitelist</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th>{% endif %}</tr></thead>
+  <thead><tr><th style="width:1.5rem"></th><th>Domínio</th><th>Ações</th><th>IA</th>{% if dec %}<th>Parecer da IA</th>{% elif not gest %}<th>Sugestão da IA</th><th>Recomendação</th>{% endif %}{% if not gest %}<th>Revisão</th>{% endif %}<th class="num">Consultas</th>{% if dec %}<th>Empresas que acessaram</th>{% endif %}{% if wlm %}<th>Entrou na whitelist</th>{% endif %}{% if lst %}<th>{{ 'Origem' if dec else 'Entrou na lista' }}</th>{% endif %}</tr></thead>
   <tbody>
   {% for i in det['items'] %}
     {% set c = CLS.get(i.classification) %}
@@ -99,7 +101,7 @@
       <td><a class="dd-hist" data-dom="{{ i.domain }}" href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}" title="clique: histórico · Ctrl+clique: página completa">{{ i.domain }}</a></td>
       <td><div class="dd-ra">
         {% if lst %}
-          {% if tem_sug and i.lista_ia != cat %}<button type="button" class="lib" data-ra="aprovar" data-dom="{{ i.domain }}" title="aprovar o parecer da IA: {{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else ('whitelist ' ~ WL_ROT.get(i.lista_wl, i.lista_wl)) if i.lista_wl else 'nenhuma lista (sai desta)' }}">✓</button>{% endif %}
+          {% if dec and tem_sug and i.lista_ia != cat %}<button type="button" class="lib" data-ra="aprovar" data-dom="{{ i.domain }}" title="aprovar o parecer da IA: {{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else ('whitelist ' ~ WL_ROT.get(i.lista_wl, i.lista_wl)) if i.lista_wl else 'nenhuma lista (sai desta)' }}">✓</button>{% endif %}
           <button type="button" class="blk" data-ra="mover" data-dom="{{ i.domain }}" title="{{ 'blocklist' if dec else 'mover para outra lista' }}">⛔</button>
           {% if dec %}<button type="button" class="lib" data-ra="wl" data-dom="{{ i.domain }}" title="whitelist">✅</button>
           {% else %}<button type="button" class="lib" data-ra="tirar" data-dom="{{ i.domain }}" title="tirar desta lista (manter liberado)">✅</button>{% endif %}
@@ -124,7 +126,7 @@
           {% if i.lista_motivo %}<div style="font-size:.8rem;margin-top:.15rem">{{ i.lista_motivo }}</div>{% endif %}
         {% else %}<span class="mut">—</span>{% endif %}
       </td>
-      {% else %}      <td style="font-size:.84rem;max-width:16rem">
+      {% elif not gest %}      <td style="font-size:.84rem;max-width:16rem">
         {% if tem_sug %}
           <b>{{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else ('✅ ' ~ WL_ROT.get(i.lista_wl, i.lista_wl)) if i.lista_wl else 'nenhuma lista' }}</b>{% if i.lista_conf is not none %} <span class="dd-sub">{{ (i.lista_conf * 100)|round|int }}%</span>{% endif %}
           {% if i.lista_ia and lst and i.lista_ia == cat %} <span class="dd-sub">✓ esta</span>{% endif %}
@@ -134,6 +136,7 @@
       <td style="font-size:.84rem;max-width:20rem">{{ REC.get(i.corp_action, i.corp_action or '—') }}
         {% if i.corp_reason %}<div class="dd-sub">{{ i.corp_reason|truncate(140) }}</div>{% endif %}</td>
       {% endif %}
+      {% if not gest %}
       <td style="font-size:.84rem">
         <b>{{ REV[i.revisao] }}</b>
         {% if i.revisao == 'manual' %}
@@ -146,6 +149,7 @@
         {% elif not i.classification and not i.last_seen %}<div class="dd-sub">nunca acessado pelos clientes</div>
         {% else %}<div class="dd-sub">na fila da IA</div>{% endif %}
       </td>
+      {% endif %}
       <td class="num">{{ i.total_queries or 0 }}</td>
       {% if dec %}<td style="font-size:.82rem">{% for e in (i.empresas or [])[:3] %}<a href="{{ url_for('analise.dominio', nome=i.domain, t=e.id) }}">{{ e.name }}</a>{{ ', ' if not loop.last }}{% else %}<span class="mut">nenhuma (nunca acessado)</span>{% endfor %}{% if (i.empresas or [])|length > 3 %} <span class="dd-sub">+{{ i.empresas|length - 3 }}</span>{% endif %}</td>{% endif %}
       {% if lst or wlm %}

@@ -646,12 +646,15 @@ def test_cascata_por_confianca(env, monkeypatch):
     assert not a["lista_duvida"] and a["incerta"] and not any(n == "cascata-a.com" for n, _ in ap["online"]), "sem confiança: fase 2 antes"
     assert ("jogos", "cascata-b.com") not in em and b["lista_duvida"], "lista com confiança alta: a IA online valida"
     assert ("para_revisar", "cascata-c.com") in em and cc["lista_duvida"], "tirar de Decisões: a IA online valida"
-    assert not e["lista_duvida"] and e["revisado_at"], "nenhuma com confiança alta, fora de listas: a IA local decide"
-    with db.conn() as c:   # coluna "Decisão" do IA ao vivo: quem decidiu
+    assert e["lista_duvida"] and not e["revisado_at"], "liberar com confiança alta: a IA online valida (a local não decide sozinha)"
+    with db.conn() as c:   # a IA online confirma a liberação: vai p/ a whitelist; a coluna "Decisão" mostra quem decidiu
+        listas_ia.salvar(c, ids["cascata-e.com"], "wl:rh_beneficios", 0.9, "portal de RH", "RH X", "online:gemini", 4)
+        listas_ia.aplicar(c)
         org = c.execute("SELECT origem FROM ai_events WHERE kind = 'aprovado' AND name = 'cascata-e.com'").fetchone()
-    assert org and org["origem"] == "f2:local", org
+        wle = c.execute("SELECT category, added_by FROM whitelist_domains WHERE domain = 'cascata-e.com'").fetchone()
+    assert org and org["origem"] == "f4:online" and wle["category"] == "rh_beneficios" and wle["added_by"] == "IA online", (org, wle)
     ev = env.get("/ai/events", headers=H).json()
-    assert any(x.get("name") == "cascata-e.com" and x.get("origem") == "f2:local" for x in ev.get("events", ev) if isinstance(x, dict)), \
+    assert any(x.get("name") == "cascata-e.com" and x.get("origem") == "f4:online" for x in ev.get("events", ev) if isinstance(x, dict)), \
         "a API entrega a origem"
     with db.conn() as c:   # fases 2 e 3 sem dados úteis: agora vai p/ a fase 4
         c.execute("UPDATE domains SET whois_at = now(), web_search_at = now(), lista_aplicada_at = NULL WHERE id = %s",
@@ -687,21 +690,29 @@ def test_todo_site_vai_p_uma_fila_whitelist(env, monkeypatch):
             ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
                                "VALUES (%s, %s, %s, now(), 5) RETURNING id", (n, cls, cat)).fetchone()["id"]
         listas_ia.salvar(c, ids["banco-wlf.com.br"], "wl:financas", 0.95, "banco digital", "Banco X", "local", 2)
+        # (liberação da IA local de antes da validação: entrada provisória, que a resposta da IA online substitui)
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES ('comunicacao', 'banco-wlf.com.br', "
+                  "'IA local (fase 2)', false)")
         listas_ia.salvar(c, ids["escola-wlf.com.br"], "wl:educacao", 0.9, "escola", "Escola Y", "online:gemini", 4)
         c.execute("UPDATE domains SET online_resp = %s WHERE id = %s", (Jsonb({"classificacao": "TRABALHO", "reconhecido": True,
                   "categoria": "educacao", "_meta": {"antes": {"lista": "wl:educacao", "confianca": 0.95, "classificacao": "TRABALHO"}}}),
                   ids["escola-wlf.com.br"]))
         listas_ia.aplicar(c)
+        assert c.execute("SELECT lista_duvida FROM domains WHERE id = %s", (ids["banco-wlf.com.br"],)).fetchone()["lista_duvida"], \
+            "liberação da IA local vai p/ a IA online"
+    with db.conn() as c:   # (resposta da IA online noutra transação, como em produção: now() muda)
+        listas_ia.salvar(c, ids["banco-wlf.com.br"], "wl:financas", 0.9, "banco digital", "Banco X", "online:gemini", 4)
+        listas_ia.aplicar(c)
         wl = {r["domain"]: r for r in c.execute("SELECT domain, category, publicar, added_by FROM whitelist_domains WHERE domain LIKE '%%-wlf.com.br'")}
         assert wl["banco-wlf.com.br"]["category"] == "financas" and not wl["banco-wlf.com.br"]["publicar"], wl
-        assert wl["banco-wlf.com.br"]["added_by"] == "IA local (fase 2)"
+        assert wl["banco-wlf.com.br"]["added_by"] == "IA online", "a categoria da IA online substitui a provisória da IA local"
         assert wl["escola-wlf.com.br"]["category"] == "educacao" and not wl["escola-wlf.com.br"]["publicar"]
         whitelist.aplicar(c)   # dois modelos online de acordo (TRABALHO, whitelist): passa a valer no DNS
         pub = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, publicar FROM whitelist_domains WHERE domain LIKE '%%-wlf.com.br'")}
         assert pub == {"banco-wlf.com.br": False, "escola-wlf.com.br": True}, pub
         assert "banco-wlf.com.br" not in whitelist.dominios(c, "financas") and "escola-wlf.com.br" in whitelist.dominios(c, "educacao")
         ev = c.execute("SELECT detail, origem, classification FROM ai_events WHERE kind = 'aprovado' AND name = 'banco-wlf.com.br'").fetchone()
-        assert ev["origem"] == "f2:local" and ev["detail"].startswith("wl:financas|Bancos") and ev["classification"] == "TRABALHO", ev
+        assert ev["origem"] == "f4:online" and ev["detail"].startswith("wl:financas|Bancos") and ev["classification"] == "TRABALHO", ev
         # Decisão Humana: aprovar a sugestão "wl:..." libera na whitelist (publicada) e registra a decisão
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'decidir-wlf.com.br', 'IA com dúvida (nenhuma)')")
         listas_ia.salvar(c, ids["decidir-wlf.com.br"], "wl:logistica", 0.6, "transportadora", "Transp Z", "online:gemini", 4)

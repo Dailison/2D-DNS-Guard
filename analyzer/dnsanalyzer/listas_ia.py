@@ -225,8 +225,7 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
     eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), meta.get("seconds"),
                       detail=f"{fase_n}|lista {res.lista} {float(res.confianca or 0) * 100:.0f}%"
                       + (f" · {res.servico}" if res.servico else "") + (f" — {res.motivo}" if res.motivo else "")
-                      + ((" · confiança alta: a IA local decide" if res.lista == NENHUMA or e_wl(res.lista) else
-                          " · confiança alta: vai p/ a IA online validar (fase 4)") if alta else
+                      + (" · confiança alta: vai p/ a IA online validar (fase 4)" if alta else
                          f" · confiança baixa: segue p/ a fase {prox}" + (" (IA online)" if prox == 4 else "")))
     return "done"
 
@@ -360,8 +359,12 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         """Decisão final de liberar: o site entra numa whitelist (Domínios liberados), na categoria escolhida pela IA.
         Não é publicado no DNS (fora de listas de bloqueio já está liberado; a whitelist vence qualquer bloqueio em
         todas as empresas) — whitelist.aplicar publica o que tiver pessoa, catálogo ou dois modelos online."""
-        if c.execute("SELECT 1 FROM whitelist_domains WHERE domain = %s", (r["name"],)).fetchone():
-            return
+        ja = c.execute("SELECT category, added_by FROM whitelist_domains WHERE domain = %s", (r["name"],)).fetchone()
+        if ja:
+            if not ((r["lista_fonte"] or "").startswith("online") and (ja["added_by"] or "").startswith("IA local")):
+                return
+            # posta antes pela IA local (provisória, de antes da validação): a categoria da IA online vale
+            c.execute("DELETE FROM whitelist_domains WHERE domain = %s AND added_by LIKE 'IA local%%'", (r["name"],))
         on = (r["lista_fonte"] or "").startswith("online")
         wl = r["lista_wl"] or whitelist._categoria(r["cat_online"] if on else r["category"], cls)
         por = "IA online" if on else f"IA local (fase {r['lista_fase']})" if r["lista_fase"] else "IA local"
@@ -392,30 +395,22 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
 
         if humano_contra:
             continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
-        local_decide = False
         if not online and online_ok:   # IA local (fases 1-3)
             # resposta nova da IA local: a ida p/ a IA online de uma rodada anterior não vale mais
             sem_online = "UPDATE domains SET lista_duvida = false WHERE id = %s AND lista_duvida"
             if fixas or (cat and cat in em):
                 c.execute(sem_online, (r["id"],))
                 continue
-            # confiança alta em "nenhuma lista" p/ site fora de listas: a IA local decide (Aprovados). Pôr numa lista ou
-            # tirar de uma continua com a validação da IA online: na prova de 27/09 (50 domínios, fases 1-3 x IA online)
-            # a IA local acertou 4/4 "liberar", mas 6/8 "bloquear" (typosquat do Facebook -> redes_sociais em vez de
-            # ameaça; adguard.com -> adware 100% mesmo com o WHOIS) — o critério do usuário era 100%
-            if certo and not cat and not em:
-                local_decide = True
-            elif not certo and proxima_fase(r) < 4:
+            # a IA local não decide sozinha (critério do usuário: 100% de acerto): toda resposta dela — lista de bloqueio
+            # ou whitelist — passa pela IA online. Provas de 27/09: "bloquear" 6/8 (typosquat -> redes_sociais,
+            # adguard -> adware); com as whitelists como opção, "liberar" com 100% p/ mensageiro (zaloapp.com ->
+            # wl:comunicacao), rede social (masto.pt) e CDN de apostas. Sem confiança alta: fases 2 e 3 antes.
+            if not certo and proxima_fase(r) < 4:
                 c.execute(sem_online, (r["id"],))
                 continue   # sem confiança alta: fase 2 (WHOIS) / 3 (busca na web) primeiro
-            else:   # confiança alta (validação) ou sem confiança alta depois da fase 3: fase 4 (IA online)
-                c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
-                out["online"].append((r["name"], cat))
-                continue
-        if local_decide:   # avaliado (Aprovados, sem reanálise) e fim da revisão pedida
-            c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false, lista_duvida = false WHERE id = %s",
-                      (r["id"],))
-            liberar(r, cls)
+            # confiança alta (validação) ou sem confiança alta depois da fase 3: fase 4 (IA online)
+            c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
+            out["online"].append((r["name"], cat))
             continue
 
         if fixas and (not cat or cat not in em):

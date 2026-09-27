@@ -80,9 +80,10 @@ explicitamente nas evidências.
 | 5. Decisões | `listas.FASE5_SQL` | o que sobrou sem certeza; a TI decide no console |
 
 Cascata por confiança (≥ `LISTA_CONFIANCA_MIN`, 0,9): sem confiança alta, o site segue para a fase seguinte
-(`incerta_sql`/`proxima_fase`; fase sem dados também avança). A IA local decide sozinha só "nenhuma lista" para
-site fora de listas (Aprovados); **pôr numa lista ou tirar de uma espera a IA online validar** (`lista_duvida`) —
-na prova de 27/09 (50 domínios) ela acertou 4/4 "liberar", mas 6/8 "bloquear". Depois da resposta online,
+(`incerta_sql`/`proxima_fase`; fase sem dados também avança). **A IA local não decide sozinha**: toda resposta
+dela — lista de bloqueio ou whitelist ("wl:<categoria>") — espera a IA online validar (`lista_duvida`). Nas provas de
+27/09 ela errou com 100% de confiança tanto no bloqueio (typosquat -> redes_sociais) quanto na liberação (mensageiro ->
+wl:comunicacao). A resposta de cada fase é aplicada na hora (`aplicar(ids=...)`). Depois da resposta online,
 `listas_ia.aplicar`:
 - aplica a resposta online com confiança ≥ `ONLINE_CONFIANCA_MIN` (0,8) quando ela é coerente.
   Com `MALICIOSO`, o domínio vai para **Ameaças**;

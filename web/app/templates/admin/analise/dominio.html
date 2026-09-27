@@ -11,15 +11,7 @@
 <div class="card">
   <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:center">
     <h2 style="margin:0;font-size:1.3rem">{{ dm.name }}</h2>
-    {{ m.badge(cls) }} {{ m.cat(dm.category) }}
-    {% if blq %}{% if blq.listas and blq.listas|selectattr('empresas')|list %}<span class="stt blk">🔒 Bloqueado</span>{% else %}<span class="stt ok">🔓 Liberado</span>{% endif %}{% endif %}
-    {% if tv.review_status %}<span class="tag">{{ {'blocked':'decidido: bloquear','allowed':'decidido: manter liberado'}.get(tv.review_status) }} · {{ tv.reviewed_by or '' }}</span>{% endif %}
-    {% if d.global_review %}{% set gr = d.global_review %}
-    <span class="tag" title="decidido na visão Todos os clientes em {{ gr.reviewed_at|dt_sp }}: vale para empresas sem decisão própria, inclusive as que acessarem depois">🌐 {{ {'blocked':'decisão global: bloquear','allowed':'decisão global: manter liberado'}.get(gr.status) }} · {{ gr.reviewed_by or '' }}
-      <form method="post" action="{{ url_for('analise.dominio_decisao_global', nome=dm.name) }}" style="display:inline" onsubmit="return confirm('Desfazer a decisão global? Empresas sem decisão própria voltam para a fila.')">
-        <input type="hidden" name="tid" value="{{ tid }}"><button class="mini neu" style="margin-left:.3rem">desfazer</button></form></span>{% endif %}
-    {% if tv.overridden %}<span class="tag">ajuste manual neste cliente</span>{% endif %}
-    {{ m.origem(dm.classified_by, dm.llm_pending) }}
+    {{ m.badge(cls) }}
   </div>
   <div class="m-grid" style="margin-top:.8rem">
     <div class="metric"><div class="n">{{ dm.risk_score if dm.risk_score is not none else '—' }}</div><div class="l">RISK_SCORE</div></div>
@@ -36,13 +28,6 @@
     Registro: {{ dm.registered_at or '—' }} ·
     Analisado: {{ dm.analyzed_at|dt_sp }}{% if dm.model %} ({{ dm.model }}){% endif %}
   </p>
-  {% set rv = tv if tv.corp_action else dm %}
-  {% if rv.corp_action %}
-  <p style="margin:.7rem 0 0">Recomendação para a empresa (ambiente corporativo): {{ m.rec(rv, full=true) }}</p>
-  {% endif %}
-  {% if dm.recommended_action == 'BLOCK_CANDIDATE' %}
-  <p class="flash erro" style="margin:.8rem 0 0">Candidato a bloqueio. Nada foi bloqueado automaticamente: para bloquear, use <a href="#bloqueio">Ações → Bloqueio no DNS</a> (aprovação humana).</p>
-  {% endif %}
 </div>
 
 <div class="two">
@@ -57,7 +42,6 @@
       {% else %}<tr><td colspan="3" class="mut">Sem justificativas registradas.</td></tr>{% endfor %}
       </tbody>
     </table>
-    <p class="hint">A IA só pode justificar citando uma evidência (E0, E1, …) da lista ao lado; justificativas sem evidência são descartadas automaticamente.</p>
   </div>
 
   <div class="card">
@@ -73,34 +57,8 @@
   </div>
 
   <div class="card">
-    <h2>Reputação (Threat Intelligence)</h2>
-    {% if dm.ti_hits %}
-    <table>
-      <thead><tr><th>Fonte</th><th>Tipo</th><th>Confiança</th><th>Entrada</th></tr></thead>
-      <tbody>
-      {% for h in dm.ti_hits %}
-        <tr><td>{{ h.label }}</td><td>{{ h.threat }}</td><td>{{ h.confidence }}</td><td><code>{{ h.matched }}</code></td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <p class="mut">Não consta nas listas de ameaça consultadas. <b>Isso não significa que é seguro</b> — só que não há registro conhecido.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <h2>Consultas por dia (30 dias)</h2>
-    {% set mx = (d.timeline|map(attribute='queries')|max) if d.timeline else 1 %}
-    <div style="display:flex;align-items:flex-end;gap:2px;height:90px">
-      {% for p in d.timeline %}
-        <div title="{{ p.day|dt_sp('%d/%m') }}: {{ p.queries }}" style="flex:1;background:var(--b);min-width:3px;height:{{ ((p.queries / mx) * 100)|round|int }}%"></div>
-      {% else %}<span class="mut">Sem consultas nos últimos 30 dias.</span>{% endfor %}
-    </div>
-  </div>
-
   {% if todos and d.by_tenant %}
-  <div class="card">
-    <h2>Acessado por empresa ({{ d.by_tenant|length }})</h2>
+      <h3 style="margin:0 0 .4rem">Acessado por empresa ({{ d.by_tenant|length }})</h3>
     <table>
       <thead><tr><th>Empresa</th><th class="num">Consultas</th><th class="num">PCs</th><th>Último acesso</th><th>Ajuste manual</th></tr></thead>
       <tbody>
@@ -112,11 +70,8 @@
       {% endfor %}
       </tbody>
     </table>
-  </div>
   {% endif %}
-
-  <div class="card">
-    <h2>Computadores que acessaram</h2>
+    <h3 style="margin:{{ '1rem' if todos and d.by_tenant else '0' }} 0 .4rem">Computadores que acessaram</h3>
     <table>
       <thead><tr><th>Computador</th>{% if todos %}<th>Empresa</th>{% endif %}<th class="num">Consultas</th><th class="num">Bloq.</th><th>Primeiro</th><th>Último</th></tr></thead>
       <tbody>
@@ -126,65 +81,14 @@
       {% endfor %}
       </tbody>
     </table>
-  </div>
-
-  <div class="card">
-    <h2>Subdomínios observados</h2>
-    <table>
-      <thead><tr><th>Nome</th><th class="num">Consultas</th><th>Último</th></tr></thead>
-      <tbody>
-      {% for f in d.fqdns %}
-        <tr><td><code>{{ f.name }}</code></td><td class="num">{{ f.queries }}</td><td class="mut" style="white-space:nowrap">{{ f.last_seen|dt_sp }}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  {% if irmaos %}
-  <div class="card">
-    <h2>Domínios irmãos <span class="mut" style="font-size:.8rem;font-weight:400">· mesmo certificado ou mesmo titular (CNPJ) no WHOIS, vistos nos logs e fora das mesmas listas</span></h2>
-    <table><thead><tr><th>Domínio</th><th>Por quê</th><th>Listas atuais</th><th class="num">Consultas</th></tr></thead><tbody>
-    {% for x in irmaos %}
-      <tr><td><a href="{{ url_for('analise.dominio', nome=x.domain, t=tid) }}">{{ x.domain }}</a></td><td class="mut" style="font-size:.82rem">{{ x.motivo }}</td>
-        <td style="font-size:.82rem">{% for c in x.listas_atuais %}{{ LISTAS_ROT.get(c, c) }}{{ ', ' if not loop.last }}{% else %}—{% endfor %}</td>
-        <td class="num">{{ x.total_queries or 0 }}</td></tr>
-    {% endfor %}
-    </tbody></table>
-    <p class="hint">Para pôr vários de uma vez numa lista, abra a lista em Domínios bloqueados, clique no domínio (painel de histórico) → 🔎 Domínios irmãos.</p>
-  </div>
-  {% endif %}
-
-  {% if auditoria %}
-  <div class="card">
-    <h2>Histórico nas listas <span class="mut" style="font-size:.8rem;font-weight:400">· o domínio e os domínios pais</span></h2>
-    <table><thead><tr><th>Quando</th><th>Lista</th><th></th><th>Domínio</th><th>Quem</th><th>Por quê</th></tr></thead><tbody>
-    {% for h in auditoria %}
-      <tr><td class="mut" style="white-space:nowrap;font-size:.82rem">{{ h.at|dt_sp }}</td><td>{{ LISTAS_ROT.get(h.category, h.category) }}</td>
-        <td>{{ '➕ entrou' if h.acao == 'add' else '➖ saiu' }}</td><td style="font-size:.82rem">{{ h.domain }}</td>
-        <td style="font-size:.82rem">{{ h.por or '—' }}</td><td class="mut" style="font-size:.82rem">{{ h.motivo or '' }}</td></tr>
-    {% endfor %}
-    </tbody></table>
-  </div>
-  {% endif %}
-
-  <div class="card">
-    <h2>Histórico da classificação</h2>
-    <table>
-      <thead><tr><th>Quando</th><th>Classe</th><th class="num">Risco</th><th class="num">Trab.</th><th>Origem</th></tr></thead>
-      <tbody>
-      {% for h in d.history %}
-        <tr><td class="mut" style="white-space:nowrap">{{ h.created_at|dt_sp }}</td><td>{{ m.badge(h.classification) if h.classification else '<span class="mut">override removido</span>'|safe }}</td>
-            <td class="num">{{ h.risk_score if h.risk_score is not none else '—' }}</td><td class="num">{{ h.work_score if h.work_score is not none else '—' }}</td>
-            <td class="mut">{{ m.origem(h.source, false) }}{% if h.tenant_name %} <span style="font-size:.75rem">· {{ h.tenant_name }}</span>{% endif %}{% if h.note %}<br><span style="font-size:.75rem">{{ h.note }}</span>{% endif %}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>Ações</h2>
+    <h3 style="margin:1rem 0 .4rem">Ações</h3>
+    {% if d.global_review %}{% set gr = d.global_review %}
+    <div style="font-size:.88rem;margin-bottom:.5rem" title="Decidido na visão Todos os clientes em {{ gr.reviewed_at|dt_sp }}: vale para empresas sem decisão própria, inclusive as que acessarem depois.">🌐 {{ {'blocked':'Decisão global: bloquear','allowed':'Decisão global: manter liberado'}.get(gr.status) }} · {{ gr.reviewed_by or '' }}
+      <form method="post" action="{{ url_for('analise.dominio_decisao_global', nome=dm.name) }}" style="display:inline" onsubmit="return confirm('Desfazer a decisão global? Empresas sem decisão própria voltam para a fila.')">
+        <input type="hidden" name="tid" value="{{ tid }}"><button class="mini neu" style="margin-left:.3rem">desfazer</button></form></div>{% endif %}
+    {% if tv.review_status %}<div style="font-size:.88rem;margin-bottom:.5rem">{{ {'blocked':'Decidido nesta empresa: bloquear','allowed':'Decidido nesta empresa: manter liberado'}.get(tv.review_status) }} · {{ tv.reviewed_by or '' }}</div>{% endif %}
     {% if blq %}
-    <div id="bloqueio" style="border:1px solid var(--bd);border-radius:10px;padding:.7rem .8rem;margin-bottom:1rem;background:#fafbfc">
+    <div id="bloqueio" style="border:1px solid var(--bd);border-radius:10px;padding:.7rem .8rem;margin-bottom:1rem">
       <label style="margin-top:0">Bloqueio no DNS (Technitium) — <code>{{ blq.nome }}</code></label>
       {% if not blq.listas %}
         <p style="margin:.3rem 0">🔓 <b>Não está</b> em nenhuma lista de bloqueio.</p>
@@ -211,8 +115,7 @@
         <script>(function () { const nas = {{ nas|tojson }}, sug = {{ (dm.lista_ia or '')|tojson }};
           document.querySelectorAll("#fListasG .lx-sec input").forEach(i => { i.checked = nas.includes(i.value);
             i.closest("label").querySelector(".lx-sug").hidden = i.value !== sug; }); })();</script>
-        <button type="button" class="danger" id="bListas">Salvar listas</button>
-        <span class="mut" style="font-size:.8rem;margin-left:.5rem">vale para todas as empresas que aplicam cada lista (no DNS em até 1 h); nenhuma marcada = manter liberado</span>
+        <button type="button" class="danger" id="bListas" title="Vale para todas as empresas que aplicam cada lista (no DNS em até 1 h); nenhuma marcada = manter liberado.">Salvar listas</button>
       </form>
       <script>
       document.getElementById("bListas").addEventListener("click", async (ev) => {
@@ -231,15 +134,11 @@
             onsubmit="return confirm('Liberar {{ blq.nome }} só para {{ tenant.name }}? Vale na hora; as demais empresas seguem com as listas delas.')">
         <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">
         <button class="btn" style="background:#16a34a">🔓 Liberar só para {{ tenant.name }}</button>
-        <span class="mut" style="font-size:.8rem">(lista “Exceções · {{ tenant.name }}”, em Domínios liberados)</span>
       </form>
       {% endif %}
-      <p class="hint" style="margin-top:.5rem">As listas são compartilhadas: a mudança vale para todas as empresas que aplicam cada lista. Quais listas cada empresa aplica: Empresas → Listas…. Para exceções só de alguns computadores, use IPs liberados.</p>
     </div>
     {% endif %}
-    {% if todos %}
-    <p class="mut" style="font-size:.88rem">O ajuste manual da classificação vale <b>por empresa</b>: abra o domínio na visão de uma empresa (quadro "Acessado por empresa") para ajustar.</p>
-    {% else %}
+    {% if not todos %}
     <form method="post" action="{{ url_for('analise.dominio_override', nome=dm.name) }}">
       <input type="hidden" name="tid" value="{{ tid }}">
       <label>Ajustar classificação <b>só para {{ tenant.name if tenant else 'este cliente' }}</b></label>
@@ -273,9 +172,73 @@
     <form method="post" action="{{ url_for('analise.dominio_reanalisar', nome=dm.name) }}" style="margin-top:.8rem">
       <input type="hidden" name="tid" value="{{ tid }}">
       <button class="btn">Reanalisar (regras + IA)</button>
-      <span class="hint">útil depois de mudar fontes ou se a classificação parecer errada</span>
     </form>
   </div>
+
+  <div class="card">
+    <h2>Consultas por dia (30 dias)</h2>
+    {% set mx = (d.timeline|map(attribute='queries')|max) if d.timeline else 1 %}
+    <div style="display:flex;align-items:flex-end;gap:2px;height:90px">
+      {% for p in d.timeline %}
+        <div title="{{ p.day|dt_sp('%d/%m') }}: {{ p.queries }}" style="flex:1;background:var(--b);min-width:3px;height:{{ ((p.queries / mx) * 100)|round|int }}%"></div>
+      {% else %}<span class="mut">Sem consultas nos últimos 30 dias.</span>{% endfor %}
+    </div>
+  </div>
+
+
+
+  <div class="card">
+    <h2>Subdomínios observados</h2>
+    <table>
+      <thead><tr><th>Nome</th><th class="num">Consultas</th><th>Último</th></tr></thead>
+      <tbody>
+      {% for f in d.fqdns %}
+        <tr><td><code>{{ f.name }}</code></td><td class="num">{{ f.queries }}</td><td class="mut" style="white-space:nowrap">{{ f.last_seen|dt_sp }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if irmaos %}
+  <div class="card">
+    <h2 title="Mesmo certificado ou mesmo titular (CNPJ) no WHOIS, vistos nos logs e fora das mesmas listas.">Domínios irmãos</h2>
+    <table><thead><tr><th>Domínio</th><th>Por quê</th><th>Listas atuais</th><th class="num">Consultas</th></tr></thead><tbody>
+    {% for x in irmaos %}
+      <tr><td><a href="{{ url_for('analise.dominio', nome=x.domain, t=tid) }}">{{ x.domain }}</a></td><td class="mut" style="font-size:.82rem">{{ x.motivo }}</td>
+        <td style="font-size:.82rem">{% for c in x.listas_atuais %}{{ LISTAS_ROT.get(c, c) }}{{ ', ' if not loop.last }}{% else %}—{% endfor %}</td>
+        <td class="num">{{ x.total_queries or 0 }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+  </div>
+  {% endif %}
+
+  {% if auditoria %}
+  <div class="card">
+    <h2 title="O domínio e os domínios pais.">Histórico nas listas</h2>
+    <table><thead><tr><th>Quando</th><th>Lista</th><th></th><th>Domínio</th><th>Quem</th><th>Por quê</th></tr></thead><tbody>
+    {% for h in auditoria %}
+      <tr><td class="mut" style="white-space:nowrap;font-size:.82rem">{{ h.at|dt_sp }}</td><td>{{ LISTAS_ROT.get(h.category, h.category) }}</td>
+        <td>{{ '➕ entrou' if h.acao == 'add' else '➖ saiu' }}</td><td style="font-size:.82rem">{{ h.domain }}</td>
+        <td style="font-size:.82rem">{{ h.por or '—' }}</td><td class="mut" style="font-size:.82rem">{{ h.motivo or '' }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Histórico da classificação</h2>
+    <table>
+      <thead><tr><th>Quando</th><th>Classe</th><th class="num">Risco</th><th class="num">Trab.</th><th>Origem</th></tr></thead>
+      <tbody>
+      {% for h in d.history %}
+        <tr><td class="mut" style="white-space:nowrap">{{ h.created_at|dt_sp }}</td><td>{{ m.badge(h.classification) if h.classification else '<span class="mut">override removido</span>'|safe }}</td>
+            <td class="num">{{ h.risk_score if h.risk_score is not none else '—' }}</td><td class="num">{{ h.work_score if h.work_score is not none else '—' }}</td>
+            <td class="mut">{{ m.origem(h.source, false) }}{% if h.tenant_name %} <span style="font-size:.75rem">· {{ h.tenant_name }}</span>{% endif %}{% if h.note %}<br><span style="font-size:.75rem">{{ h.note }}</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
 </div>
 {% endif %}
 {% endblock %}

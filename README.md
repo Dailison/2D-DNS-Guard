@@ -5,11 +5,11 @@ do [2D Hub](https://portal.2dtecnologia.com) (login único + launcher).
 
 Filtra ameaças e sites improdutivos **por empresa**. Todo domínio que aparece nos logs passa
 por um fluxo de 5 fases. As IAs põem cada site na lista certa (de bloqueio ou de liberação),
-e só o que nenhuma delas resolve com certeza chega à TI em *Decisões*.
+e só o que nenhuma delas resolve com certeza chega à TI na fase 5, *Decisão Humana*.
 
 | Parte | Onde roda | Pasta |
 |---|---|---|
-| **Console web**: Análise (IA), Decisões, Empresas, Domínios bloqueados, Domínios liberados, IPs liberados, Logs, Gráficos, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
+| **Console web**: Análise (IA), Decisão Humana, Empresas, Domínios bloqueados, Domínios liberados, IPs liberados, Logs, Gráficos, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
 | **Analisador**: coleta dos logs, regras, Threat Intel, IA local (Ollama/Qwen3), IA online (Gemini), listas, alertas, API | VM `10.100.10.4` (systemd + PostgreSQL) | [`analyzer/`](analyzer/) |
 | **Resolvedor/filtro**: Technitium + app Advanced Blocking | VM `10.100.10.15` | (fora do repo) |
 
@@ -35,10 +35,10 @@ O analisador apenas publica as listas em texto, e o Technitium as baixa.
 | 2. WHOIS + IA local | RDAP/registro.br e o titular (CNPJ) entram no dossiê |
 | 3. Busca web + IA local | SearXNG com o nome do domínio, para o que a IA ainda não reconhece |
 | 4. IA online | Gemini/Gemma recebe **todo** o contexto das fases 1-3 e valida ou corrige a sugestão local |
-| 5. Decisões | só o que a IA online não resolveu com certeza (a TI decide) |
+| 5. Decisão Humana | só o que a IA online não resolveu com certeza (a TI decide) |
 
 - Resposta da IA online com confiança **≥ 0,8** e coerente vai direto para a lista.
-  `MALICIOSO` com certeza vai para **Ameaças**. "Nenhuma lista" com certeza sai de Decisões.
+  `MALICIOSO` com certeza vai para **Ameaças**. "Nenhuma lista" com certeza sai da Decisão Humana.
 - **DoH/DNS** exige dois modelos com confiança ≥ 0,95. Isso nasceu de um incidente: CDNs
   foram parar em DoH e bloquearam o seu.ze.delivery.
 - **Travas**: infraestrutura protegida do catálogo e decisões humanas ("manter liberado")

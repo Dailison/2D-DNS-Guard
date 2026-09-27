@@ -87,7 +87,7 @@ na prova de 27/09 (50 domínios) ela acertou 4/4 "liberar", mas 6/8 "bloquear". 
 - aplica a resposta online com confiança ≥ `ONLINE_CONFIANCA_MIN` (0,8) quando ela é coerente.
   Com `MALICIOSO`, o domínio vai para **Ameaças**;
 - com "nenhuma lista" certa, tira o domínio de Decisões e das listas que a IA tinha posto;
-- manda o resto para Decisões (fase 5).
+- manda o resto para a Decisão Humana (fase 5).
 
 Salvaguardas (`guardado`):
 - infraestrutura protegida do catálogo nunca é bloqueada;
@@ -268,7 +268,7 @@ A lista completa está em `dnsanalyzer/api.py`. Os principais grupos:
 - **Whitelists e liberações:** `GET /whitelist/{cat}.txt` · `GET /whitelist` ·
   `GET /whitelist/{cat}/detalhes` · `POST /whitelist/{cat}` · `POST /whitelist-remover` ·
   `GET/POST /liberacao` · `GET /servico/{slug}.txt` · `GET /liberacao/{slug}.txt`.
-- **Decisões (fase 5):** `GET /online/pendentes` · `POST /online/decisao`.
+- **Decisão Humana (fase 5):** `GET /online/pendentes` · `POST /online/decisao`.
 - **Políticas e console:** `GET /policies` · `PUT/DELETE /policies/{escopo}` ·
   `GET /policies/impacto` · `GET/POST /console/excecoes` · `POST /console/excecoes/remover` ·
   `GET/POST /console/technitium-backups` · `/console/operators` · `GET /logs/grouped`.

@@ -34,7 +34,7 @@
   <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado, .br primeiro">Fase 2 · WHOIS</div></div>
   <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web (depois do WHOIS)">Fase 3 · busca na web</div></div>
   <div class="metric"><div class="n" id="st-online">–</div><div class="l" title="o que a IA local não resolveu com confiança vai para a IA online (Gemini)">Fase 4 · IA online</div></div>
-  <div class="metric"><div class="n" id="st-revisar">–</div><div class="l" title="Decisões: classificação manual pela equipe de TI">Fase 5 · Decisões</div></div>
+  <div class="metric"><div class="n" id="st-revisar">–</div><div class="l" title="classificação manual pela equipe de TI">Fase 5 · Decisão Humana</div></div>
 </div>
 
 <div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div>
@@ -65,10 +65,10 @@
   var feed = document.getElementById('feed'), feedDec = document.getElementById('feedDec');
   var LROT = {{ LISTAS_ROT|tojson }};
   var DEC = {lista_add: 1, lista_rem: 1, fase5: 1, decisao: 1, auto_block: 1, lista_ia: 1, lista_recusada: 1, aprovado: 1};
-  // quem decidiu (coluna Decisão): fase 1-3 = IA local, 4 = IA online, 5 = equipe de TI
+  // quem decidiu (coluna Decisão): fase 1-3 = IA local, 4 = IA online, 5 = Decisão Humana
   var ORIGEM = {'f1:local': ['Fase 1 · IA local', 'local'], 'f2:local': ['Fase 2 · IA local', 'local'],
                 'f3:local': ['Fase 3 · IA local', 'local'], 'local': ['IA local', 'local'], 'f4:online': ['Fase 4 · IA online', 'online'],
-                'f5:ti': ['Fase 5 · equipe de TI', 'ti'], 'auto': ['Bloqueio automático', 'auto'], 'regras': ['Regras / feeds', 'regras'],
+                'f5:ti': ['Fase 5 · Decisão Humana', 'ti'], 'auto': ['Bloqueio automático', 'auto'], 'regras': ['Regras / feeds', 'regras'],
                 'catalogo': ['Catálogo', 'catalogo']};
   function origemDe(ev){   // eventos antigos (sem origem gravada): deduz pelo texto
     if (ev.origem) return ev.origem;
@@ -153,7 +153,7 @@
       if (ev.name) { body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' ')); }
       if (k === 'lista_add') { body.appendChild(document.createTextNode('entrou em ')); body.appendChild(el('span', 'lst', rot(p[0]))); }
       else if (k === 'lista_rem') { body.appendChild(document.createTextNode('saiu de ')); body.appendChild(el('span', 'lst sai', rot(p[0]))); }
-      else if (k === 'fase5') { body.appendChild(document.createTextNode('foi para ')); body.appendChild(el('span', 'lst dec', 'Decisões'));
+      else if (k === 'fase5') { body.appendChild(document.createTextNode('foi para a ')); body.appendChild(el('span', 'lst dec', 'Decisão Humana'));
         if (p[0]) body.appendChild(el('span', 'd', ' · sugestão: ' + rot(p[0]))); }
       else { body.appendChild(el('span', 'lst ' + (/manteve liberado|nenhuma lista|tirou/.test(p[1]) ? 'sai' : ''), 'decisão manual')); }
       if (p[1]) { body.appendChild(el('br')); body.appendChild(el('span', 'd', p[1])); }

@@ -21,7 +21,7 @@
       <b>{{ rot.get(cat, cat) }}</b> —
       {% if cat == 'outros_bloqueios' %}lista manual. Os sites daqui passam pelas fases da IA: com certeza, saem para a lista certa; sem certeza, ficam aqui (bloqueados) com a sugestão — aprove abaixo.
       {% elif tipo.get(cat) == 'manual' %}lista manual: a IA não põe sites aqui sozinha (só sugere outra lista quando for o caso).
-      {% else %}a IA põe aqui os sites desta lista quando tem certeza (fases 1 a 3 = IA local com WHOIS e busca na web; fase 4 = IA online); se nenhuma fase tiver certeza, vão para <a href="{{ url_for('analise.decisoes') }}">Decisões</a> (fase 5, manual). Dá para adicionar e tirar à mão.{{ ' ⚡ = lista de risco.' if cat in LISTAS_RISCO }}{% endif %}
+      {% else %}a IA põe aqui os sites desta lista quando tem certeza (fases 1 a 3 = IA local com WHOIS e busca na web; fase 4 = IA online); se nenhuma fase tiver certeza, vão para a <a href="{{ url_for('analise.decisoes') }}">Decisão Humana</a> (fase 5). Dá para adicionar e tirar à mão.{{ ' ⚡ = lista de risco.' if cat in LISTAS_RISCO }}{% endif %}
       <br>Aplicada em: {% if emp_com %}<b>{{ emp_com|map(attribute='nome')|join(', ') }}</b>{% else %}<b>nenhuma empresa</b>{% endif %}{% if default_tem %} + <b>redes sem cadastro</b>{% endif %}. O DNS baixa as listas de novo a cada 1 h{% if pulso and pulso.last_at %} (última busca desta lista: {{ pulso.last_at|dt_sp }}, {{ pulso.last_n }} domínios){% elif emp_com or default_tem %} — <b style="color:#b91c1c">o DNS ainda não buscou esta lista</b>{% endif %}.
     </p>
     <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">

@@ -1652,7 +1652,7 @@ def dominio_historico(name: str):
                                                        f"{float(antes.get('confianca') or 0) * 100:.0f}%" if antes else "")})
     tl.sort(key=lambda x: x["at"] or datetime.min.replace(tzinfo=timezone.utc))
     estado = ("bloqueado (" + ", ".join(listas_atuais) + ")" if [x for x in listas_atuais if x != "para_revisar"]
-              else "em Decisões (fase 5)" if "para_revisar" in listas_atuais
+              else "na Decisão Humana (fase 5)" if "para_revisar" in listas_atuais
               else "whitelist (" + ", ".join(wl) + ")" if wl else "aprovado (fora de listas)" if d["revisado_at"] else "em análise")
     return {"domain": reg, "estado": estado, "classificacao": d["classification"], "categoria": d["category"], "servico": d["topic"],
             "recomendacao": d["corp_action"], "motivo": d["corp_reason"], "fonte": _FONTE.get(d["classified_by"], d["classified_by"]),
@@ -1663,14 +1663,14 @@ def dominio_historico(name: str):
 
 
 ORIGEM = {"f1:local": "Fase 1 · IA local", "f2:local": "Fase 2 · IA local", "f3:local": "Fase 3 · IA local",
-          "local": "IA local", "f4:online": "Fase 4 · IA online", "f5:ti": "Fase 5 · equipe de TI",
+          "local": "IA local", "f4:online": "Fase 4 · IA online", "f5:ti": "Fase 5 · Decisão Humana",
           "auto": "bloqueio automático", "regras": "regras (feeds/travas)", "catalogo": "catálogo"}
 _EVENTO_TITULO = {"aprovado": "liberado (Aprovados)", "whois_start": "Fase 2 · consultando WHOIS", "whois_done": "Fase 2 · WHOIS + IA local",
                   "whois_error": "Fase 2 · WHOIS indisponível", "search_start": "Fase 3 · buscando na web",
                   "search_done": "Fase 3 · busca na web + IA local", "search_error": "Fase 3 · busca indisponível",
                   "llm_start": "Fase 1 · IA local analisando", "llm_error": "Fase 1 · falha da IA local",
                   "online_done": "Fase 4 · IA online", "lista_add": "entrou numa lista", "lista_rem": "saiu de uma lista",
-                  "fase5": "foi para Decisões (fase 5)", "decisao": "decisão manual", "auto_block": "bloqueio automático",
+                  "fase5": "foi para a Decisão Humana (fase 5)", "decisao": "decisão manual", "auto_block": "bloqueio automático",
                   "rules_alert": "alerta das regras"}
 
 

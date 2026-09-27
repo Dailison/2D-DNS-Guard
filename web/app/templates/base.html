@@ -85,7 +85,7 @@
       {% if adm %}
       {% if config.ANALYZER_ENABLED %}
       <a href="{{ url_for('analise.painel') }}" class="{{ 'on' if request.blueprint == 'analise' and request.endpoint not in ('analise.empresas', 'analise.decisoes') }}">Análise (IA)</a>
-      <a href="{{ url_for('analise.decisoes') }}" class="{{ 'on' if request.endpoint == 'analise.decisoes' }}">Decisões</a>{% endif %}
+      <a href="{{ url_for('analise.decisoes') }}" class="{{ 'on' if request.endpoint == 'analise.decisoes' }}">Decisão Humana</a>{% endif %}
       {% if config.TECHNITIUM_ENABLED %}
       <a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">Empresas</a>
       <a href="{{ url_for('admin.listas_categoria') }}" class="{{ 'on' if request.endpoint == 'admin.listas_categoria' }}">Domínios bloqueados</a>

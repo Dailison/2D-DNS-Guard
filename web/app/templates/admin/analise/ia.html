@@ -7,6 +7,7 @@
   @keyframes sp{to{transform:rotate(360deg)}}
   .now.idle{background:#f8fafc;border-color:var(--bd)} .now.idle .spin{display:none}
   .now .ia-st{margin-left:auto;font-size:.82rem;font-weight:600;white-space:nowrap;padding-left:.8rem}
+  .now .ia-st .sep{color:var(--mut);margin:0 .35rem;font-weight:400}
   .feed{list-style:none;margin:0;padding:0}
   .feed li{display:flex;gap:.6rem;align-items:baseline;padding:.45rem .2rem;border-bottom:1px solid var(--bd);font-size:.9rem}
   .feed li.novo{animation:fl 2s ease-out}
@@ -34,12 +35,12 @@
   <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web (depois do WHOIS)">Fase 3 · busca na web</div></div>
   <div class="metric"><div class="n" id="st-online">–</div><div class="l" title="o que a IA local não resolveu com confiança vai para a IA online (Gemini)">Fase 4 · IA online</div></div>
   <div class="metric"><div class="n" id="st-revisar">–</div><div class="l" title="Decisões: classificação manual pela equipe de TI">Fase 5 · Decisões</div></div>
-  <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
-  <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div></div>
 </div>
 
 <div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div>
-  <div class="ia-st" title="IA local (Ollama)"><span id="st-model" class="mut">IA</span> <span id="st-ia">…</span></div></div>
+  <div class="ia-st"><span title="analisados na última hora"><span id="st-hora">–</span>/h</span>
+    <span class="sep">·</span><span title="tempo médio por domínio"><span id="st-media">–</span>/domínio</span>
+    <span class="sep">·</span><span id="st-model" class="mut" title="IA local (Ollama)">IA</span> <span id="st-ia">…</span></div></div>
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">

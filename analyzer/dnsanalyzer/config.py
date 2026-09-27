@@ -78,8 +78,6 @@ class Settings:
     llm_extra_timeout: int
     llm_max_attempts: int
     llm_skip_hosting_subdomains: bool
-    llm_min_queries: int       # triagem por acesso: menos consultas que isto (e menos computadores que
-    llm_min_clients: int       # llm_min_clients) fica só com as regras até recorrer; 0 = desligado
 
     rdap_enabled: bool
     rdap_cache_days: int
@@ -174,11 +172,6 @@ def load_settings() -> Settings:
         llm_extra_timeout=_int("LLM_EXTRA_TIMEOUT_SECONDS", 90),
         llm_max_attempts=_int("LLM_MAX_ATTEMPTS", 3),
         llm_skip_hosting_subdomains=_bool(os.environ.get("LLM_SKIP_HOSTING_SUBDOMAINS"), False),
-        # triagem por acesso (27/09: 83% da fila da IA eram domínios com <= 2 consultas de 1 computador): domínio
-        # com pouco acesso fica só com as regras, na fila com a prioridade suspensa, até recorrer. Risco (feed de
-        # ameaça, SUSPEITO/MALICIOSO) e análise pedida por pessoa nunca esperam. 0 desliga.
-        llm_min_queries=_int("LLM_MIN_QUERIES", 3),
-        llm_min_clients=_int("LLM_MIN_CLIENTS", 2),
         rdap_enabled=_bool(os.environ.get("RDAP_ENABLED"), True),
         rdap_cache_days=_int("RDAP_CACHE_DAYS", 30),
         rdap_skip_top_rank=_int("RDAP_SKIP_TOP_RANK", 100000),

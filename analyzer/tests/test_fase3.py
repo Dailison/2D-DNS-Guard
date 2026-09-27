@@ -332,6 +332,16 @@ def test_irmaos_por_certificado_e_cnpj(api):
     assert "bet-c.com.br" in irm and "mesmo titular" in irm["bet-c.com.br"]["motivo"]
     assert "bet-b.com" not in irm, "já está na mesma lista"
     assert "naovisto.com" not in irm and "bet-x.com" not in irm and "bet-d.com.br" not in irm, "só vistos nos logs; CPF não conta"
+    # certificado compartilhado: irmão popular, protegido ou na whitelist nunca vai junto
+    with db.conn() as c:
+        for n, rank in (("pop.com", 500), ("wl-irmao.com", None), ("microsoft.com", None), ("bet-e.com", 90000)):
+            c.execute("INSERT INTO domains (name, classification, total_queries, popularity_rank) VALUES (%s, 'TRABALHO', 5, %s) "
+                      "ON CONFLICT DO NOTHING", (n, rank))
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by) VALUES ('essenciais', 'wl-irmao.com', 'op')")
+        c.execute("UPDATE lookup_cache SET value = %s WHERE kind = 'web' AND key = 'bet-a.com'",
+                  (Jsonb({"cert": {"san_domains": ["bet-b.com", "pop.com", "wl-irmao.com", "microsoft.com", "bet-e.com"]}}),))
+    irm = {x["domain"] for x in api.get("/domains/bet-a.com/irmaos", headers=H).json()}
+    assert "bet-e.com" in irm and not irm & {"pop.com", "wl-irmao.com", "microsoft.com"}, irm
     # dados reais: site sem HTTPS grava "cert": null; WHOIS sem titular grava "titular": null
     with db.conn() as c:
         c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('web', 'nada.com', true, %s), ('whois', 'nada.com', true, %s)",

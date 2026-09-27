@@ -1654,7 +1654,10 @@ def dominio_historico(name: str):
 @app.get("/domains/{name}/irmaos", dependencies=[Depends(auth)])
 def dominio_irmaos(name: str, limit: int = Query(50, le=200)):
     """Domínios já vistos nos logs que compartilham o CERTIFICADO (SAN) ou o TITULAR do WHOIS (mesmo CNPJ) com
-    este e que NÃO estão nas mesmas listas — p/ bloquear/liberar a família inteira de uma vez."""
+    este e que NÃO estão nas mesmas listas — p/ bloquear a família inteira de uma vez. Ficam de fora os que
+    nunca devem ir junto: protegidos no catálogo, na whitelist ou populares (Tranco ≤ 10.000) — certificado
+    compartilhado (ex.: o do youtu.be é o do Google) traria google.ca, android.com, google-analytics.com."""
+    from . import catalog
     reg = name.strip().lower().rstrip(".")
     with db.conn() as c:
         if not c.execute("SELECT 1 FROM domains WHERE name = %s", (reg,)).fetchone():
@@ -1675,8 +1678,11 @@ def dominio_irmaos(name: str, limit: int = Query(50, le=200)):
         if not motivos:
             return []
         minhas = {r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain = %s", (reg,))}
-        rows = c.execute("SELECT name, total_queries, classification, category FROM domains WHERE name = ANY(%s)",
+        rows = c.execute("SELECT name, total_queries, classification, category, popularity_rank FROM domains WHERE name = ANY(%s)",
                          (list(motivos),)).fetchall()
+        na_wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain = ANY(%s)", (list(motivos),))}
+        rows = [r for r in rows if r["name"] not in na_wl and not (r["popularity_rank"] and r["popularity_rank"] <= 10000)
+                and not (catalog.match(r["name"]) or {}).get("protected")]
         listas_de = {}
         for r in c.execute("SELECT domain, category FROM category_lists WHERE domain = ANY(%s)", ([r["name"] for r in rows],)):
             listas_de.setdefault(r["domain"], []).append(r["category"])

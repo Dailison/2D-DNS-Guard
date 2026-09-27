@@ -42,7 +42,8 @@ LISTAS_IA = {
                       "forex/day trade, sinais de trading, pirâmides (bancos e corretoras tradicionais são nenhuma)",
     "publicidade": "redes de anúncio, rastreamento, analytics, pixels, atribuição de apps",
     "compras": "lojas online, marketplaces, varejo, atacado, supermercado, delivery, cupons (conta como trabalho: compras da empresa)",
-    "noticias": "portais de notícias, revistas, fofoca e entretenimento",
+    "noticias": "portais de notícias, revistas e fofoca de celebridades (site de hobby, desenhos para colorir, receitas, "
+                "artesanato, conteúdo infantil ou educativo NÃO é notícia: sem lista de bloqueio, vai para a whitelist)",
     "pirataria": "torrents, downloads piratas, cracks, IPTV pirata, filmes e séries piratas, sites que baixam vídeo/música "
                  "de YouTube e streamings (conversor de ARQUIVOS/PDF legítimo não é pirataria: é nenhuma)",
     "ia_chatbots": "assistentes de IA, chatbots e geradores de texto ou imagem (ChatGPT, Claude, Gemini, Copilot, Perplexity)",

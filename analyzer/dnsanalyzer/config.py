@@ -175,7 +175,7 @@ def load_settings() -> Settings:
         llm_max_attempts=_int("LLM_MAX_ATTEMPTS", 3),
         llm_skip_hosting_subdomains=_bool(os.environ.get("LLM_SKIP_HOSTING_SUBDOMAINS"), False),
         # triagem por acesso (27/09: 83% da fila da IA eram domínios com <= 2 consultas de 1 computador): domínio
-        # com pouco acesso fica só com as regras, na fila com a prioridade suspensa, até recorrer. Risco (feed de
+        # com pouco acesso vai para o fim da fila (analisado quando ela esvazia ou quando recorrer). Risco (feed de
         # ameaça, SUSPEITO/MALICIOSO) e análise pedida por pessoa nunca esperam. 0 desliga.
         llm_min_queries=_int("LLM_MIN_QUERIES", 3),
         llm_min_clients=_int("LLM_MIN_CLIENTS", 2),

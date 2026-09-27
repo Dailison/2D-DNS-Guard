@@ -194,7 +194,7 @@ def phase_a(limit: int = 2000) -> int:
             elif drow["classified_by"] == "llm" and not rule.final and rule.classification != "SUSPEITO" \
                     and cfg.llm_enabled and not skip_llm:
                 # evidências mudaram, mas sem risco novo: mantém a classificação da IA e reenfileira
-                # (pouco acesso: fica na fila com a prioridade suspensa até o site recorrer)
+                # (pouco acesso: vai para o fim da fila até o site recorrer)
                 raro = _pouco_acesso(cfg, drow, dossier, rule)
                 c.execute("UPDATE domains SET needs_analysis=false, llm_pending=true, aguarda_recorrencia=%s, ti_hits=%s, "
                           "ti_signature=%s WHERE id=%s", (raro, Jsonb(hits), ti.signature(hits), drow["id"]))
@@ -224,9 +224,9 @@ def phase_a(limit: int = 2000) -> int:
 
 def _pouco_acesso(cfg, drow: dict, dossier: dict, rule: RuleResult) -> bool:
     """Triagem por acesso: domínio consultado menos de LLM_MIN_QUERIES vezes por menos de LLM_MIN_CLIENTS
-    computadores fica só com as regras, na fila da IA com a prioridade suspensa (aguarda_recorrencia), até
-    recorrer — a IA local trabalha no que as pessoas realmente acessam. Nunca para risco (feed de ameaça,
-    SUSPEITO/MALICIOSO) nem quando uma pessoa pediu a análise (reanalise_pedida)."""
+    computadores fica só com as regras e vai para o FIM da fila da IA (aguarda_recorrencia): é analisado quando a
+    fila ativa esvazia, ou antes se recorrer — a IA local trabalha primeiro no que as pessoas realmente acessam.
+    Nunca para risco (feed de ameaça, SUSPEITO/MALICIOSO) nem quando uma pessoa pediu a análise (reanalise_pedida)."""
     if cfg.llm_min_queries <= 0 or drow.get("reanalise_pedida") or drow.get("kind") != "public":
         return False
     if rule.classification in ("SUSPEITO", "MALICIOSO") or dossier.get("ti_hits"):
@@ -237,7 +237,7 @@ def _pouco_acesso(cfg, drow: dict, dossier: dict, rule: RuleResult) -> bool:
 
 
 def reenfileirar_recorrentes(c) -> int:
-    """Domínios com a prioridade suspensa que voltaram a ser acessados (consultas ou computadores chegaram ao
+    """Domínios do fim da fila (pouco acesso) que voltaram a ser acessados (consultas ou computadores chegaram ao
     mínimo) voltam à fila normal da IA. Retorna quantos."""
     cfg = settings()
     if cfg.llm_min_queries <= 0:
@@ -252,12 +252,16 @@ def reenfileirar_recorrentes(c) -> int:
 def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
-             SELECT id FROM domains WHERE llm_pending AND NOT locked AND NOT aguarda_recorrencia
+             SELECT id FROM domains WHERE llm_pending AND NOT locked
                AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
-             ORDER BY (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC, (model IS NULL) DESC, total_queries DESC
+             ORDER BY aguarda_recorrencia ASC, (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC, (model IS NULL) DESC,
+               total_queries DESC
              LIMIT 1 FOR UPDATE SKIP LOCKED)
-           RETURNING *""").fetchone()   # (27/09) nunca passou pela IA (domínio novo) vai antes do backlog de reanálise
+           RETURNING *""").fetchone()
+    # (27/09) nunca passou pela IA (domínio novo) vai antes do backlog de reanálise; os de pouco acesso
+    # (aguarda_recorrencia) ficam por último: só quando a fila ativa esvazia (pedido do usuário: todo site acaba
+    # numa lista, sem atrasar o que as pessoas acessam de fato)
 
 
 def phase_b(client: OllamaClient, cats: list[dict]) -> str:

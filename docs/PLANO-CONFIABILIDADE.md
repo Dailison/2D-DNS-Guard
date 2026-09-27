@@ -355,7 +355,9 @@ Feito em 27/09: `LLM_VM_RESERVA=true` na VM (Ollama local só se o PC cair; mode
 PostgreSQL com `shared_buffers` 2 GB, `effective_cache_size` 6 GB, `work_mem` 32 MB,
 `pg_stat_statements` e `log_min_duration_statement = 500ms` (a VM tem memória dinâmica no
 Hyper-V: `free` mostra 4 GB quando ociosa e cresce sob demanda); triagem por acesso
-(migração 060, `LLM_MIN_QUERIES`/`LLM_MIN_CLIENTS`).
+(migração 060, `LLM_MIN_QUERIES`/`LLM_MIN_CLIENTS`: pouco acesso vai para o fim da fila e é
+analisado quando ela esvazia); cota do Gemini persistida por chave, modelo e dia (migração 061,
+tabela `online_cota`, limite aprendido do `quotaValue` do 429).
 
 ### 6.1 Consultas da API (medir antes, com `pg_stat_statements`)
 

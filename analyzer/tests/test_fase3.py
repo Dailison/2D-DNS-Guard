@@ -437,12 +437,15 @@ def test_pouco_acesso_espera_recorrencia(api):
               c.execute("SELECT name, llm_pending, aguarda_recorrencia FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
     assert st["raro-teste.com"] == (True, True), st      # na fila, mas suspenso
     assert st["raro-pedido.com"] == (True, False), st    # pessoa pediu: não espera
-    # a fila da IA não pega o suspenso (os outros pendentes ficam "reservados" só durante este teste)
+    # a fila da IA pega o suspenso por último: só quando não há mais ninguém na fila ativa
+    # (os outros pendentes ficam "reservados" só durante este teste)
     with db.conn() as c:
         c.execute("UPDATE domains SET claimed_at = now() WHERE llm_pending AND id <> ALL(%s)", (list(ids.values()),))
-        pego = classifier._claim_llm(c)
+        primeiro = classifier._claim_llm(c)
+        segundo = classifier._claim_llm(c)
         c.execute("UPDATE domains SET claimed_at = NULL WHERE llm_pending")
-    assert pego and pego["name"] == "raro-pedido.com", pego and pego["name"]
+    assert primeiro and primeiro["name"] == "raro-pedido.com", primeiro and primeiro["name"]
+    assert segundo and segundo["name"] == "raro-teste.com", "fila ativa vazia: analisa os de pouco acesso"
     assert classifier.status()["aguarda"] >= 1
     # recorreu (3 consultas): volta à fila normal
     with db.conn() as c:

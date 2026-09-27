@@ -294,8 +294,9 @@ pytest          # unitários + testes com PostgreSQL real (pgserver): listas pel
 
 - Fase A (regras): ~500 domínios em ~2 s.
 - Triagem por acesso (`LLM_MIN_QUERIES`/`LLM_MIN_CLIENTS`, 27/09): domínio com menos de 3 consultas de 1
-  computador fica só com as regras, na fila da IA com a prioridade suspensa (`aguarda_recorrencia`),
-  até recorrer. Risco (feed de ameaça, SUSPEITO/MALICIOSO) e análise pedida por pessoa não esperam.
+  computador fica só com as regras e vai para o fim da fila da IA (`aguarda_recorrencia`): é analisado
+  quando a fila ativa esvazia, ou antes se recorrer. Risco (feed de ameaça, SUSPEITO/MALICIOSO) e
+  análise pedida por pessoa não esperam.
 - IA: ~35 s por domínio (geração ~5 tokens/s — CPU virtualizada é limitada por banda
   de memória). Por isso a resposta é compacta e o catálogo resolve o óbvio.
 - Carga inicial de ~500 domínios: algumas horas em segundo plano; depois, só os

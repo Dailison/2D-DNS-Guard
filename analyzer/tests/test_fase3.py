@@ -332,6 +332,12 @@ def test_irmaos_por_certificado_e_cnpj(api):
     assert "bet-c.com.br" in irm and "mesmo titular" in irm["bet-c.com.br"]["motivo"]
     assert "bet-b.com" not in irm, "já está na mesma lista"
     assert "naovisto.com" not in irm and "bet-x.com" not in irm and "bet-d.com.br" not in irm, "só vistos nos logs; CPF não conta"
+    # dados reais: site sem HTTPS grava "cert": null; WHOIS sem titular grava "titular": null
+    with db.conn() as c:
+        c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('web', 'nada.com', true, %s), ('whois', 'nada.com', true, %s)",
+                  (Jsonb({"cert": None}), Jsonb({"titular": None})))
+    r = api.get("/domains/nada.com/irmaos", headers=H)
+    assert r.status_code == 200 and r.json() == []
 
 
 def test_precisao_da_ia(api):

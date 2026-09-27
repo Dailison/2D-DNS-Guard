@@ -1661,13 +1661,14 @@ def dominio_irmaos(name: str, limit: int = Query(50, le=200)):
             raise HTTPException(404, "domínio nunca observado")
         motivos: dict[str, str] = {}
         web = c.execute("SELECT value FROM lookup_cache WHERE kind = 'web' AND key = %s", (reg,)).fetchone()
-        for x in ((web or {}).get("value") or {}).get("cert", {}).get("san_domains") or []:
-            motivos.setdefault(x.lower(), "mesmo certificado (está no certificado deste)")
+        cert = ((web or {}).get("value") or {}).get("cert")   # null quando o site não tem HTTPS
+        for x in (cert or {}).get("san_domains") or []:
+            motivos.setdefault(str(x).lower(), "mesmo certificado (está no certificado deste)")
         for r in c.execute("SELECT key FROM lookup_cache WHERE kind = 'web' AND value->'cert'->'san_domains' ? %s", (reg,)):
             motivos.setdefault(r["key"], "mesmo certificado (este está no certificado dele)")
         w = c.execute("SELECT value->'titular' AS t FROM lookup_cache WHERE kind = 'whois' AND key = %s", (reg,)).fetchone()
-        t = (w or {}).get("t") or {}
-        if t.get("tipo") == "cnpj" and t.get("doc"):
+        t = (w or {}).get("t")
+        if isinstance(t, dict) and t.get("tipo") == "cnpj" and t.get("doc"):
             for r in c.execute("SELECT key FROM lookup_cache WHERE kind = 'whois' AND value->'titular'->>'doc' = %s", (t["doc"],)):
                 motivos[r["key"]] = f"mesmo titular no WHOIS ({t.get('nome') or 'CNPJ'} · {t['doc']})"
         motivos.pop(reg, None)

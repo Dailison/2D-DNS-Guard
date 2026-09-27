@@ -2,203 +2,257 @@
 {% block an %}
 <style>
   .ia-top{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem;margin-bottom:1rem}
-  .now{display:flex;align-items:center;gap:.8rem;padding:.8rem 1rem;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;margin-bottom:1rem;min-height:3rem}
+  .now{display:flex;align-items:center;gap:.8rem;padding:.7rem 1rem;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;margin-bottom:1rem;min-height:2.8rem;flex-wrap:wrap}
   .now .spin{width:14px;height:14px;border:3px solid #93c5fd;border-top-color:var(--b);border-radius:50%;animation:sp 1s linear infinite;flex:0 0 auto}
   @keyframes sp{to{transform:rotate(360deg)}}
   .now.idle{background:#f8fafc;border-color:var(--bd)} .now.idle .spin{display:none}
-  .now .ia-st{margin-left:auto;font-size:.82rem;font-weight:600;white-space:nowrap;padding-left:.8rem}
+  .now .ia-st{margin-left:auto;font-size:.82rem;font-weight:600;white-space:nowrap}
   .now .ia-st .sep{color:var(--mut);margin:0 .35rem;font-weight:400}
-  .feed{list-style:none;margin:0;padding:0}
-  .feed li{display:flex;gap:.6rem;align-items:baseline;padding:.45rem .2rem;border-bottom:1px solid var(--bd);font-size:.9rem}
-  .feed li.novo{animation:fl 2s ease-out}
+  .now a{font-weight:600;text-decoration:none}
+  .et{margin-bottom:1rem}
+  .et-h{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.5rem}
+  .et-h h2{margin:0;font-size:1.05rem}
+  .et-h .n{font-size:.78rem;font-weight:700;padding:.1rem .5rem;border-radius:999px;background:#e2e8f0;color:#334155}
+  .flt{display:flex;gap:.3rem;flex-wrap:wrap;margin-left:auto}
+  .flt button{border:1px solid var(--bd);background:#fff;border-radius:999px;padding:.15rem .6rem;font-size:.75rem;cursor:pointer;color:#334155}
+  .flt button.on{background:#1e293b;color:#fff;border-color:#1e293b}
+  .flt .sep{width:1px;background:var(--bd);margin:0 .2rem}
+  .tb{width:100%;border-collapse:collapse;font-size:.85rem}
+  .tb th{text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;color:var(--mut);font-weight:600;padding:.35rem .5rem;border-bottom:1px solid var(--bd);white-space:nowrap}
+  .tb td{padding:.4rem .5rem;border-bottom:1px solid var(--bd);vertical-align:middle}
+  .tb tr.novo td{animation:fl 2s ease-out}
   @keyframes fl{from{background:#fef9c3}to{background:transparent}}
-  .feed .h{color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:.8rem}
-  .feed .ic{width:1.2rem;text-align:center;flex:0 0 auto}
-  .feed .d{color:var(--mut);font-size:.82rem}
-  .feed a{font-weight:600;text-decoration:none}
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem} @media (max-width:900px){.cols{grid-template-columns:1fr}}
-  .cols>div{min-width:0} .colt{font-size:.95rem;margin:.2rem 0 .3rem} .colt .mut{font-size:.75rem;font-weight:400}
-  .cols .feed{max-height:70vh;overflow:auto}
-  .lst{display:inline-block;font-size:.72rem;font-weight:700;padding:.05rem .45rem;border-radius:6px;background:#fee2e2;color:#991b1b}
-  .lst.sai{background:#dcfce7;color:#166534} .lst.dec{background:#ffedd5;color:#9a3412}
-  .fase{display:inline-block;font-size:.68rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;margin-right:.4rem;background:#e2e8f0;color:#334155;white-space:nowrap}
-  .fase.f1,.fase.f1R{background:#dbeafe;color:#1e40af} .fase.f2{background:#ede9fe;color:#5b21b6} .fase.f3{background:#fef3c7;color:#92400e}
-  .org{display:inline-block;font-size:.68rem;font-weight:600;padding:.05rem .4rem;border-radius:.6rem;margin-right:.35rem;white-space:nowrap}
-  .org.local{background:#e0f2fe;color:#075985} .org.online{background:#dcfce7;color:#166534} .org.ti{background:#ede9fe;color:#5b21b6}
-  .org.auto{background:#fee2e2;color:#991b1b} .org.regras,.org.catalogo{background:#f1f5f9;color:#475569}
-  .fase.f4{background:#dcfce7;color:#166534} .fase.fB{background:#fee2e2;color:#991b1b}
+  .tb .h{color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:.78rem;width:4.5rem}
+  .tb .dm{max-width:22rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tb .dm a{font-weight:600;text-decoration:none;cursor:pointer}
+  .tb tr.run .dm a::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--b);margin-right:.4rem;animation:pl 1s infinite}
+  @keyframes pl{50%{opacity:.25}}
+  .wrap{max-height:42vh;overflow:auto}
+  .bar{display:flex;align-items:center;gap:.4rem;min-width:6.5rem}
+  .bar i{display:block;height:6px;border-radius:3px;background:#e2e8f0;flex:1;position:relative;overflow:hidden}
+  .bar i b{position:absolute;left:0;top:0;bottom:0;border-radius:3px}
+  .bar span{font-size:.75rem;font-variant-numeric:tabular-nums;width:2.4rem;text-align:right;color:#334155}
+  .dst{display:inline-block;font-size:.74rem;font-weight:700;padding:.1rem .5rem;border-radius:6px;white-space:nowrap;max-width:17rem;overflow:hidden;text-overflow:ellipsis}
+  .dst.bl{background:#fee2e2;color:#991b1b} .dst.wl{background:#dcfce7;color:#166534} .dst.on{background:#e0e7ff;color:#3730a3}
+  .dst.hm{background:#ffedd5;color:#9a3412} .dst.pd{background:#f1f5f9;color:#64748b}
+  .dst.ok::after{content:' ✓'}
+  .vazio td{color:var(--mut);text-align:center;padding:1rem}
+  .mdl{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:1rem}
+  .mdl.on{display:flex}
+  .mdl .cx{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:85vh;overflow:auto;padding:1.2rem 1.3rem;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+  .mdl h3{margin:0 0 .2rem;font-size:1.1rem;word-break:break-all}
+  .mdl .sv{color:#334155;margin:.1rem 0 .8rem}
+  .mdl .gr{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.6rem;margin-bottom:.8rem}
+  .mdl .gr div{background:#f8fafc;border:1px solid var(--bd);border-radius:10px;padding:.45rem .6rem}
+  .mdl .gr small{display:block;color:var(--mut);font-size:.7rem;text-transform:uppercase;letter-spacing:.03em}
+  .mdl .tx{font-size:.85rem;color:#334155;white-space:pre-wrap;background:#f8fafc;border-radius:10px;padding:.6rem .7rem;margin:.3rem 0 .8rem}
+  .mdl .ac{display:flex;justify-content:space-between;align-items:center;gap:.6rem}
+  @media (max-width:760px){.tb .rk,.tb th.rk{display:none}}
 </style>
 
 <div class="ia-top">
-  <div class="metric"><div class="n" id="st-fila">–</div><div class="l" title="classificação do site e em qual lista ele entra (IA local)">Fase 1 · IA local</div></div>
-  <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado, .br primeiro">Fase 2 · WHOIS</div></div>
-  <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web (depois do WHOIS)">Fase 3 · busca na web</div></div>
-  <div class="metric"><div class="n" id="st-online">–</div><div class="l" title="o que a IA local não resolveu com confiança vai para a IA online (Gemini)">Fase 4 · IA online</div></div>
+  <div class="metric"><div class="n" id="st-e1">–</div><div class="l" id="st-e1-l">Etapa 1 · IA local</div></div>
+  <div class="metric"><div class="n" id="st-e2">–</div><div class="l">Etapa 2 · IA online</div></div>
+  <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
+  <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div></div>
 </div>
 
 <div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div>
-  <div class="ia-st"><span title="analisados na última hora"><span id="st-hora">–</span>/h</span>
-    <span class="sep">·</span><span title="tempo médio por domínio"><span id="st-media">–</span>/domínio</span>
-    <span class="sep">·</span><span id="st-model" class="mut" title="IA local (Ollama)">IA</span> <span id="st-ia">…</span></div></div>
+  <div class="ia-st"><span id="st-model" class="mut">IA</span> <span id="st-ia">…</span>
+    <span class="sep">·</span><span class="mut" id="upd"></span>
+    <button class="btn mini" id="pausa" style="padding:.2rem .6rem;font-size:.78rem;margin-left:.5rem">Pausar</button></div></div>
 
-<div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
-    <h2 style="margin:0">Atividade em tempo real</h2>
-    <span><span class="mut" id="upd" style="font-size:.8rem"></span>
-      <button class="btn mini" id="pausa" style="padding:.25rem .6rem;font-size:.8rem;margin-left:.5rem">Pausar</button></span>
+{% for et in [("e1", "Etapa 1 · IA local", "🧠"), ("e2", "Etapa 2 · IA online", "🌐")] %}
+<div class="card et" id="{{ et[0] }}">
+  <div class="et-h">
+    <h2>{{ et[2] }} {{ et[1] }}</h2><span class="n" id="{{ et[0] }}-n">0</span>
+    <div class="flt" data-alvo="{{ et[0] }}">
+      <button data-f="cls" data-v="" class="on">Todos</button>
+      <button data-f="cls" data-v="TRABALHO">Trabalho</button>
+      <button data-f="cls" data-v="NAO_TRABALHO">Não trabalho</button>
+      <button data-f="cls" data-v="RISCO">Suspeito / Malicioso</button>
+      <button data-f="cls" data-v="DESCONHECIDO">Desconhecido</button>
+      <span class="sep"></span>
+      <button data-f="dst" data-v="" class="on">Qualquer destino</button>
+      <button data-f="dst" data-v="bl">Bloqueio</button>
+      <button data-f="dst" data-v="wl">Whitelist</button>
+      {% if et[0] == "e1" %}<button data-f="dst" data-v="on">→ IA online</button>{% endif %}
+    </div>
   </div>
-  <div class="cols">
-    <div><h3 class="colt">🔬 Classificação</h3>
-      <ul class="feed" id="feed"><li class="mut">Carregando…</li></ul></div>
-    <div><h3 class="colt">⚖️ Decisão</h3>
-      <ul class="feed" id="feedDec"><li class="mut">Carregando…</li></ul></div>
-  </div>
+  <div class="wrap"><table class="tb">
+    <thead><tr><th>Hora</th><th>Domínio</th><th>Classificação</th><th class="rk">Risco</th><th>Confiança</th><th>Destino</th></tr></thead>
+    <tbody id="{{ et[0] }}-b"><tr class="vazio"><td colspan="6">Carregando…</td></tr></tbody>
+  </table></div>
 </div>
+{% endfor %}
+
+<div class="mdl" id="mdl"><div class="cx">
+  <h3 id="m-n"></h3><div class="sv" id="m-sv"></div>
+  <div class="gr" id="m-gr"></div>
+  <div id="m-tx"></div>
+  <div class="ac"><span class="mut" id="m-rod" style="font-size:.78rem"></span>
+    <span><a class="btn mini" id="m-link" href="#">Abrir domínio</a>
+      <button class="btn mini" id="m-x" style="margin-left:.4rem">Fechar</button></span></div>
+</div></div>
 
 <script>
 (function(){
   var URL_EV = "{{ url_for('analise.ia_eventos') }}";
   var URL_DOM = "{{ url_for('analise.dominio', nome='__N__', t=tid) }}";
-  var LBL = {TRABALHO:'Trabalho', NAO_TRABALHO:'Não trabalho', SUSPEITO:'Suspeito', MALICIOSO:'Malicioso', DESCONHECIDO:'Desconhecido'};
+  var LROT = {{ LISTAS_ROT|tojson }}, WROT = {{ WL_ROT|tojson }};
+  var LBL = {TRABALHO: 'Trabalho', NAO_TRABALHO: 'Não trabalho', SUSPEITO: 'Suspeito', MALICIOSO: 'Malicioso', DESCONHECIDO: 'Desconhecido'};
+  var LOCAL = {llm_done: 1, whois_done: 1, search_done: 1, rules_final: 1, lista_local: 1, llm_start: 1, whois_start: 1, search_start: 1};
+  var DEC = {lista_add: 1, aprovado: 1};
   var lastId = 0, paused = false, cur = null, curBase = 0, first = true;
-  var feed = document.getElementById('feed'), feedDec = document.getElementById('feedDec');
-  var LROT = {{ LISTAS_ROT|tojson }};
-  var DEC = {lista_add: 1, lista_rem: 1, fase5: 1, decisao: 1, auto_block: 1, lista_ia: 1, lista_recusada: 1, aprovado: 1};
-  // quem decidiu (coluna Decisão): fase 1-3 = IA local, 4 = IA online, pessoa (TI) = correção manual; "fase5" só no histórico
-  var ORIGEM = {'f1:local': ['Fase 1 · IA local', 'local'], 'f2:local': ['Fase 2 · IA local', 'local'],
-                'f3:local': ['Fase 3 · IA local', 'local'], 'local': ['IA local', 'local'], 'f4:online': ['Fase 4 · IA online', 'online'],
-                'f5:ti': ['Pessoa (TI)', 'ti'], 'auto': ['Bloqueio automático', 'auto'], 'regras': ['Regras / feeds', 'regras'],
-                'catalogo': ['Catálogo', 'catalogo']};
-  function origemDe(ev){   // eventos antigos (sem origem gravada): deduz pelo texto
-    if (ev.origem) return ev.origem;
-    var d = ev.detail || '';
-    if (/IA online/.test(d)) return 'f4:online';
-    if (/IA local/.test(d)) return 'local';
-    if (ev.kind === 'decisao' || /manual:|@/.test(d)) return 'f5:ti';
-    if (/bloqueio automático/.test(d)) return 'auto';
-    if (/feeds|NXDOMAIN|encolheu|whitelist:/.test(d)) return 'regras';
-    return null;
-  }
-  function origemTag(ev){ var o = ORIGEM[origemDe(ev)]; return o ? el('span', 'org ' + o[1], o[0]) : null; }
-  function rot(cats){ return (cats || '').split(',').filter(Boolean).map(function(c){ return LROT[c] || c; }).join(', ') || 'nenhuma lista'; }
-  var WROT = {{ WL_ROT|tojson }};
-  var TRAB = {TRABALHO: 'trabalho', NAO_TRABALHO: 'não é de trabalho', SUSPEITO: 'suspeito', MALICIOSO: 'malicioso', DESCONHECIDO: 'desconhecido'};
-  function destino(cat){   // "wl:<categoria>" = whitelist; senão lista(s) de bloqueio
-    if (!cat) return null;
-    if (cat.indexOf('wl:') === 0) return ['✅ Whitelist · ' + (WROT[cat.slice(3)] || cat.slice(3)), 'sai'];
-    return ['⛔ Blocklist · ' + rot(cat), ''];
-  }
-  function partes(ev){ var d = ev.detail || '', i = d.indexOf('|'); return i < 0 ? ['', d] : [d.slice(0, i), d.slice(i + 1)]; }
+  var linhas = {e1: {}, e2: {}}, filtro = {e1: {cls: '', dst: ''}, e2: {cls: '', dst: ''}};
 
-  function el(tag, cls, txt){ var e = document.createElement(tag); if(cls) e.className = cls; if(txt != null) e.textContent = txt; return e; }
-  function hora(iso){ var d = new Date(iso); return d.toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo'}); }
-  function dur(s){ s = Math.max(0, Math.round(s)); var m = Math.floor(s/60); return m ? m + 'min ' + (s%60) + 's' : s + 's'; }
-  function link(name){ var a = el('a', null, name); a.href = URL_DOM.replace('__N__', encodeURIComponent(name)); return a; }
-  function badge(c){ return el('span', 'cls ' + (c || 'PENDENTE'), LBL[c] || c || '—'); }
-  // resposta da IA que termina numa decisão (fase 4, ou IA local com confiança alta): só na coluna Decisão
-  function virouDecisao(ev){
-    return ev.kind === 'online_done' || (ev.kind === 'lista_local' && /confiança alta: a IA local decide/.test(ev.detail || ''));
+  function el(tag, cls, txt){ var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+  function hora(iso){ return new Date(iso).toLocaleTimeString('pt-BR', {timeZone: 'America/Sao_Paulo'}); }
+  function dur(s){ s = Math.max(0, Math.round(s)); var m = Math.floor(s / 60); return m ? m + 'min ' + (s % 60) + 's' : s + 's'; }
+  function nomeLista(c){
+    if (!c) return '';
+    if (c.indexOf('wl:') === 0) return WROT[c.slice(3)] || c.slice(3);
+    return c.split(',').map(function(x){ return LROT[x] || x; }).join(', ');
+  }
+  function destino(lista, estado){   // [texto, classe]
+    if (estado === 'on') return ['→ IA online' + (lista ? ' (sugeriu ' + nomeLista(lista) + ')' : ''), 'on'];
+    if (estado === 'hm') return ['Decisão humana mantida', 'hm'];
+    if (!lista) return ['…', 'pd'];
+    if (lista === 'nenhuma') return ['✅ Sem lista', 'wl'];
+    if (lista.indexOf('wl:') === 0) return ['✅ ' + nomeLista(lista), 'wl'];
+    return ['⛔ ' + nomeLista(lista), 'bl'];
+  }
+  function barra(v, cor){
+    var d = el('div', 'bar'), i = el('i'), b = el('b');
+    if (v == null) { d.appendChild(el('span', null, '—')); return d; }
+    b.style.width = Math.max(2, Math.min(100, v)) + '%'; b.style.background = cor(v);
+    i.appendChild(b); d.appendChild(i); d.appendChild(el('span', null, Math.round(v) + (cor === corConf ? '%' : '')));
+    return d;
+  }
+  function corRisco(v){ return v >= 70 ? '#dc2626' : v >= 40 ? '#f59e0b' : '#16a34a'; }
+  function corConf(v){ return v >= 90 ? '#2563eb' : v >= 60 ? '#60a5fa' : '#cbd5e1'; }
+  function grupoCls(c){ return c === 'SUSPEITO' || c === 'MALICIOSO' ? 'RISCO' : (c || ''); }
+
+  // etapa de cada evento: 1 = IA local (fases 1-3 do fluxo antigo entram aqui), 2 = IA online
+  function etapa(ev){ return ev.kind === 'online_done' ? 'e2' : LOCAL[ev.kind] ? 'e1' : null; }
+
+  function linha(et, name){
+    var r = linhas[et][name];
+    if (r) return r;
+    r = linhas[et][name] = {name: name, et: et, tr: el('tr'), ev: []};
+    return r;
   }
 
-  // fase de cada evento (fluxo: 1 IA local · 2 WHOIS · 3 busca na web · 4 IA online, a última)
-  var FASE = {llm_start: '1', llm_done: '1', llm_error: '1', rules_final: '1R', rules_alert: '1R',
-              whois_start: '2', whois_done: '2', whois_error: '2', search_start: '3', search_done: '3', search_error: '3',
-              online_done: '4', lista_ia: '1', auto_block: 'B', rules_batch: 'R'};
-  var FASE_TXT = {'1': 'Fase 1 · IA local', '1R': 'Fase 1 · regras', '2': 'Fase 2 · WHOIS', '3': 'Fase 3 · busca na web', '4': 'Fase 4 · IA online',
-                  'B': 'Bloqueio automático', 'R': 'Regras'};
-  function faseTag(f){ return f ? el('span', 'fase f' + f, FASE_TXT[f] || f) : null; }
+  function ler(r, ev){   // junta o que cada evento diz sobre o domínio
+    r.ev.push(ev); r.at = ev.created_at;
+    var d = ev.detail || '', m;
+    if (ev.classification) r.cls = ev.classification;
+    if (ev.risk != null) r.risco = ev.risk;
+    if (ev.work != null) r.trab = ev.work;
+    if (ev.kind === 'llm_start' || ev.kind === 'whois_start' || ev.kind === 'search_start') { r.run = true; return; }
+    r.run = false;
+    if (ev.seconds != null) r.seg = (r.seg || 0) + ev.seconds;
+    if (ev.kind === 'lista_local') {
+      var t = d.split('|').slice(1).join('|');
+      if ((m = /^lista (\S+) (\d+)%/.exec(t))) { r.lista = m[1]; r.conf = +m[2]; }
+      var p = t.split(' · '); if (p.length > 1) r.servico = r.servico || p[1].split(' — ')[0];
+      if (/— /.test(t)) r.motivo = t.split(' — ').slice(1).join(' — ').split(' · ')[0];
+      r.estado = /IA local decide|lista atual mantida/.test(t) ? 'ok' : /decisão humana/.test(t) ? 'hm' : /fase 4|IA online|segue p\/ a fase/.test(t) ? 'on' : '';
+      r.proximo = (t.match(/· (confiança[^·]*|lista atual mantida|decisão humana[^·]*)$/) || [])[1] || '';
+    } else if (ev.kind === 'online_done') {
+      if ((m = /fase 4 · ([^·]+) · lista (\S+) \((\d+)%\)/.exec(d))) { r.modelo = m[1].trim(); r.lista = m[2]; r.conf = +m[3]; }
+      var q = d.split(' · '); r.servico = q.slice(3).join(' · ') || r.servico; r.estado = 'ok';
+    } else if (ev.kind !== 'lista_local') {
+      var s = d.split(' · ').filter(function(x){ return !/^(com busca|reforço|fase \d|IA local:)/.test(x); });
+      if (s[0]) r.servico = r.servico || s[0];
+      r.resumo = d;
+    }
+  }
 
-  function row(ev){
-    var li = el('li'), ic = el('span', 'ic'), body = el('span');
-    li.appendChild(el('span', 'h', hora(ev.created_at)));
-    li.appendChild(ic); li.appendChild(body);
-    var k = ev.kind, ft = DEC[k] ? origemTag(ev) : faseTag(k === 'lista_local' ? (ev.detail || '1').split('|')[0] : FASE[k]);
-    if (ft) body.appendChild(ft);
-    if (k === 'llm_start') {
-      ic.textContent = '⏳'; body.appendChild(document.createTextNode('Analisando '));
-      body.appendChild(link(ev.name)); if (ev.detail) body.appendChild(el('span', 'd', ' — ' + ev.detail));
-    } else if (k === 'search_start') {
-      ic.textContent = '🔎'; body.appendChild(document.createTextNode('Buscando na web '));
-      body.appendChild(link(ev.name)); if (ev.detail) body.appendChild(el('span', 'd', ' — ' + ev.detail));
-    } else if (k === 'whois_start') {
-      ic.textContent = '🪪'; body.appendChild(document.createTextNode('Consultando WHOIS de '));
-      body.appendChild(link(ev.name)); if (ev.detail) body.appendChild(el('span', 'd', ' — ' + ev.detail));
-    } else if (k === 'whois_error') {
-      ic.textContent = '⏸️'; body.appendChild(document.createTextNode('WHOIS indisponível ('));
-      body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ') — ' + (ev.detail || '') + '; tenta de novo depois'));
-    } else if (k === 'search_error') {
-      ic.textContent = '⏸️'; body.appendChild(document.createTextNode('Busca na web indisponível ('));
-      body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ') — ' + (ev.detail || '') + '; tenta de novo depois'));
-    } else if (k === 'llm_done' || k === 'rules_final' || k === 'rules_alert' || k === 'search_done' || k === 'whois_done') {
-      ic.textContent = k === 'rules_alert' ? '⚠️' : (k === 'search_done' ? '🔎' : (k === 'whois_done' ? '🪪' : '✅'));
-      body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' → '));
-      body.appendChild(badge(ev.classification));
-      var nums = [];
-      if (ev.risk != null) nums.push('risco ' + ev.risk);
-      if (ev.work != null) nums.push('trabalho ' + ev.work);
-      if (ev.seconds != null) nums.push(Math.round(ev.seconds) + 's');
-      body.appendChild(el('span', 'd', ' ' + nums.join(' · ')));
-      if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail)); }
-    } else if (k === 'lista_local') {   // o que a IA local respondeu sobre a lista, em cada fase, e o próximo passo
-      var tl = (ev.detail || '').split('|').slice(1).join('|');
-      ic.textContent = /confiança alta/.test(tl) ? '🗂️' : '↪️';
-      body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' → '));
-      body.appendChild(el('span', 'd', tl));
-    } else if (k === 'rules_batch') {
-      ic.textContent = '⚙️'; body.appendChild(el('span', 'd', 'Fase A — ' + (ev.detail || '')));
-    } else if (k === 'llm_error') {
-      ic.textContent = '❌'; body.appendChild(document.createTextNode('Falha ao analisar '));
-      body.appendChild(link(ev.name)); body.appendChild(el('span', 'd', ' — ' + (ev.detail || '')));
-    } else if (k === 'auto_block') {
-      ic.textContent = '⛔'; body.appendChild(el('span', 'd', 'Bloqueio automático — ' + (ev.detail || '')));
-    } else if (k === 'online_done') {
-      ic.textContent = '🌐'; body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' → '));
-      body.appendChild(badge(ev.classification));
-      if (ev.seconds != null) body.appendChild(el('span', 'd', ' ' + Math.round(ev.seconds) + 's'));
-      if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail.replace(/^fase 4 · /, ''))); }
-    } else if (k === 'lista_add' || k === 'lista_rem' || k === 'fase5' || k === 'decisao' || k === 'aprovado') {
-      // só o que foi feito: para qual lista (bloqueio ou whitelist e a categoria) e se é de trabalho; o motivo fica no hover
-      var p = partes(ev), dst = destino(p[0]);
-      li.title = p[1] || '';
-      if (!ev.name) { ic.textContent = '✋'; body.appendChild(el('span', 'd', p[1])); return li; }
-      body.appendChild(link(ev.name));
-      if (k === 'fase5') {
-        ic.textContent = '🧑‍💻'; body.appendChild(document.createTextNode(' → ')); body.appendChild(el('span', 'lst dec', 'Decisão Humana'));
-      } else if (k === 'decisao' && /nova análise/.test(p[1])) {
-        ic.textContent = '🔁'; body.appendChild(document.createTextNode(' → nova análise (fase 1)'));
-      } else if (k === 'lista_rem' || (k === 'decisao' && /manteve liberado|nenhuma lista|tirou/.test(p[1]))) {
-        ic.textContent = '↩️'; body.appendChild(document.createTextNode(/deixou de valer no DNS/.test(p[1]) ? ' saiu do DNS: ' : ' saiu de '));
-        body.appendChild(el('span', 'lst ' + (dst ? dst[1] : ''), dst ? dst[0] : rot(p[0])));
-      } else {
-        ic.textContent = dst && dst[1] === 'sai' ? '✅' : '⛔'; body.appendChild(document.createTextNode(' → '));
-        body.appendChild(el('span', 'lst ' + (dst ? dst[1] : ''), dst ? dst[0] : rot(p[0])));
-      }
-      if (TRAB[ev.classification] && k !== 'lista_rem') { body.appendChild(document.createTextNode(' ')); body.appendChild(badge(ev.classification)); }
-    } else if (k === 'lista_recusada') {
-      var pr = partes(ev); ic.textContent = '🛑';
-      body.appendChild(el('span', 'lst', rot(pr[0]))); body.appendChild(el('span', 'd', ' ' + pr[1]));
-    } else if (k === 'lista_ia') {
-      ic.textContent = '🗂️'; body.appendChild(el('span', 'd', (ev.detail || '').replace(/^listas pela IA/, 'Listas pela IA')));
-    } else if (k === 'llm_extra') {
-      ic.textContent = '🚀'; body.appendChild(el('span', 'd', 'Reforço da IA: ' + (ev.detail || '')));
-    } else if (k === 'llm_unavailable') {
-      ic.textContent = '⏸️'; body.appendChild(el('span', 'd', 'IA indisponível: ' + (ev.detail || '')));
-    } else { ic.textContent = '•'; body.appendChild(el('span', 'd', k + ' ' + (ev.name || '') + ' ' + (ev.detail || ''))); }
-    return li;
+  function desenhar(r, novo){
+    var tr = r.tr; tr.innerHTML = '';
+    tr.className = (r.run ? 'run' : '') + (novo && !first ? ' novo' : '');
+    tr.dataset.cls = grupoCls(r.cls); var ds = destino(r.lista, r.estado); tr.dataset.dst = ds[1];
+    tr.appendChild(el('td', 'h', hora(r.at)));
+    var td = el('td', 'dm'), a = el('a', null, r.name); a.onclick = function(){ abrir(r); };
+    a.title = r.servico || ''; td.appendChild(a); tr.appendChild(td);
+    var tc = el('td'); tc.appendChild(el('span', 'cls ' + (r.cls || 'PENDENTE'), r.run ? 'analisando…' : (LBL[r.cls] || r.cls || '—'))); tr.appendChild(tc);
+    var trk = el('td', 'rk'); trk.appendChild(barra(r.risco, corRisco)); tr.appendChild(trk);
+    var tf = el('td'); tf.appendChild(barra(r.conf, corConf)); tr.appendChild(tf);
+    var tdd = el('td'), sp = el('span', 'dst ' + ds[1] + (r.aplicado ? ' ok' : ''), r.run ? '…' : ds[0]); sp.title = r.proximo || ''; tdd.appendChild(sp); tr.appendChild(tdd);
+    aplicaFiltro(r.et, tr);
+  }
+
+  function aplicaFiltro(et, tr){
+    var f = filtro[et];
+    tr.style.display = (!f.cls || tr.dataset.cls === f.cls) && (!f.dst || tr.dataset.dst === f.dst) ? '' : 'none';
+  }
+
+  function abrir(r){
+    document.getElementById('m-n').textContent = r.name;
+    document.getElementById('m-sv').textContent = r.servico || '';
+    var gr = document.getElementById('m-gr'); gr.innerHTML = '';
+    var ds = destino(r.lista, r.estado);
+    [['Classificação', LBL[r.cls] || r.cls || '—'], ['Risco', r.risco != null ? r.risco : '—'], ['Trabalho', r.trab != null ? r.trab : '—'],
+     ['Confiança', r.conf != null ? r.conf + '%' : '—'], ['Destino', ds[0]], ['Tempo', r.seg != null ? dur(r.seg) : '—']]
+      .forEach(function(x){ var d = el('div'); d.appendChild(el('small', null, x[0])); d.appendChild(document.createTextNode(x[1])); gr.appendChild(d); });
+    var tx = document.getElementById('m-tx'); tx.innerHTML = '';
+    if (r.motivo) { tx.appendChild(el('small', 'mut', 'Motivo')); tx.appendChild(el('div', 'tx', r.motivo)); }
+    if (r.proximo) { tx.appendChild(el('small', 'mut', 'Próximo passo')); tx.appendChild(el('div', 'tx', r.proximo)); }
+    var ev = r.ev.filter(function(e){ return e.detail && e.kind !== 'lista_local' && !/_start$/.test(e.kind); }).map(function(e){ return e.detail.replace(/^fase 4 · /, ''); });
+    if (ev.length) { tx.appendChild(el('small', 'mut', 'Resumo da análise')); tx.appendChild(el('div', 'tx', ev.join('\n\n'))); }
+    document.getElementById('m-rod').textContent = (r.modelo ? r.modelo + ' · ' : '') + hora(r.at);
+    document.getElementById('m-link').href = URL_DOM.replace('__N__', encodeURIComponent(r.name));
+    document.getElementById('mdl').classList.add('on');
+  }
+  function fechar(){ document.getElementById('mdl').classList.remove('on'); }
+  document.getElementById('m-x').onclick = fechar;
+  document.getElementById('mdl').onclick = function(e){ if (e.target === this) fechar(); };
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') fechar(); });
+
+  document.querySelectorAll('.flt').forEach(function(box){
+    box.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if (!b) return;
+      var et = box.dataset.alvo; filtro[et][b.dataset.f] = b.dataset.v;
+      box.querySelectorAll('button[data-f="' + b.dataset.f + '"]').forEach(function(x){ x.classList.toggle('on', x === b); });
+      document.querySelectorAll('#' + et + '-b tr').forEach(function(tr){ if (tr.dataset.cls !== undefined) aplicaFiltro(et, tr); });
+    });
+  });
+
+  function inserir(et, r){
+    var tb = document.getElementById(et + '-b');
+    var vz = tb.querySelector('.vazio'); if (vz) vz.remove();
+    tb.insertBefore(r.tr, tb.firstChild);
+    while (tb.children.length > 150) { var u = tb.lastChild; tb.removeChild(u); }
+    document.getElementById(et + '-n').textContent = tb.children.length;
+  }
+
+  function evento(ev){
+    lastId = Math.max(lastId, ev.id);
+    if (!ev.name) return;
+    if (DEC[ev.kind]) {   // a lista foi aplicada: marca o destino da linha (✓)
+      var et = (ev.origem || '').indexOf('online') >= 0 ? 'e2' : 'e1', r0 = linhas[et][ev.name];
+      if (r0) { r0.aplicado = true; if (!r0.lista) r0.lista = (ev.detail || '').split('|')[0]; desenhar(r0); }
+      return;
+    }
+    var et2 = etapa(ev); if (!et2) return;
+    var nova = !linhas[et2][ev.name], r = linha(et2, ev.name);
+    ler(r, ev); desenhar(r, true);
+    if (nova || r.tr !== document.getElementById(et2 + '-b').firstChild) inserir(et2, r);
   }
 
   function status(d){
-    var ia = document.getElementById('st-ia');
+    var ia = document.getElementById('st-ia'), q = d.queue || {};
     ia.textContent = d.llm && d.llm.ok ? '● no ar' : '● fora'; ia.style.color = d.llm && d.llm.ok ? '#16a34a' : '#b91c1c';
-    document.getElementById('st-model').textContent = 'IA (' + ((d.llm && d.llm.model) || '?') + ')';
-    document.getElementById('st-fila').textContent = d.queue ? d.queue.ia + (d.queue.lista || 0) : '–';   // a lista faz parte da fase 1
-    document.getElementById('st-fila').title = d.queue && d.queue.aguarda ? 'inclui ' + d.queue.aguarda + ' de pouco acesso (fim da fila)' : '';
-    document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca : '–';
-    document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois : '–';
-    document.getElementById('st-online').textContent = d.queue && d.queue.online != null ? (d.queue.online_on ? d.queue.online : d.queue.online + ' (sem chave)') : '–';
+    document.getElementById('st-model').textContent = 'IA local (' + ((d.llm && d.llm.model) || '?') + ')';
+    var antigo = (q.whois || 0) + (q.busca || 0);
+    document.getElementById('st-e1').textContent = d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–';
+    document.getElementById('st-e1-l').title = (q.aguarda ? 'inclui ' + q.aguarda + ' de pouco acesso (fim da fila)' : '')
+      + (antigo ? (q.aguarda ? ' · ' : '') + antigo + ' do fluxo antigo (WHOIS/busca)' : '');
+    document.getElementById('st-e2').textContent = q.online != null ? (q.online_on ? q.online : q.online + ' (sem chave)') : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';
     document.getElementById('st-media').textContent = d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–';
-    cur = d.current; curBase = cur ? (cur.elapsed - (Date.now()/1000)) : 0;
+    cur = d.current; curBase = cur ? (cur.elapsed - Date.now() / 1000) : 0;
     tick();
   }
 
@@ -206,37 +260,30 @@
     var box = document.getElementById('now'), txt = document.getElementById('now-txt');
     if (cur) {
       box.className = 'now'; txt.textContent = '';
-      txt.appendChild(document.createTextNode('Analisando agora: '));
-      var ftc = faseTag(cur.fase); if (ftc) txt.appendChild(ftc);
-      txt.appendChild(link(cur.name));
-      txt.appendChild(el('span', 'd', ' · ' + dur(curBase + Date.now()/1000) + ' · ' + cur.total_queries + ' consultas'));
+      txt.appendChild(document.createTextNode((cur.fase === '4' ? 'Etapa 2 · IA online: ' : 'Etapa 1 · IA local: ')));
+      var a = el('a', null, cur.name); a.href = URL_DOM.replace('__N__', encodeURIComponent(cur.name)); txt.appendChild(a);
+      txt.appendChild(el('span', 'mut', ' · ' + dur(curBase + Date.now() / 1000) + ' · ' + cur.total_queries + ' consultas'));
     } else {
       box.className = 'now idle';
-      txt.textContent = document.getElementById('st-fila').textContent === '0' ? 'Nada na fila — aguardando domínios novos.' : 'Entre análises…';
+      txt.textContent = document.getElementById('st-e1').textContent === '0' ? 'Nada na fila — aguardando domínios novos.' : 'Entre análises…';
     }
   }
 
   function poll(){
     if (paused) return;
-    fetch(URL_EV + '?after=' + lastId, {credentials:'same-origin'})
+    fetch(URL_EV + '?after=' + lastId, {credentials: 'same-origin'})
       .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function(d){
         if (d.error) throw new Error(d.error);
-        if (first) { feed.innerHTML = ''; feedDec.innerHTML = ''; }
-        var evs = (d.events || []).slice().reverse();   // mais antigo primeiro, p/ inserir no topo em ordem
-        evs.forEach(function(ev){
-          lastId = Math.max(lastId, ev.id);
-          if (virouDecisao(ev)) return;   // a resposta virou decisão: aparece só na coluna Decisão
-          var li = row(ev), alvo = DEC[ev.kind] ? feedDec : feed;
-          if (alvo.firstChild && alvo.firstChild.classList && alvo.firstChild.classList.contains('mut')) alvo.removeChild(alvo.firstChild);
-          if (!first) li.className = 'novo'; alvo.insertBefore(li, alvo.firstChild); lastId = Math.max(lastId, ev.id); });
-        [feed, feedDec].forEach(function(f){
-          if (first && !f.children.length) f.appendChild(el('li', 'mut', 'Sem atividade registrada ainda.'));
-          while (f.children.length > 200) f.removeChild(f.lastChild); });
+        (d.events || []).slice().reverse().forEach(evento);
+        if (first) ['e1', 'e2'].forEach(function(et){
+          var tb = document.getElementById(et + '-b');
+          if (tb.querySelector('.vazio')) tb.querySelector('.vazio td').textContent = 'Sem atividade ainda.';
+        });
         first = false; status(d);
-        document.getElementById('upd').textContent = 'atualizado ' + new Date().toLocaleTimeString('pt-BR');
+        document.getElementById('upd').textContent = new Date().toLocaleTimeString('pt-BR');
       })
-      .catch(function(e){ document.getElementById('upd').textContent = 'falha ao atualizar (' + e.message + ')'; });
+      .catch(function(e){ document.getElementById('upd').textContent = 'falha (' + e.message + ')'; });
   }
 
   document.getElementById('pausa').onclick = function(){

@@ -948,3 +948,23 @@ def test_segunda_chave_gemini_tem_cota_propria(monkeypatch):
     r = online._consultar([("gemini-3.5-flash-lite", 14, 490)], {"name": "x.com"}, [], False)
     assert r and usadas == [("gemini-3.5-flash-lite", 1)], usadas
     assert online.cota("gemini-3.5-flash-lite", 1).modelo == "gemini-3.5-flash-lite (chave 2)"
+
+
+def test_liberar_site_suspeito_vai_p_decisao_humana(env, monkeypatch):
+    """Whitelist não aceita SUSPEITO/MALICIOSO (sairia sozinho e o site ficava em "Aprovados", sem fila): a IA local
+    não decide sozinha (trava) e a resposta certa da IA online vai p/ a Decisão Humana."""
+    from dnsanalyzer import config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        ids = {}
+        for n in ("susp-local.com", "susp-online.com"):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
+                               "VALUES (%s, 'SUSPEITO', 'outros', now() - interval '1 minute', 5, now(), now()) RETURNING id", (n,)).fetchone()["id"]
+        listas_ia.salvar(c, ids["susp-local.com"], "wl:produtividade", 0.95, "", "", "local", 1, "gemma4:26b")
+        listas_ia.salvar(c, ids["susp-online.com"], "wl:produtividade", 0.95, "", "", "online:gemini", 4)
+        ap = listas_ia.aplicar(c)
+        wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain LIKE 'susp-%%'")}
+        rev = {r["domain"]: r["added_by"] for r in c.execute("SELECT domain, added_by FROM category_lists WHERE category = 'para_revisar'")}
+    assert not wl, wl
+    assert ap["local"][ids["susp-local.com"]][0] == "online" and "SUSPEITO" in ap["local"][ids["susp-local.com"]][-1], ap["local"]
+    assert "susp-online.com" in rev and "SUSPEITO" in rev["susp-online.com"], rev

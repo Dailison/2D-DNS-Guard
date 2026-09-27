@@ -7,56 +7,21 @@
   .mini{padding:.25rem .5rem;font-size:.8rem}
 </style>
 {% if modo == 'liberacao' %}
-<h1>Domínios liberados <span class="mut" style="font-size:.8rem">· whitelists, listas de liberação e aprovados</span></h1>
-<div class="card">
-  <h2 style="margin:0 0 .3rem">✅ Whitelists <span class="mut" style="font-size:.8rem;font-weight:400">· vão ao DNS em TODAS as empresas e vencem qualquer bloqueio (inclusive por CNAME)</span></h2>
-  <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
-    {% set totwl = {} %}{% for x in whitelists.categorias %}{% set _ = totwl.update({x.categoria: x.total}) %}{% endfor %}
-    {% for c, r in cats_wl %}
-    <a href="{{ url_for('admin.listas_liberacao', wl=c) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if wl == c else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if wl == c }}">{{ r }} <span class="mut">({{ totwl.get(c, 0) }})</span></a>
-    {% endfor %}
-  </div>
-  <p class="mut" style="font-size:.82rem;margin:.5rem 0 0">A IA põe aqui sozinha o site que a IA online validou como <b>trabalho</b>, com certeza e sem lista de bloqueio; os protegidos do catálogo vão para Essenciais. Nunca entram plataformas de hospedagem compartilhada nem "pais" de algo bloqueado; <b>se o site aparecer num feed de ameaça, sai sozinho</b>.</p>
-  <div style="margin-top:.6rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
-    <a href="{{ url_for('admin.listas_liberacao', slug='_trabalho') }}" title="avaliados pela IA ou por uma pessoa e liberados: não vão ao DNS" style="text-decoration:none;padding:.35rem .7rem;border:1px dashed {{ 'var(--b)' if trabalho else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if trabalho }}">👍 Aprovados <span class="mut">({{ whitelists.revisados }} avaliados)</span></a>
-    <span class="mut" style="font-size:.8rem">avaliados pela IA ou por uma pessoa e liberados (fora de qualquer lista de bloqueio): não vão ao DNS e não voltam para a IA sem pedido (os feeds de ameaça continuam valendo).</span>
-  </div>
-</div>
-{% if wl %}
-<div class="card">
-  <h2>{{ dict(cats_wl).get(wl, wl) }} <span class="mut" style="font-size:.8rem;font-weight:400">· {{ det.total }} domínio(s)</span></h2>
-  <form method="post" action="{{ url_for('admin.whitelist_add') }}" class="row" style="align-items:flex-end;margin:0 0 .6rem">
-    <input type="hidden" name="wl" value="{{ wl }}">
-    <div style="flex:1"><label>Liberar nesta whitelist (todas as empresas; sai das listas de bloqueio)</label><input type="text" name="dominio" placeholder="ex.: sistema-do-cliente.com.br" required></div>
-    <div style="flex:0"><button class="primary">Liberar</button></div>
-  </form>
-  {% with modo = 'whitelist' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
-</div>
-{% endif %}
-<h2 style="margin:1.2rem 0 .4rem;font-size:1.05rem">📋 Listas de liberação e serviços <span class="mut" style="font-size:.8rem;font-weight:400">· cada empresa escolhe quais aplica (Empresas → Listas…)</span></h2>
-{% set avulsas = todas %}
+<h1>Domínios liberados</h1>
+<h2 style="margin:0 0 .4rem;font-size:1.05rem" title="Serviços prontos (YouTube, Instagram, Mercado Livre…) e listas criadas por vocês. Cada empresa escolhe o que libera em Empresas (botão Listas…) ou aqui no botão Empresas que liberam.">📋 Listas de liberação e serviços</h2>
 <div class="card">
   <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
-    {% for x in avulsas %}
+    {% for x in todas %}
     <a href="{{ url_for('admin.listas_liberacao', slug=x.slug) }}" style="text-decoration:none;padding:.45rem .8rem;border:1px solid {{ 'var(--b)' if servico and x.slug == servico.slug else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if servico and x.slug == servico.slug }}">{{ x.name }} <span class="mut">({{ x.total }})</span></a>
-    {% else %}<span class="mut">Nenhuma lista de liberação avulsa ainda.</span>{% endfor %}
+    {% else %}<span class="mut">Nenhuma lista de liberação.</span>{% endfor %}
   </div>
   <form method="post" action="{{ url_for('admin.servico_criar') }}" class="row" style="align-items:flex-end;margin-top:.8rem">
     <div style="flex:1"><label>Nova lista de liberação</label><input type="text" name="nome" placeholder="ex.: Sistemas do Cliente X, Bancos" required></div>
     <div style="flex:0"><button class="primary">Criar</button></div>
   </form>
-  <p class="mut" style="font-size:.82rem;margin:.6rem 0 0">Serviços prontos (YouTube, Instagram, Mercado Livre…) e listas criadas por vocês. Cada empresa escolhe o que libera em <a href="{{ url_for('analise.empresas') }}">Empresas</a> (botão Listas…) ou aqui no botão Empresas que liberam.</p>
 </div>
 {% else %}
 <h1>Lista de liberação {% if servico %}<b>{{ servico.name }}</b>{% endif %} <span class="mut" style="font-size:.8rem">· <a href="{{ url_for('admin.listas_liberacao') }}">Domínios liberados</a></span></h1>
-{% endif %}
-
-{% if trabalho %}
-<div class="card">
-  <h2>👍 Aprovados <span class="mut" style="font-size:.8rem">· {{ det.total }} domínio(s) avaliados e liberados</span></h2>
-  <p class="mut" style="font-size:.84rem;margin:-.3rem 0 .7rem">Avaliados pela IA (fases 1 a 4) ou por uma pessoa e liberados: não estão em nenhuma lista de bloqueio, whitelist ou lista de liberação. Clique no domínio para ver todo o histórico até chegar aqui. <b>Não vão para o Technitium</b> (resolvem normalmente) e <b>não voltam para a IA sem pedido</b> — "Pedir nova análise da IA" reabre. Os feeds de ameaça continuam valendo.</p>
-  {% with modo = 'sem_lista' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
-</div>
 {% endif %}
 
 {% if servico %}
@@ -122,5 +87,34 @@ document.getElementById("lSalvar").addEventListener("click", async (ev) => {
   b.disabled = false;
 });
 </script>
+{% endif %}
+{% if modo == 'liberacao' %}
+<h2 style="margin:1.2rem 0 .4rem;font-size:1.05rem" title="Vão ao DNS em todas as empresas e vencem qualquer bloqueio (inclusive por CNAME). A IA põe aqui o que validou como trabalho, sem lista de bloqueio; protegidos do catálogo vão para Essenciais; sai sozinho se aparecer num feed de ameaça.">✅ Whitelists</h2>
+<div class="card">
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
+    {% set totwl = {} %}{% for x in whitelists.categorias %}{% set _ = totwl.update({x.categoria: x.total}) %}{% endfor %}
+    {% for c, r in cats_wl %}
+    <a href="{{ url_for('admin.listas_liberacao', wl=c) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if wl == c else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if wl == c }}">{{ r }} <span class="mut">({{ totwl.get(c, 0) }})</span></a>
+    {% endfor %}
+    <a href="{{ url_for('admin.listas_liberacao', slug='_trabalho') }}" title="Avaliados pela IA ou por uma pessoa e liberados, fora de qualquer lista: não vão ao DNS." style="text-decoration:none;padding:.35rem .7rem;border:1px dashed {{ 'var(--b)' if trabalho else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if trabalho }}">👍 Aprovados <span class="mut">({{ whitelists.revisados }})</span></a>
+  </div>
+</div>
+{% if wl %}
+<div class="card">
+  <h2>{{ dict(cats_wl).get(wl, wl) }} <span class="mut" style="font-size:.8rem;font-weight:400">· {{ det.total }} domínio(s)</span></h2>
+  <form method="post" action="{{ url_for('admin.whitelist_add') }}" class="row" style="align-items:flex-end;margin:0 0 .6rem">
+    <input type="hidden" name="wl" value="{{ wl }}">
+    <div style="flex:1"><label>Liberar nesta whitelist</label><input type="text" name="dominio" placeholder="ex.: sistema-do-cliente.com.br" required></div>
+    <div style="flex:0"><button class="primary">Liberar</button></div>
+  </form>
+  {% with modo = 'whitelist' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
+</div>
+{% endif %}
+{% if trabalho %}
+<div class="card">
+  <h2 title="Avaliados pela IA (fases 1 a 4) ou por uma pessoa e liberados: fora de qualquer lista de bloqueio, whitelist ou lista de liberação. Não vão para o Technitium e não voltam para a IA sem pedido.">👍 Aprovados <span class="mut" style="font-size:.8rem">· {{ det.total }} domínio(s)</span></h2>
+  {% with modo = 'sem_lista' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
+</div>
+{% endif %}
 {% endif %}
 {% endblock %}

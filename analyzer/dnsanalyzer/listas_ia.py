@@ -346,6 +346,12 @@ def _fonte(r: dict) -> str:
     return ("IA online" + conf if f.startswith("online") else "IA local" + conf if f == FONTE_LOCAL else f)
 
 
+def _suspeito(r: dict) -> str | None:
+    """Liberar (whitelist) um site classificado SUSPEITO/MALICIOSO não vale: whitelist.aplicar o tiraria."""
+    return f"recomenda liberar, mas o site está classificado {r['classification']}" \
+        if r.get("classification") in ("SUSPEITO", "MALICIOSO") else None
+
+
 def _coerente(cat: str, cls: str | None, categoria: str | None) -> bool:
     return _incoerencia(cat, cls, categoria) is None
 
@@ -462,7 +468,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             trava = None
             if certo:
                 trava = ("tirar da Infraestrutura" if tira_infra else
-                         (_incoerencia(cat, cls, r["category"]) or guardado(r, cat)) if cat else None)
+                         (_incoerencia(cat, cls, r["category"]) or guardado(r, cat)) if cat else _suspeito(r))
                 if not decide_sozinho(r["lista_modelo"]):
                     trava = trava or f"modelo {r['lista_modelo'] or 'antigo'} não decide sozinho"
             prox = proxima_fase(r)
@@ -485,6 +491,12 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         if fixas and (not cat or cat not in em):
             if online and confiavel and PARA_REVISAR not in em:   # alguém pôs noutra lista: fica, e a pessoa revê
                 para_decisoes(r, recomenda, f"contraria decisão humana ({', '.join(sorted(fixas))})", REVER_BY)
+            continue
+        if certo and not cat and (online or local_decide) and _suspeito(r):
+            # recomenda liberar um site SUSPEITO/MALICIOSO: a whitelist não aceita (sairia sozinho e o site ficava sem
+            # fila nenhuma, em "Aprovados" — 69 casos em 27/09); a pessoa decide
+            if PARA_REVISAR not in em:
+                para_decisoes(r, recomenda, _suspeito(r))
             continue
         if certo and not cat and (online or local_decide):
             # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs). Da

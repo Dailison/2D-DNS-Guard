@@ -202,6 +202,25 @@ def _json_da_resposta(texto: str) -> dict:
     return json.loads(m.group(0))
 
 
+def _limite_429(r) -> tuple[bool, float]:
+    """(estourou a cota do DIA?, segundos p/ tentar de novo). Pelo quotaId violado (…PerDay… x …PerMinute…) e pelo
+    retryDelay do Google. Antes bastava "day" aparecer no texto: um 429 do minuto parou o 3.5 Flash-Lite o dia todo
+    com 264 de 500 pedidos usados (27/09)."""
+    try:
+        det = (r.json().get("error") or {}).get("details") or []
+    except ValueError:
+        det = []
+    ids = [v.get("quotaId") or "" for x in det for v in (x.get("violations") or [])]
+    espera = 65.0
+    for x in det:
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(x.get("retryDelay") or ""))
+        if m:
+            espera = min(max(float(m.group(1)) + 2, 10.0), 600.0)
+    if ids:
+        return any("perday" in i.lower() for i in ids) and not any("perminute" in i.lower() for i in ids), espera
+    return False, espera   # sem detalhe: trata como limite do minuto (o contador próprio pausa o dia no RPD)
+
+
 def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None = None) -> tuple[dict, dict]:
     cfg = settings()
     modelo = modelo or cfg.gemini_modelos[0][0]
@@ -234,9 +253,9 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
     except httpx.HTTPError as e:
         raise OnlineIndisponivel(f"Gemini {modelo}: {e.__class__.__name__}") from e
     if r.status_code == 429:
-        dia = "day" in r.text.lower() or "perday" in r.text.lower().replace("_", "")
-        ct.pausar_dia() if dia else ct.pausar(65)
-        raise OnlineIndisponivel(f"Gemini {modelo}: cota esgotada (429)")
+        dia, espera = _limite_429(r)
+        ct.pausar_dia() if dia else ct.pausar(espera)
+        raise OnlineIndisponivel(f"Gemini {modelo}: cota {'do dia' if dia else 'do minuto'} esgotada (429)")
     if r.status_code >= 500:   # sobrecarga do modelo
         ct.pausar(90)
         raise OnlineIndisponivel(f"Gemini {modelo}: HTTP {r.status_code}")

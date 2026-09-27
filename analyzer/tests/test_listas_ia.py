@@ -911,3 +911,20 @@ def test_ia_online_sem_resposta_valida_nao_prende_a_fila(env, monkeypatch):
     with db.conn() as c:
         c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (i,))
     assert online.fase(["adulto"]) == "idle", "saiu da fila da fase 4"
+
+
+def test_429_do_minuto_nao_para_o_modelo_o_dia_todo():
+    """27/09: um 429 do limite por minuto parou o 3.5 Flash-Lite até a meia-noite do Pacífico com 264/500 usados."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import online
+
+    def resp(quota, retry="23s"):
+        corpo = {"error": {"code": 429, "message": "Quota exceeded ... per day usage https://ai.dev/usage", "details": [
+            {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": quota}]},
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry}]}}
+        return SimpleNamespace(json=lambda: corpo, text=str(corpo))
+    assert online._limite_429(resp("GenerateRequestsPerMinutePerProjectPerModel-FreeTier")) == (False, 25.0)
+    assert online._limite_429(resp("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "3600s"))[0] is True
+    sem = SimpleNamespace(json=lambda: (_ for _ in ()).throw(ValueError()), text="Resource exhausted per day")
+    assert online._limite_429(sem) == (False, 65.0), "sem detalhe: minuto (o contador próprio cuida do dia)"

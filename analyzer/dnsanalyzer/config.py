@@ -207,10 +207,11 @@ def load_settings() -> Settings:
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
         # plano grátis desta conta (AI Studio, 2026-09-26) — "modelo:rpm:rpd", na ordem de uso:
         # volume: 3.5/3.1 Flash-Lite 15/min 500/dia, Gemma 4 31B 30/min 14.400/dia (lento: ~40-75 s);
-        # reforço: 3.8 Flash 5/min 20/dia
-        gemini_modelos=_modelos("GEMINI_MODELS", "gemini-3.5-flash-lite:14:480,gemini-3.1-flash-lite:14:480"),
+        # reforço: 3.8/3.7/3.5/3.6 Flash 5/min 20/dia cada (27/09: 2.5 Flash/Flash-Lite fechados p/ contas novas, 3 Flash 404)
+        gemini_modelos=_modelos("GEMINI_MODELS", "gemini-3.5-flash-lite:14:490,gemini-3.1-flash-lite:14:490"),
         # segunda opinião (sem certeza/discorda da IA local; também quando o volume esgota a cota do dia)
-        gemini_reforco=_modelos("GEMINI_ESCALATE_MODELS", "gemma-4-31b-it:28:14000,gemini-3.8-flash:5:18"),
+        gemini_reforco=_modelos("GEMINI_ESCALATE_MODELS", "gemma-4-31b-it:28:14000,gemini-3.8-flash:5:19,gemini-3.7-flash:5:19,"
+                                "gemini-3.5-flash:5:19,gemini-3.6-flash:5:19"),
         # busca no Google (grounding): indisponível nesta conta (2.5 fechado p/ contas novas; 3.x = 0/dia) —
         # a IA online avalia o que a fase 3 (busca na web) já achou. Ex.: GEMINI_SEARCH_MODELS=gemini-2.5-flash:5:18
         gemini_busca=_modelos("GEMINI_SEARCH_MODELS", ""),

@@ -300,8 +300,8 @@ def _buscas_no_mes(c) -> int:
                      "AND online_resp->'_meta'->>'busca' = 'true'").fetchone()["n"]
 
 
-def _consultar(nivel, d, categorias, buscar) -> tuple[dict, dict] | None:
-    """Primeiro modelo do nível com cota que responder."""
+def _consultar(nivel, d, categorias, buscar, invalidas: list | None = None) -> tuple[dict, dict] | None:
+    """Primeiro modelo do nível com cota que responder (resposta sem JSON vai p/ `invalidas`)."""
     for modelo, _, _ in nivel:
         if not cota(modelo).esperar():
             continue
@@ -311,7 +311,32 @@ def _consultar(nivel, d, categorias, buscar) -> tuple[dict, dict] | None:
             log.info("%s", e)
         except (ValueError, KeyError, json.JSONDecodeError) as e:
             log.warning("IA online (%s) para %s: resposta inválida: %s", modelo, d["name"], e)
+            if invalidas is not None:
+                invalidas.append(f"{modelo}: {e}")
     return None
+
+
+ONLINE_TENTATIVAS = 3   # rodadas com resposta inválida de todos os modelos antes de desistir (Decisão Humana)
+
+
+def _sem_resposta_valida(c, d: dict, invalidas: list[str]) -> str:
+    """Os modelos responderam, mas sem JSON (ex.: filtro de segurança do Gemini em site adulto: resposta vazia). Antes
+    o domínio voltava na hora p/ o topo da fila e prendia a fase 4 (naticr.com: 212 respostas vazias em 27 min, 27/09).
+    Agora fica reservado 10 min e, na 3ª rodada, vai p/ a Decisão Humana com a sugestão da IA local."""
+    n = c.execute("UPDATE domains SET online_falhas = online_falhas + 1, online_claimed_at = now() WHERE id = %s "
+                  "RETURNING online_falhas", (d["id"],)).fetchone()["online_falhas"]
+    if n < ONLINE_TENTATIVAS:
+        log.info("IA online: %s sem resposta válida (%d de %d); tenta de novo em 10 min", d["name"], n, ONLINE_TENTATIVAS)
+        return "done"
+    motivo = f"IA online sem resposta válida ({n} tentativas)"
+    c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, online_falhas = 0, lista_duvida = false, "
+              "reanalise_pedida = false, online_resp = %s WHERE id = %s", (Jsonb({"erro": motivo, "ultima": invalidas[-1][:300]}), d["id"]))
+    c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) ON CONFLICT DO NOTHING",
+              (d["name"], f"{listas_ia.DUVIDA_BY} ({d.get('lista_ia') or 'nenhuma'}) · {motivo}"))
+    from . import eventos
+    eventos.lista("fase5", d["name"], d.get("lista_ia"), motivo, d["id"], "f4:online", d.get("classification"))
+    log.info("IA online: %s -> Decisão Humana (%s)", d["name"], motivo)
+    return "done"
 
 
 def fase(categorias: list[str]) -> str:
@@ -340,6 +365,7 @@ def fase(categorias: list[str]) -> str:
     revalidar = bool(d.get("online_resp")) and not (d.get("online_resp") or {}).get("erro")
     vol, reforco, busca = niveis()
     obj = meta = None
+    invalidas: list[str] = []
     for nivel, buscar in ((vol, False), (reforco, False), (busca if pode_buscar else [], True)):
         # próximo nível (modelo maior) se não há resposta, se ela não tem certeza ou se DISCORDA da IA local
         if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")) \
@@ -350,7 +376,7 @@ def fase(categorias: list[str]) -> str:
             break
         if obj is not None and meta.get("nivel_reforco") and nivel is not busca:
             break
-        r = _consultar(nivel, d, categorias, buscar)
+        r = _consultar(nivel, d, categorias, buscar, invalidas)
         if r and nivel is reforco:
             r[1]["nivel_reforco"] = True
         if r:
@@ -359,6 +385,8 @@ def fase(categorias: list[str]) -> str:
                                  "classificacao": obj.get("classificacao")}
             obj, meta = r
     with db.conn() as c:
+        if obj is None and invalidas:   # responderam, mas sem JSON: não volta p/ o topo da fila na hora
+            return _sem_resposta_valida(c, d, invalidas)
         if obj is None:   # nenhum modelo respondeu (cota/sobrecarga): tenta de novo depois
             c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (d["id"],))
             return "unavailable"
@@ -385,8 +413,8 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     cat = obj.get("categoria") if obj.get("categoria") in categorias else None
     servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:500]
     salvar(c, d["id"], lista, conf, motivo, servico, fonte, 4)
-    c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, online_resp = %s, "
-              "revisado_at = now(), reanalise_pedida = false WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
+    c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, online_falhas = 0, lista_duvida = false, "
+              "online_resp = %s, revisado_at = now(), reanalise_pedida = false WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
     reconhecido = bool(obj.get("reconhecido")) and cls != "DESCONHECIDO" and conf >= settings().online_confianca_min
     if d["classification"] == "DESCONHECIDO" and reconhecido:
         razoes = [{"evidence_id": "E0", "text": f"IA online ({meta.get('model')}): {servico} — {motivo}"[:400], "by": "online"}]
@@ -409,14 +437,6 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
             eventos.lista("fase5", d["name"], None, "nem a IA online identificou o site", d["id"], "f4:online", cls)
     log.info("IA online: %s -> %s / %s (%.2f)%s", d["name"], cls, lista, conf, " [busca]" if meta.get("busca") else "")
     _evento(d, cls, lista, conf, servico, meta)
-
-
-def _fase5_se_duvida(c, domain_id: int) -> None:
-    """Resposta inválida da IA online numa dúvida de lista: segue para a fase 4 (manual)."""
-    r = c.execute("SELECT name, lista_ia FROM domains WHERE id = %s", (domain_id,)).fetchone()
-    if r and r["lista_ia"]:
-        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
-                  "ON CONFLICT DO NOTHING", (r["name"], f"IA com dúvida ({r['lista_ia']})"))
 
 
 def status(c) -> dict:

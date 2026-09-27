@@ -871,3 +871,43 @@ def test_ia_que_contraria_decisao_humana_vai_p_decisao_humana(env, monkeypatch):
     with db.conn() as c:
         g = c.execute("SELECT status, reviewed_by FROM global_reviews WHERE domain_id = %s", (ids["lib-pessoa.com"],)).fetchone()
     assert g["status"] == "blocked" and g["reviewed_by"] == "ti@empresa", g
+
+
+def test_ia_online_sem_resposta_valida_nao_prende_a_fila(env, monkeypatch):
+    """Resposta sem JSON de todos os modelos (filtro de segurança do Gemini): o domínio não volta p/ o topo da fila na
+    hora (naticr.com prendeu a fase 4 com 212 respostas vazias); na 3ª rodada vai p/ a Decisão Humana."""
+    from dnsanalyzer import config, db, online
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    monkeypatch.setattr(config.settings(), "web_search_url", "")
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)
+    chamadas = []
+
+    def vazio(d, cats, b, m):
+        chamadas.append(m)
+        raise ValueError("sem JSON: ")
+    monkeypatch.setattr(online, "perguntar", vazio)
+    with db.conn() as c:   # (o que outros testes deixaram na fila da fase 4 fica de fora)
+        c.execute("UPDATE domains SET online_claimed_at = now() + interval '1 day'")
+        i = c.execute("INSERT INTO domains (name, tld, kind, classification, category, analyzed_at, total_queries, lista_ia, lista_conf, "
+                      "lista_fonte, lista_at, lista_duvida, whois_at, web_search_at) VALUES ('filtrado-adulto.com', 'com', 'public', "
+                      "'NAO_TRABALHO', 'adulto', now() - interval '1 hour', 5, 'adulto', 0.7, 'local', now(), true, now(), now()) "
+                      "RETURNING id").fetchone()["id"]
+    assert online.fase(["adulto"]) == "done" and chamadas, "não é 'unavailable' (o worker não para 60 s)"
+    with db.conn() as c:
+        r = c.execute("SELECT online_falhas, online_claimed_at IS NOT NULL AS reservado FROM domains WHERE id = %s", (i,)).fetchone()
+    assert r["online_falhas"] == 1 and r["reservado"], "fica reservado 10 min em vez de voltar p/ o topo da fila"
+    n = len(chamadas)
+    assert online.fase(["adulto"]) == "idle" and len(chamadas) == n, "reservado: não pergunta de novo na hora"
+    for _ in range(2):   # passam os 10 min
+        with db.conn() as c:
+            c.execute("UPDATE domains SET online_claimed_at = now() - interval '11 minutes' WHERE id = %s", (i,))
+        online.fase(["adulto"])
+    with db.conn() as c:
+        r = c.execute("SELECT online_falhas, online_at, lista_duvida, online_resp FROM domains WHERE id = %s", (i,)).fetchone()
+        rev = c.execute("SELECT added_by FROM category_lists WHERE category = 'para_revisar' AND domain = 'filtrado-adulto.com'").fetchone()
+        ev = c.execute("SELECT detail FROM ai_events WHERE kind = 'fase5' AND name = 'filtrado-adulto.com'").fetchone()
+    assert r["online_at"] and not r["lista_duvida"] and r["online_falhas"] == 0 and "erro" in r["online_resp"], r
+    assert rev and "sem resposta válida" in rev["added_by"] and ev and "3 tentativas" in ev["detail"], (rev, ev)
+    with db.conn() as c:
+        c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (i,))
+    assert online.fase(["adulto"]) == "idle", "saiu da fila da fase 4"

@@ -96,7 +96,7 @@ document.getElementById("lSalvar").addEventListener("click", async (ev) => {
     {% for c, r in cats_wl %}
     <a href="{{ url_for('admin.listas_liberacao', wl=c) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if wl == c else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if wl == c }}">{{ r }} <span class="mut">({{ totwl.get(c, 0) }})</span></a>
     {% endfor %}
-    <a href="{{ url_for('admin.listas_liberacao', slug='_trabalho') }}" title="Avaliados pela IA ou por uma pessoa e liberados, fora de qualquer lista: não vão ao DNS." style="text-decoration:none;padding:.35rem .7rem;border:1px dashed {{ 'var(--b)' if trabalho else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if trabalho }}">👍 Aprovados <span class="mut">({{ whitelists.revisados }})</span></a>
+    <a href="{{ url_for('admin.listas_liberacao', slug='_trabalho') }}" title="Avaliados pela IA ou por uma pessoa e liberados, fora de qualquer lista: não vão ao DNS." style="text-decoration:none;padding:.35rem .7rem;border:1px dashed {{ 'var(--b)' if trabalho else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if trabalho }}">👍 Aprovados <span class="mut">({{ whitelists.aprovados if whitelists.aprovados is defined else '–' }})</span></a>
   </div>
 </div>
 {% if wl %}

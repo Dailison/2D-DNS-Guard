@@ -96,6 +96,10 @@
   function dur(s){ s = Math.max(0, Math.round(s)); var m = Math.floor(s/60); return m ? m + 'min ' + (s%60) + 's' : s + 's'; }
   function link(name){ var a = el('a', null, name); a.href = URL_DOM.replace('__N__', encodeURIComponent(name)); return a; }
   function badge(c){ return el('span', 'cls ' + (c || 'PENDENTE'), LBL[c] || c || '—'); }
+  // resposta da IA que termina numa decisão (fase 4, ou IA local com confiança alta): só na coluna Decisão
+  function virouDecisao(ev){
+    return ev.kind === 'online_done' || (ev.kind === 'lista_local' && /confiança alta: a IA local decide/.test(ev.detail || ''));
+  }
 
   // fase de cada evento (fluxo: 1 IA local · 2 WHOIS · 3 busca na web · 4 IA online · 5 Decisões)
   var FASE = {llm_start: '1', llm_done: '1', llm_error: '1', rules_final: '1', rules_alert: '1',
@@ -171,7 +175,7 @@
         ic.textContent = dst && dst[1] === 'sai' ? '✅' : '⛔'; body.appendChild(document.createTextNode(' → '));
         body.appendChild(el('span', 'lst ' + (dst ? dst[1] : ''), dst ? dst[0] : rot(p[0])));
       }
-      if (TRAB[ev.classification] && k !== 'lista_rem') body.appendChild(el('span', 'd', ' · ' + TRAB[ev.classification]));
+      if (TRAB[ev.classification] && k !== 'lista_rem') { body.appendChild(document.createTextNode(' ')); body.appendChild(badge(ev.classification)); }
     } else if (k === 'lista_recusada') {
       var pr = partes(ev); ic.textContent = '🛑';
       body.appendChild(el('span', 'lst', rot(pr[0]))); body.appendChild(el('span', 'd', ' ' + pr[1]));
@@ -223,6 +227,8 @@
         if (first) { feed.innerHTML = ''; feedDec.innerHTML = ''; }
         var evs = (d.events || []).slice().reverse();   // mais antigo primeiro, p/ inserir no topo em ordem
         evs.forEach(function(ev){
+          lastId = Math.max(lastId, ev.id);
+          if (virouDecisao(ev)) return;   // a resposta virou decisão: aparece só na coluna Decisão
           var li = row(ev), alvo = DEC[ev.kind] ? feedDec : feed;
           if (alvo.firstChild && alvo.firstChild.classList && alvo.firstChild.classList.contains('mut')) alvo.removeChild(alvo.firstChild);
           if (!first) li.className = 'novo'; alvo.insertBefore(li, alvo.firstChild); lastId = Math.max(lastId, ev.id); });

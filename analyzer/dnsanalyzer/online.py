@@ -403,8 +403,10 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
         from . import listas as _listas
         _listas.contexto(c, "IA sem certeza", "nem a IA online identificou o site")
         # nem a IA online identificou: fase 5 (Decisões). Com lista sugerida, `aplicar` decide.
-        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
-                  "ON CONFLICT DO NOTHING", (d["name"], "IA sem certeza (desconhecido)"))
+        if c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
+                     "ON CONFLICT DO NOTHING", (d["name"], "IA sem certeza (desconhecido)")).rowcount:
+            from . import eventos
+            eventos.lista("fase5", d["name"], None, "nem a IA online identificou o site", d["id"], "f4:online", cls)
     log.info("IA online: %s -> %s / %s (%.2f)%s", d["name"], cls, lista, conf, " [busca]" if meta.get("busca") else "")
     _evento(d, cls, lista, conf, servico, meta)
 

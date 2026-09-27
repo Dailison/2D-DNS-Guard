@@ -464,6 +464,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                 eventos.lista("lista_add", r["name"], cat, _fonte(r)
                               + (f" · saiu de {', '.join(x for x in moveis if x in em)}" if any(x in em for x in moveis) else ""),
                               r["id"], origem(r), cls)
+            elif online:   # já estava na lista: a IA online confirmou (a decisão aparece na coluna "Decisão")
+                eventos.lista("lista_add", r["name"], cat, f"confirmou (já estava na lista) · {_fonte(r)}", r["id"], origem(r), cls)
             tirar = [x for x in moveis if x in em and x != cat]
             if tirar:
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))

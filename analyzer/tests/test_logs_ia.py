@@ -335,3 +335,17 @@ def test_logs_sem_nomes_locais(api):
     assert {"srv.2d.local", "pc.empresa.corp"} <= todos
     sem = {r["dominio"] for r in _grouped(api, sem_locais="true", excluir=["empresa.corp"])}
     assert "srv.2d.local" not in sem and "pc.empresa.corp" not in sem and "x.ruim.com" in sem
+
+
+def test_dominio_novo_passa_na_frente_do_backlog_de_reanalise(api):
+    """27/09: domínios novos (1-4 consultas) esperavam ~15 h atrás de ~7.000 reenfileirados com muitas consultas."""
+    from dnsanalyzer import classifier, db
+    with db.conn() as c:
+        c.execute("UPDATE domains SET claimed_at = now() WHERE llm_pending")   # (o que outros testes deixaram na fila)
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, model, llm_pending, total_queries) VALUES "
+                  "('backlog-velho.com', 'com', 'NAO_TRABALHO', 'llm', 'qwen3:8b', true, 900), "
+                  "('novo-hoje.com.br', 'br', NULL, NULL, NULL, true, 2), "
+                  "('suspeito-velho.net', 'net', 'SUSPEITO', 'llm', 'qwen3:8b', true, 5)")
+    with db.conn() as c:
+        ordem = [classifier._claim_llm(c)["name"] for _ in range(3)]
+    assert ordem == ["suspeito-velho.net", "novo-hoje.com.br", "backlog-velho.com"], ordem

@@ -255,9 +255,9 @@ def _claim_llm(c) -> dict | None:
              SELECT id FROM domains WHERE llm_pending AND NOT locked AND NOT aguarda_recorrencia
                AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
-             ORDER BY (classification = 'SUSPEITO') DESC, total_queries DESC
+             ORDER BY (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC, (model IS NULL) DESC, total_queries DESC
              LIMIT 1 FOR UPDATE SKIP LOCKED)
-           RETURNING *""").fetchone()
+           RETURNING *""").fetchone()   # (27/09) nunca passou pela IA (domínio novo) vai antes do backlog de reanálise
 
 
 def phase_b(client: OllamaClient, cats: list[dict]) -> str:

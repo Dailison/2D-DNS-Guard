@@ -168,8 +168,12 @@ def aplicar(c) -> dict:
             motivo = risco
         elif r["publicar"] and (risco or (auto and sinal)):
             so_lista = risco or f"sinal de baixa confiança em subdomínio ({', '.join(sinal)})"
-        elif auto and (listas._em_lista(nome, em) or nome in pais):
-            motivo = "conflita com uma lista de bloqueio"
+        elif auto and listas._em_lista(nome, em):
+            motivo = "está numa lista de bloqueio"
+        elif auto and nome in pais and r["publicar"]:
+            # pai de algo bloqueado (amazonaws.com, fastly.net): no DNS liberaria o subdomínio; fica só na lista. Antes
+            # saía da whitelist e o site ficava sem categoria nenhuma, em "Aprovados" (27/09)
+            so_lista = "tem subdomínio numa lista de bloqueio"
         if motivo:
             listas.contexto(c, "whitelist (trava)", motivo)
             c.execute("DELETE FROM whitelist_domains WHERE category = %s AND domain = %s", (r["category"], nome))

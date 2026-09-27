@@ -968,3 +968,21 @@ def test_liberar_site_suspeito_vai_p_decisao_humana(env, monkeypatch):
     assert not wl, wl
     assert ap["local"][ids["susp-local.com"]][0] == "online" and "SUSPEITO" in ap["local"][ids["susp-local.com"]][-1], ap["local"]
     assert "susp-online.com" in rev and "SUSPEITO" in rev["susp-online.com"], rev
+
+
+def test_pai_de_algo_bloqueado_fica_na_whitelist_sem_publicar(env):
+    """amazonaws.com/fastly.net na whitelist: no DNS liberaria o subdomínio bloqueado, mas a entrada da IA (só na lista)
+    fica — antes saía e o site ficava sem categoria ("Aprovados"). O próprio domínio numa blocklist: sai."""
+    from dnsanalyzer import db, whitelist
+    with db.conn() as c:
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'jogo.plataforma-pai.com', 'op@2d'), "
+                  "('jogos', 'bloqueado-e-wl.com', 'op@2d')")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES "
+                  "('infraestrutura', 'plataforma-pai.com', 'IA local (fase 1)', false), "
+                  "('infraestrutura', 'plataforma-pai2.com', 'IA online', true), "
+                  "('produtividade', 'bloqueado-e-wl.com', 'IA online', false)")
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'x.plataforma-pai2.com', 'op@2d')")
+        whitelist.aplicar(c)
+        w = {r["domain"]: r["publicar"] for r in c.execute("SELECT domain, publicar FROM whitelist_domains "
+                                                          "WHERE domain IN ('plataforma-pai.com', 'plataforma-pai2.com', 'bloqueado-e-wl.com')")}
+    assert w == {"plataforma-pai.com": False, "plataforma-pai2.com": False}, w

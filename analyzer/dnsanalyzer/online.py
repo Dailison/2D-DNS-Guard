@@ -120,11 +120,18 @@ def niveis() -> list[list[tuple[str, int, int]]]:
     return [cfg.gemini_modelos, cfg.gemini_reforco, cfg.gemini_busca]
 
 
-def cota(modelo: str) -> _Cota:
-    if modelo not in _COTAS:
+def _chaves() -> list[str]:
+    """Chave principal + as de outros projetos (GEMINI_API_KEY_2..4): a cota do plano grátis é por projeto e modelo."""
+    cfg = settings()
+    return [cfg.gemini_api_key] + [k for k in cfg.gemini_api_keys_extra if k != cfg.gemini_api_key]
+
+
+def cota(modelo: str, chave: int = 0) -> _Cota:
+    nome = modelo if not chave else f"{modelo} (chave {chave + 1})"
+    if nome not in _COTAS:
         rpm, rpd = next(((r, d) for nivel in niveis() for m, r, d in nivel if m == modelo), (5, 20))
-        _COTAS[modelo] = _Cota(modelo, rpm, rpd)
-    return _COTAS[modelo]
+        _COTAS[nome] = _Cota(nome, rpm, rpd)
+    return _COTAS[nome]
 
 
 def _com_busca(modelo: str) -> bool:
@@ -221,7 +228,7 @@ def _limite_429(r) -> tuple[bool, float]:
     return False, espera   # sem detalhe: trata como limite do minuto (o contador próprio pausa o dia no RPD)
 
 
-def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None = None) -> tuple[dict, dict]:
+def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None = None, chave: int = 0) -> tuple[dict, dict]:
     cfg = settings()
     modelo = modelo or cfg.gemini_modelos[0][0]
     listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
@@ -246,22 +253,23 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
         else:
             corpo["generationConfig"]["responseMimeType"] = "application/json"
     t0 = time.monotonic()
-    ct = cota(modelo)
+    ct = cota(modelo, chave)
+    qual = f"{modelo} (chave {chave + 1})" if chave else modelo
     try:
         r = httpx.post(URL.format(model=modelo), json=corpo, timeout=150 if modelo.startswith("gemma") else 60,
-                       headers={"x-goog-api-key": cfg.gemini_api_key})
+                       headers={"x-goog-api-key": _chaves()[chave]})
     except httpx.HTTPError as e:
-        raise OnlineIndisponivel(f"Gemini {modelo}: {e.__class__.__name__}") from e
+        raise OnlineIndisponivel(f"Gemini {qual}: {e.__class__.__name__}") from e
     if r.status_code == 429:
         dia, espera = _limite_429(r)
         ct.pausar_dia() if dia else ct.pausar(espera)
-        raise OnlineIndisponivel(f"Gemini {modelo}: cota {'do dia' if dia else 'do minuto'} esgotada (429)")
+        raise OnlineIndisponivel(f"Gemini {qual}: cota {'do dia' if dia else 'do minuto'} esgotada (429)")
     if r.status_code >= 500:   # sobrecarga do modelo
         ct.pausar(90)
-        raise OnlineIndisponivel(f"Gemini {modelo}: HTTP {r.status_code}")
+        raise OnlineIndisponivel(f"Gemini {qual}: HTTP {r.status_code}")
     if r.status_code != 200:
         ct.pausar(600)   # chave inválida/modelo inexistente: não martela
-        raise OnlineIndisponivel(f"Gemini: HTTP {r.status_code}: {r.text[:200]}")
+        raise OnlineIndisponivel(f"Gemini {qual}: HTTP {r.status_code}: {r.text[:200]}")
     j = r.json()
     partes = ((j.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
     texto = "".join(p.get("text", "") for p in partes if not p.get("thought"))
@@ -269,7 +277,7 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
     fontes = [c.get("web", {}).get("uri") for c in
               ((j.get("candidates") or [{}])[0].get("groundingMetadata") or {}).get("groundingChunks") or []][:5]
     return obj, {"model": modelo, "seconds": round(time.monotonic() - t0, 1), "busca": buscar,
-                 "fontes": [f for f in fontes if f]}
+                 "fontes": [f for f in fontes if f], **({"chave": chave + 1} if chave else {})}
 
 
 # fila da fase 3: dúvidas da etapa "lista" + desconhecidos que já passaram pela fase 2
@@ -322,16 +330,18 @@ def _buscas_no_mes(c) -> int:
 def _consultar(nivel, d, categorias, buscar, invalidas: list | None = None) -> tuple[dict, dict] | None:
     """Primeiro modelo do nível com cota que responder (resposta sem JSON vai p/ `invalidas`)."""
     for modelo, _, _ in nivel:
-        if not cota(modelo).esperar():
-            continue
-        try:
-            return perguntar(d, categorias, buscar, modelo)
-        except OnlineIndisponivel as e:
-            log.info("%s", e)
-        except (ValueError, KeyError, json.JSONDecodeError) as e:
-            log.warning("IA online (%s) para %s: resposta inválida: %s", modelo, d["name"], e)
-            if invalidas is not None:
-                invalidas.append(f"{modelo}: {e}")
+        for chave in range(len(_chaves())):   # cada chave (projeto) tem a própria cota do modelo
+            if not cota(modelo, chave).esperar():
+                continue
+            try:
+                return perguntar(d, categorias, buscar, modelo, **({"chave": chave} if chave else {}))
+            except OnlineIndisponivel as e:
+                log.info("%s", e)
+            except (ValueError, KeyError, json.JSONDecodeError) as e:
+                log.warning("IA online (%s) para %s: resposta inválida: %s", modelo, d["name"], e)
+                if invalidas is not None:
+                    invalidas.append(f"{modelo}: {e}")
+                break   # resposta inválida é do modelo (ex.: filtro de segurança), não da chave: próximo modelo
     return None
 
 
@@ -466,9 +476,10 @@ def status(c) -> dict:
     modelos = {}
     for m in dict.fromkeys(x for nivel in niveis() for x, _, _ in nivel):
         if m:
-            ct = cota(m)
-            modelos[m] = {"hoje": ct.n if ct.dia == ct._hoje() else 0, "limite_dia": ct.rpd,
-                          "pausado_ate": datetime.fromtimestamp(ct.pausa_ate, timezone.utc).isoformat() if ct.pausa_ate > time.time() else None}
+            cts = [cota(m, i) for i in range(len(_chaves()))]
+            fim = min(ct.pausa_ate for ct in cts)   # pausado só se todas as chaves estão pausadas
+            modelos[m] = {"hoje": sum(ct.n for ct in cts if ct.dia == ct._hoje()), "limite_dia": sum(ct.rpd for ct in cts),
+                          "pausado_ate": datetime.fromtimestamp(fim, timezone.utc).isoformat() if fim > time.time() else None}
     with db.conn() as c2:
         buscas = _buscas_no_mes(c2)
     return {**r, "habilitado": habilitado(), "modelos": modelos, "buscas_google_mes": buscas,

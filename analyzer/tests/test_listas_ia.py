@@ -928,3 +928,23 @@ def test_429_do_minuto_nao_para_o_modelo_o_dia_todo():
     assert online._limite_429(resp("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "3600s"))[0] is True
     sem = SimpleNamespace(json=lambda: (_ for _ in ()).throw(ValueError()), text="Resource exhausted per day")
     assert online._limite_429(sem) == (False, 65.0), "sem detalhe: minuto (o contador próprio cuida do dia)"
+
+
+def test_segunda_chave_gemini_tem_cota_propria(monkeypatch):
+    """Cota do plano grátis é por projeto e modelo: com a da chave 1 esgotada, o mesmo modelo segue pela chave 2."""
+    from dnsanalyzer import config, online
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "gemini_api_key", "k1")
+    monkeypatch.setattr(cfg, "gemini_api_keys_extra", ["k2", "k1"])
+    assert online._chaves() == ["k1", "k2"]
+    monkeypatch.setattr(online, "_COTAS", {})
+    online.cota("gemini-3.5-flash-lite").pausar_dia()   # chave 1 esgotada
+    usadas = []
+
+    def falso(d, cats, b, m, chave=0):
+        usadas.append((m, chave))
+        return {"lista": "jogos", "confianca": 0.9}, {"model": m}
+    monkeypatch.setattr(online, "perguntar", falso)
+    r = online._consultar([("gemini-3.5-flash-lite", 14, 490)], {"name": "x.com"}, [], False)
+    assert r and usadas == [("gemini-3.5-flash-lite", 1)], usadas
+    assert online.cota("gemini-3.5-flash-lite", 1).modelo == "gemini-3.5-flash-lite (chave 2)"

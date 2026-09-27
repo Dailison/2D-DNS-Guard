@@ -106,6 +106,7 @@ class Settings:
     online_enabled: bool
     online_workers: int
     gemini_api_key: str
+    gemini_api_keys_extra: list
     gemini_modelos: list
     gemini_reforco: list
     gemini_busca: list
@@ -205,6 +206,8 @@ def load_settings() -> Settings:
         online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 4 (só com GEMINI_API_KEY)
         online_workers=max(_int("ONLINE_WORKERS", 6), 1),   # consultas simultâneas (Gemma é lento; a cota é por modelo)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
+        # chaves de outros projetos (cada uma com a própria cota por modelo), usadas depois da principal
+        gemini_api_keys_extra=[k for k in (os.environ.get(f"GEMINI_API_KEY_{i}", "").strip() for i in (2, 3, 4)) if k],
         # plano grátis desta conta (AI Studio, 2026-09-26) — "modelo:rpm:rpd", na ordem de uso:
         # volume: 3.5/3.1 Flash-Lite 15/min 500/dia, Gemma 4 31B 30/min 14.400/dia (lento: ~40-75 s);
         # reforço: 3.8/3.7/3.5/3.6 Flash 5/min 20/dia cada (27/09: 2.5 Flash/Flash-Lite fechados p/ contas novas, 3 Flash 404)

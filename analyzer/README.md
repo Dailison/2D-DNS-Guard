@@ -221,7 +221,8 @@ comentário na mesma linha do valor.** Principais: `DATABASE_URL`, `TECHNITIUM_U
 `OLLAMA_MODEL`, `LLM_ENABLED`, `EXCLUDE_CLIENTS`, `RETENTION_DAYS`, `API_TOKEN`,
 `WEB_SEARCH_URL`, `LISTS_ALLOWED_IPS`, `WEBHOOK_URLS/KINDS`.
 
-IA online (fase 4): `GEMINI_API_KEY` (sem ela a fase 4 fica desligada), `ONLINE_ENABLED`,
+IA online (fase 4): `GEMINI_API_KEY` (sem ela a fase 4 fica desligada), `GEMINI_API_KEY_2..4` (chaves de outros
+projetos, cada uma com a própria cota por modelo; usadas depois da principal), `ONLINE_ENABLED`,
 `ONLINE_WORKERS` (6), `ONLINE_CONFIANCA_MIN` (0,8), `GEMINI_MODELS` (volume),
 `GEMINI_ESCALATE_MODELS` (segunda opinião), `GEMINI_SEARCH_MODELS` (grounding, vazio nesta
 conta). Os padrões e as cotas estão comentados em `dnsanalyzer/config.py`.

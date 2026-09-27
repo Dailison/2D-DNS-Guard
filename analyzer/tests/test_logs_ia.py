@@ -367,3 +367,26 @@ def test_cada_reforco_com_o_seu_modelo_e_rodizio(monkeypatch):
         assert [r.cliente().url for _ in range(3)] == ["http://pc1:11434", "http://pc2:11434", "http://pc1:11434"]
     finally:
         config._settings = None
+
+
+def test_etapas_so_na_gpu_rapida_e_workers_por_reforco(monkeypatch):
+    """27/09: fases 2/3 presas no PC lento (rodízio) -> OLLAMA_ETAPAS_URLS escolhe a GPU delas; LLM_EXTRA_WORKERS_URL
+    dá menos análises simultâneas à mais lenta. Fora do ar, vale outro reforço e depois a VM."""
+    from dnsanalyzer import classifier, config, llm
+    monkeypatch.setenv("OLLAMA_EXTRA_URLS", "http://pc1:11434=gemma4:26b-iq3s,http://pc2:11434=gemma4:26b-iq3s")
+    monkeypatch.setenv("OLLAMA_ETAPAS_URLS", "http://pc2:11434")
+    monkeypatch.setenv("LLM_EXTRA_WORKERS_URL", "http://pc1:11434=2")
+    monkeypatch.setenv("LLM_EXTRA_WORKERS", "4")
+    monkeypatch.setattr(config, "_settings", None)
+    try:
+        cfg = config.settings()
+        assert classifier._workers_reforco(cfg, "http://pc1:11434") == 2 and classifier._workers_reforco(cfg, "http://pc2:11434") == 4
+        no_ar = {"http://pc1:11434": True, "http://pc2:11434": True}
+        monkeypatch.setattr(llm.OllamaClient, "available", lambda self: (no_ar.get(self.url, True), "ok"))
+        r = classifier._Reforco(llm.OllamaClient())
+        assert [r.cliente().url for _ in range(3)] == ["http://pc2:11434"] * 3
+        no_ar["http://pc2:11434"] = False
+        r = classifier._Reforco(llm.OllamaClient())
+        assert r.cliente().url == "http://pc1:11434", "a preferida fora: outro reforço"
+    finally:
+        config._settings = None

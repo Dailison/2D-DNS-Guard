@@ -474,25 +474,37 @@ def _claim_etapa3(c) -> dict | None:
            RETURNING *""").fetchone()
 
 
+def _workers_reforco(cfg, url: str) -> int:
+    return cfg.llm_extra_workers_url.get(url, cfg.llm_extra_workers)
+
+
 class _Reforco:
-    """Escolhe o cliente da IA: um reforço com GPU que responde (checado a cada 60 s), em rodízio entre eles (com duas
-    GPUs, as fases 2/3 e a pergunta de lista não pesam numa só); nenhum no ar: a VM."""
+    """Escolhe o cliente da IA das fases 2/3 e da pergunta de lista: um reforço com GPU que responde (checado a cada
+    60 s), em rodízio entre os de OLLAMA_ETAPAS_URLS (vazio = todos); nenhum deles no ar: outro reforço; nenhum: a VM.
+    (27/09: em rodízio com o PC, que enfileira ~30 s por pedido, os 3 workers das fases 2/3 ficavam presos nele.)"""
 
     def __init__(self, vm: OllamaClient):
+        cfg = settings()
         self.vm, self.ok, self.vez = vm, {}, 0
-        self.extras = [OllamaClient(u) for u in settings().ollama_extra_urls]
+        todos = [OllamaClient(u) for u in cfg.ollama_extra_urls]
+        pref = set(cfg.ollama_etapas_urls)
+        self.extras = [x for x in todos if not pref or x.url in pref] or todos
+        self.reserva = [x for x in todos if x not in self.extras]
+
+    def _no_ar(self, x: OllamaClient) -> bool:
+        t, ok = self.ok.get(x.url, (0.0, False))
+        if time.monotonic() - t > 60:
+            ok = x.available()[0]
+            self.ok[x.url] = (time.monotonic(), ok)
+        return ok
 
     def cliente(self) -> OllamaClient:
         for i in range(len(self.extras)):
             x = self.extras[(self.vez + i) % len(self.extras)]
-            t, ok = self.ok.get(x.url, (0.0, False))
-            if time.monotonic() - t > 60:
-                ok = x.available()[0]
-                self.ok[x.url] = (time.monotonic(), ok)
-            if ok:
+            if self._no_ar(x):
                 self.vez = (self.vez + i + 1) % len(self.extras)
                 return x
-        return self.vm
+        return next((x for x in self.reserva if self._no_ar(x)), self.vm)
 
 
 def _whois_worker(stop, cats: list[dict], reforco: "_Reforco", wid: int) -> None:
@@ -614,7 +626,8 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
-    db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
+    db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
+                    + cfg.whois_workers)
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:
@@ -626,11 +639,10 @@ def run_forever(stop=lambda: False) -> None:
         with db.conn() as c:
             cats0 = categories(c)
         for s, url in enumerate(cfg.ollama_extra_urls, start=1):
-            for j in range(cfg.llm_extra_workers):
+            for j in range(_workers_reforco(cfg, url)):
                 threading.Thread(target=_llm_worker, args=(stop, cats0, s * 100 + j, url), daemon=True,
                                  name=f"ia-extra{s}-{j}").start()
-        log.info("reforço da IA: %s (%d análises simultâneas cada)", ", ".join(cfg.ollama_extra_urls),
-                 cfg.llm_extra_workers)
+        log.info("reforço da IA: %s", ", ".join(f"{u} ({_workers_reforco(cfg, u)} análises simultâneas)" for u in cfg.ollama_extra_urls))
     last_stale = 0.0
     last_auto = 0.0
     backoff = 0

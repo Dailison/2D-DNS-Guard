@@ -76,6 +76,8 @@ class Settings:
     ollama_extra_urls: list[str]
     ollama_extra_modelos: dict   # url -> modelo daquele reforço ("url=modelo" em OLLAMA_EXTRA_URLS)
     llm_extra_workers: int
+    llm_extra_workers_url: dict   # url -> análises simultâneas daquele reforço (senão LLM_EXTRA_WORKERS)
+    ollama_etapas_urls: list      # reforços das fases 2/3 e da pergunta de lista (vazio = todos, em rodízio)
     llm_extra_timeout: int
     llm_max_attempts: int
     llm_skip_hosting_subdomains: bool
@@ -174,6 +176,11 @@ def load_settings() -> Settings:
         ollama_extra_modelos={u.split("=", 1)[0].rstrip("/"): u.split("=", 1)[1].strip()
                               for u in _list("OLLAMA_EXTRA_URLS") if "=" in u and u.split("=", 1)[1].strip()},
         llm_extra_workers=max(_int("LLM_EXTRA_WORKERS", 2), 1),
+        # "http://pc1:11434=2,http://pc2:11434=4": GPU mais lenta recebe menos análises ao mesmo tempo (27/09: o PC
+        # enfileirava ~30 s por pedido e as fases 2/3 presas nele pararam)
+        llm_extra_workers_url={u.rsplit("=", 1)[0].rstrip("/"): max(int(u.rsplit("=", 1)[1]), 0)
+                               for u in _list("LLM_EXTRA_WORKERS_URL") if "=" in u and u.rsplit("=", 1)[1].strip().isdigit()},
+        ollama_etapas_urls=[u.rstrip("/") for u in _list("OLLAMA_ETAPAS_URLS")],
         # GPU responde em segundos: pedido que some (queda do PC/VPN) não pode segurar o domínio 10 min
         llm_extra_timeout=_int("LLM_EXTRA_TIMEOUT_SECONDS", 90),
         llm_max_attempts=_int("LLM_MAX_ATTEMPTS", 3),

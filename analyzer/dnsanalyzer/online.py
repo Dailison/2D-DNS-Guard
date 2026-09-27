@@ -59,6 +59,8 @@ Para o domínio, diga:
   identificado (CloudFront, Akamai, Fastly, Cloudflare, subdomínio aleatório de CDN) = "wl:cdn" etc.
   Domínio que imita marca famosa com letras trocadas (ffacebook, g00gle) e não é o oficial = "ameaca";
   Variação/espelho de uma marca (mesmo nome com sufixo diferente, ex.: cs8sp.com da marca de cassino CS8) = a lista da marca;
+  Portal/buscador com notícias (nacional ou estrangeiro: Naver, Yahoo, UOL, Baidu, Yandex) = "noticias"; loja estrangeira = "compras".
+  "wl:outros_liberados" só para o que foi identificado e não cabe em NENHUMA lista (religião, cultura, ONG, pessoal);
   Domínio que você NÃO consegue identificar (nome aleatório, sem presença na web, registro recente/titular oculto) =
   "nao_identificado" — nunca whitelist para o que não foi identificado;
 - "confianca": 1.0 só se tem certeza; 0.7 provável; 0.4 ou menos se está chutando;

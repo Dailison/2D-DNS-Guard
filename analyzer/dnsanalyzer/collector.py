@@ -24,14 +24,15 @@ from .tenants import TenantResolver, auto_network_for, slugify
 log = logging.getLogger(__name__)
 CURSOR_KEY = "ingest_cursor"
 BLOCKED_TYPES = {"Blocked", "UpstreamBlocked", "CacheBlocked"}
-SEM_IP_RCODES = {"NxDomain", "ServerFailure", "Refused"}
+SEM_IP_RCODES = {"NxDomain", "ServerFailure"}   # (REFUSED é política, não "não existe")
+RESOLVIDO_TYPES = {"Recursive", "Cached"}         # só estas refletem a resolução na internet (Authoritative = zona local/app)
 
 
 def sem_ip(e: dict) -> tuple[bool, bool]:
-    """(consulta de endereço que conta, voltou sem IP). Só tipo A (IPv4) não bloqueada: AAAA vazio é normal (muito site
-    não tem IPv6) e bloqueio não diz se o nome resolve. Sem IP = NXDOMAIN, SERVFAIL, REFUSED ou NoError sem resposta
-    (o nome existe mas não tem endereço)."""
-    if e.get("qtype") != "A" or e.get("responseType") in BLOCKED_TYPES:
+    """(consulta de endereço que conta, voltou sem IP). Só tipo A (IPv4) resolvida na internet (Recursive/Cached): AAAA
+    vazio é normal (muito site não tem IPv6), bloqueio e resposta autoritativa não dizem se o nome resolve. Sem IP =
+    NXDOMAIN, SERVFAIL ou NoError sem resposta (o nome existe mas não tem endereço)."""
+    if e.get("qtype") != "A" or e.get("responseType") not in RESOLVIDO_TYPES:
         return False, False
     rc = e.get("rcode")
     return True, rc in SEM_IP_RCODES or (rc == "NoError" and not str(e.get("answer") or "").strip())

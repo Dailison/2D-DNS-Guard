@@ -716,3 +716,5 @@ def test_coletor_conta_respostas_sem_ip():
     assert sem_ip({"qtype": "A", "responseType": "Recursive", "rcode": "ServerFailure", "answer": ""}) == (True, True)
     assert sem_ip({"qtype": "AAAA", "responseType": "Recursive", "rcode": "NoError", "answer": ""}) == (False, False), "sem IPv6 é normal"
     assert sem_ip({"qtype": "A", "responseType": "Blocked", "rcode": "NoError", "answer": "0.0.0.0"}) == (False, False)
+    assert sem_ip({"qtype": "A", "responseType": "Authoritative", "rcode": "Refused", "answer": ""}) == (False, False), "política"
+    assert sem_ip({"qtype": "A", "responseType": "Cached", "rcode": "NoError", "answer": ""}) == (True, True)

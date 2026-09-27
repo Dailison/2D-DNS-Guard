@@ -343,12 +343,27 @@ def _em_lista(nome: str, conjunto: set[str]) -> bool:
     return any(".".join(p[i:]) in conjunto for i in range(len(p) - 1))
 
 
+def _fora_das_filas_sql() -> str:
+    """Ainda nas filas da IA (fases 2-4 ou a pergunta de lista) não é "Aprovado": só aparece quando termina (27/09: 417
+    dos 429 "Aprovados" estavam no meio do caminho)."""
+    from . import listas_ia, online
+    from .config import settings
+    fila4 = online._FILA.replace("(d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') AND ", "")
+    fase23 = ("(NOT d.llm_pending AND ((d.classification = 'DESCONHECIDO' AND d.classified_by IN ('llm', 'web')) OR "
+              + listas_ia.incerta_sql("d") + ") AND (d.whois_at IS NULL OR d.web_search_at IS NULL) "
+              "AND (NOT dominio_decidido(d.id) OR d.reanalise_pedida))")
+    pergunta = ("(NOT d.locked AND d.classification <> 'DESCONHECIDO' AND (d.lista_at IS NULL OR d.lista_at < d.analyzed_at))"
+                if settings().lista_ia_enabled else "false")
+    return f"NOT coalesce(({fila4}), false) AND NOT coalesce({fase23}, false) AND NOT coalesce({pergunta}, false)"   # (NULL não exclui)
+
+
 def sem_lista(c, **filtros) -> dict:
     """Domínios já analisados que não estão em NENHUMA lista (bloqueio ou liberação, nem por domínio
-    pai). Não vão p/ o Technitium: só p/ consulta, pedir nova análise ou pôr numa lista."""
+    pai) nem numa fila da IA ("Aprovados"). Não vão p/ o Technitium: só p/ consulta, pedir nova análise ou pôr numa lista."""
     em = {r["domain"] for r in c.execute("SELECT domain FROM category_lists UNION SELECT domain FROM allow_list_domains "
                                          "UNION SELECT domain FROM whitelist_domains")}
-    rows = [r for r in c.execute(DETALHE_SQL + "d.kind = 'public' AND d.classification IS NOT NULL AND NOT d.llm_pending")
+    rows = [r for r in c.execute(DETALHE_SQL + "d.kind = 'public' AND d.classification IS NOT NULL AND NOT d.llm_pending AND "
+                                 + _fora_das_filas_sql())
             if not _em_lista(r["domain"], em)]
     for r in rows:
         r["revisao"] = _revisao(r)

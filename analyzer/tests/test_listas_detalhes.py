@@ -142,3 +142,15 @@ def test_backups_do_technitium(api):
     um = api.get(f"/console/technitium-backups/{lista[0]['id']}", headers=H).json()
     assert um["config"] == {"groups": [{"name": "g102"}]} and um["taken_by"] == "op@2d"
     assert api.get("/console/technitium-backups/999999", headers=H).status_code == 404
+
+
+def test_aprovados_nao_mostra_o_que_ainda_esta_nas_filas_da_ia(api):
+    from dnsanalyzer import db
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, classification, category, total_queries, classified_by, analyzed_at, lista_ia, "
+                  "lista_conf, lista_fonte, lista_at, lista_duvida) VALUES "
+                  "('na-fase4.com', 'TRABALHO', 'produtividade', 3, 'llm', now() - interval '1 minute', 'jogos', 0.95, 'local', now(), true), "
+                  "('sem-pergunta.com', 'TRABALHO', 'produtividade', 3, 'catalog', now(), NULL, NULL, NULL, NULL, false)")
+    nomes = {r["domain"] for r in api.get("/sem-lista", headers=H).json()["items"]}
+    assert not {"na-fase4.com", "sem-pergunta.com"} & nomes, nomes
+    assert "travado.com" in nomes, "travado (decisão de pessoa) não espera a IA"

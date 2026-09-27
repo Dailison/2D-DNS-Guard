@@ -314,6 +314,11 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
             save(c, drow, dossier, rule, rules_only(rule, False), False, None)
         event("rules_final", name, did, rule.classification, rule.risk, rule.work,
               detail="resolvido pelas regras (evidência nova); IA não foi necessária")
+        if rule.classification != "DESCONHECIDO" and cfg.lista_ia_enabled:   # a lista também faz parte da fase (antes
+            try:                                                             # ia p/ uma fila que só andava c/ tudo vazio)
+                listas_ia.sugerir(client, did, 2 if etapa3 else 3 if etapa2 else 1)
+            except Exception:  # noqa: BLE001 — a fila de listas pega depois
+                log.exception("lista da IA para %s", name)
         return "done"
     ev = [e.as_dict() for e in rule.evidence]
     with db.conn() as c:
@@ -543,9 +548,14 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
                 if not ok:
                     time.sleep(60)
                     continue
-            st = phase_b(client, cats)
-            if st == "idle":            # fila da IA vazia: etapa "lista" (qual lista de bloqueio)
-                st = listas_ia.fase(client)
+            if wid % 100 == 1:   # um worker do reforço atende primeiro a pergunta de lista (catálogo/regras): com a fila da
+                st = listas_ia.fase(client)   # fase 1 cheia ela não andava (214 esperando, 27/09)
+                if st == "idle":
+                    st = phase_b(client, cats)
+            else:
+                st = phase_b(client, cats)
+                if st == "idle":            # fila da IA vazia: etapa "lista" (qual lista de bloqueio)
+                    st = listas_ia.fase(client)
             if st == "idle":
                 time.sleep(20)
             elif st == "unavailable":

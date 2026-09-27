@@ -764,11 +764,7 @@ def empresa_excluir(tid):
 # ------------------------------------------------------------------ IA ao vivo
 @analise_bp.get("/ia")
 def ia_ao_vivo():
-    try:
-        precisao = api.get("/ai/precisao", days=7)
-    except AnalyzerError:
-        precisao = None
-    return render_template("admin/analise/ia.html", aba="ia", precisao=precisao, **_ctx())
+    return render_template("admin/analise/ia.html", aba="ia", **_ctx())
 
 
 @analise_bp.get("/ia/eventos")

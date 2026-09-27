@@ -6,6 +6,7 @@
   .now .spin{width:14px;height:14px;border:3px solid #93c5fd;border-top-color:var(--b);border-radius:50%;animation:sp 1s linear infinite;flex:0 0 auto}
   @keyframes sp{to{transform:rotate(360deg)}}
   .now.idle{background:#f8fafc;border-color:var(--bd)} .now.idle .spin{display:none}
+  .now .ia-st{margin-left:auto;font-size:.82rem;font-weight:600;white-space:nowrap;padding-left:.8rem}
   .feed{list-style:none;margin:0;padding:0}
   .feed li{display:flex;gap:.6rem;align-items:baseline;padding:.45rem .2rem;border-bottom:1px solid var(--bd);font-size:.9rem}
   .feed li.novo{animation:fl 2s ease-out}
@@ -28,7 +29,6 @@
 </style>
 
 <div class="ia-top">
-  <div class="metric"><div class="n" id="st-ia" style="font-size:1rem;padding-top:.4rem">…</div><div class="l" id="st-model">IA</div></div>
   <div class="metric"><div class="n" id="st-fila">–</div><div class="l" title="classificação do site e em qual lista ele entra (IA local)">Fase 1 · IA local</div></div>
   <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado, .br primeiro">Fase 2 · WHOIS</div></div>
   <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web (depois do WHOIS)">Fase 3 · busca na web</div></div>
@@ -36,20 +36,10 @@
   <div class="metric"><div class="n" id="st-revisar">–</div><div class="l" title="Decisões: classificação manual pela equipe de TI">Fase 5 · Decisões</div></div>
   <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
   <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div></div>
-  <div class="metric"><div class="n" id="st-eta" style="font-size:1.1rem;padding-top:.3rem">–</div><div class="l">Previsão p/ zerar a fila</div></div>
 </div>
 
-{% if precisao and precisao.fontes %}
-<div class="card" style="padding:.7rem 1rem;margin-bottom:1rem">
-  <b>Precisão da IA · últimos {{ precisao.dias }} dias</b> <span class="mut" style="font-size:.8rem">— entradas automáticas nas listas que uma pessoa desfez depois</span>
-  <div style="display:flex;flex-wrap:wrap;gap:.5rem 1.2rem;margin-top:.4rem;font-size:.88rem">
-    {% for f in precisao.fontes %}<span><b>{{ f.fonte }}</b>: {{ f.aplicadas }} aplicada(s), {{ f.corrigidas }} corrigida(s) <span class="{{ 'mut' if f.pct_corrigidas < 5 else '' }}" style="{{ 'color:#b91c1c;font-weight:700' if f.pct_corrigidas >= 10 }}">({{ f.pct_corrigidas }}%)</span></span>{% endfor %}
-  </div>
-  {% set dc = precisao.decisoes or {} %}
-  <div class="mut" style="font-size:.8rem;margin-top:.3rem">Decisões (fase 5): {{ dc.aprovou_sugestao or 0 }} sugestão(ões) da IA aprovada(s), {{ dc.outra_lista or 0 }} postas noutra lista, {{ dc.manteve_liberado or 0 }} mantidas liberadas.</div>
-</div>
-{% endif %}
-<div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div></div>
+<div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div>
+  <div class="ia-st" title="IA local (Ollama)"><span id="st-model" class="mut">IA</span> <span id="st-ia">…</span></div></div>
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
@@ -196,7 +186,6 @@
     document.getElementById('st-revisar').textContent = d.queue && d.queue.revisar != null ? d.queue.revisar : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';
     document.getElementById('st-media').textContent = d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–';
-    document.getElementById('st-eta').textContent = d.eta_seconds ? '~' + (d.eta_seconds > 5400 ? Math.round(d.eta_seconds/3600) + ' h' : Math.round(d.eta_seconds/60) + ' min') : (d.queue && d.queue.ia === 0 ? 'fila vazia' : '–');
     cur = d.current; curBase = cur ? (cur.elapsed - (Date.now()/1000)) : 0;
     tick();
   }

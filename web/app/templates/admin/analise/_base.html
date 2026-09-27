@@ -57,6 +57,7 @@
 {% else %}
 <div class="an-top">
   <h1>Análise DNS <span class="mut" style="font-size:.8rem;font-weight:400">· IA local (Qwen3) + Threat Intelligence</span></h1>
+  {% if aba != 'ia' %}{# IA ao vivo é global: sem filtro de cliente/período #}
   <form method="get">
     <select name="t" onchange="this.form.submit()" title="Cliente">
       <option value="0" {{ 'selected' if tid == 0 }}>🌐 Todos os clientes</option>
@@ -70,6 +71,7 @@
       {% endfor %}
     </select>
   </form>
+  {% endif %}
 </div>
 <nav class="an-tabs">
   <a href="{{ url_for('analise.painel', t=tid) }}" class="{{ 'on' if aba=='painel' }}">Painel</a>

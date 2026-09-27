@@ -243,12 +243,26 @@ def search(c, domain: str, fetch: bool, wait: bool = True) -> list[dict] | None:
     return out
 
 
+SITE_VAZIO_REABRE = timedelta(hours=6)
+
+
 def lookup(c, domain: str, fetch: bool, allow_site: bool) -> dict | None:
-    """Dados de identificação do domínio (cache; busca na rede só se fetch=True)."""
+    """Dados de identificação do domínio (cache; busca na rede só se fetch=True). Página do site que veio vazia
+    (fora do ar/erro na hora) é aberta de novo depois de 6 h (27/09: jiluio3u500.com, tigrinho, ficou dias com a
+    página vazia no cache e a IA nunca viu "GANHE ATÉ R$788")."""
     cfg = settings()
     row = c.execute("SELECT value, fetched_at FROM lookup_cache WHERE kind='web' AND key=%s", (domain,)).fetchone()
     if row and row["fetched_at"] > datetime.now(timezone.utc) - timedelta(days=cfg.web_cache_days):
-        return row["value"]
+        v = row["value"] or {}
+        if (fetch and allow_site and cfg.web_intel_enabled and cfg.web_fetch_site and not v.get("site")
+                and v.get("site_at", v.get("fetched") or "") < (datetime.now(timezone.utc) - SITE_VAZIO_REABRE).isoformat()):
+            try:
+                v["site"] = homepage(domain)
+            except Exception as e:  # noqa: BLE001 — site fora do ar não trava a análise
+                log.debug("webintel site %s: %s", domain, e)
+            v["site_at"] = datetime.now(timezone.utc).isoformat()
+            c.execute("UPDATE lookup_cache SET value = %s WHERE kind='web' AND key=%s", (Jsonb(v), domain))
+        return v
     if not (fetch and cfg.web_intel_enabled):
         return row["value"] if row else None
     out: dict = {"fetched": datetime.now(timezone.utc).isoformat()}

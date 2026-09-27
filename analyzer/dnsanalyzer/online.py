@@ -230,6 +230,8 @@ def contexto_completo(d: dict, limite: int = 8000) -> str:
                       "reasons, evidence, popularity_rank, whois_at, web_search_at FROM domains WHERE id = %s", (d["id"],)).fetchone()
         hist = c.execute("SELECT source, classification, topic, confidence, created_at FROM classification_history "
                          "WHERE domain_id = %s ORDER BY created_at DESC LIMIT 6", (d["id"],)).fetchall()
+        web = (c.execute("SELECT value FROM lookup_cache WHERE kind = 'web' AND key = %s", (r["name"],)).fetchone()
+               or {}).get("value") if r else None
     if not r:
         return _contexto(d)
     L = [f"Domínio: {r['name']}",
@@ -245,6 +247,11 @@ def contexto_completo(d: dict, limite: int = 8000) -> str:
     if ev:
         L.append("Evidências coletadas (fases 1 a 3):")
         L += [f"- {_KIND.get(e['kind'], e['kind'])}: {e['text'][:900]}" for e in ev]
+    site = (web or {}).get("site") or {}
+    if not any(e.get("kind") == "site" for e in ev) and any(site.get(k) for k in ("title", "description", "site_name")):
+        # página aberta depois da última análise local (27/09: reaberta quando tinha vindo vazia)
+        L.append("Página inicial do site (texto do próprio site, não verificado): "
+                 + " · ".join(f"{k}: {site[k]}" for k in ("site_name", "title", "description") if site.get(k)))
     busca = d.get("_busca") or []
     if busca and not any(e.get("kind") == "websearch" for e in ev):
         L.append("Busca na web feita agora (texto de terceiros, pista — não prova):")

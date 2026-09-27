@@ -61,3 +61,32 @@ def test_busca_pelas_palavras_do_nome_composto(monkeypatch):
     out = webintel.search(C(), "herosistemas-storage.s3.amazonaws.com", fetch=True)
     assert consultas == ['"herosistemas-storage.s3.amazonaws.com"', "herosistemas-storage.s3.amazonaws.com", "herosistemas storage"]
     assert [r["host"] for r in out] == ["herosistemas.com.br"]
+
+
+def test_pagina_vazia_no_cache_e_reaberta(monkeypatch):
+    """Página vazia no cache (site fora do ar na hora) é aberta de novo depois de 6 h; com página, fica o cache."""
+    from datetime import datetime, timedelta, timezone
+    from dnsanalyzer import webintel
+    monkeypatch.setattr(webintel, "settings", lambda: SimpleNamespace(web_cache_days=30, web_intel_enabled=True, web_fetch_site=True))
+    abertas = []
+    monkeypatch.setattr(webintel, "homepage", lambda d: abertas.append(d) or {"title": "78K.COM", "description": "GANHE ATÉ R$788"})
+    antigo = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+    gravado = []
+
+    class C:
+        def __init__(self, value):
+            self.value = value
+
+        def execute(self, sql, params=()):
+            if sql.startswith("UPDATE"):
+                gravado.append(params[0].obj)
+            return self
+
+        def fetchone(self):
+            return {"value": self.value, "fetched_at": datetime.now(timezone.utc) - timedelta(days=1)}
+    v = webintel.lookup(C({"fetched": antigo, "site": None, "cert": None}), "jiluio3u500.com", fetch=True, allow_site=True)
+    assert abertas == ["jiluio3u500.com"] and v["site"]["title"] == "78K.COM" and gravado
+    webintel.lookup(C({"fetched": antigo, "site": {"title": "x"}}), "tem-site.com", fetch=True, allow_site=True)
+    webintel.lookup(C({"fetched": datetime.now(timezone.utc).isoformat(), "site": None}), "vazio-recente.com", fetch=True, allow_site=True)
+    webintel.lookup(C({"fetched": antigo, "site": None}), "so-cache.com", fetch=False, allow_site=True)
+    assert abertas == ["jiluio3u500.com"]

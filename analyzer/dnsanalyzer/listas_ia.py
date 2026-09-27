@@ -238,6 +238,8 @@ def _proximo(fim: tuple | None, alta: bool) -> str:
         return " · confiança alta: a IA local decide"   # (o IA ao vivo mostra esta como decisão)
     if fim[0] == "mantida":
         return " · lista atual mantida"
+    if fim[0] == "humano":
+        return " · decisão humana mantida (liberado)"
     conf = "confiança alta" + (f", trava: {fim[-1]}" if fim[-1] else "") if alta else "confiança baixa"
     return f" · {conf}: segue p/ a fase {fim[1]}" if fim[0] == "segue" else f" · {conf}: vai p/ a fase 4 (IA online)"
 
@@ -386,15 +388,18 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         """Decisão final de liberar: o site entra numa whitelist (Domínios liberados), na categoria escolhida pela IA.
         Não é publicado no DNS (fora de listas de bloqueio já está liberado; a whitelist vence qualquer bloqueio em
         todas as empresas) — whitelist.aplicar publica o que tiver pessoa, catálogo ou dois modelos online."""
-        ja = c.execute("SELECT category, added_by FROM whitelist_domains WHERE domain = %s", (r["name"],)).fetchone()
-        if ja:
-            if not ((r["lista_fonte"] or "").startswith("online") and (ja["added_by"] or "").startswith("IA local")):
-                return
-            # posta antes pela IA local (provisória, de antes da validação): a categoria da IA online vale
-            c.execute("DELETE FROM whitelist_domains WHERE domain = %s AND added_by LIKE 'IA local%%'", (r["name"],))
         on = (r["lista_fonte"] or "").startswith("online")
         wl = r["lista_wl"] or whitelist._categoria(r["cat_online"] if on else r["category"], cls)
         por = "IA online" if on else f"IA local (fase {r['lista_fase']})" if r["lista_fase"] else "IA local"
+        ja = c.execute("SELECT category, added_by FROM whitelist_domains WHERE domain = %s", (r["name"],)).fetchone()
+        if ja:
+            if not ((ja["added_by"] or "").startswith("IA local") and ja["category"] != wl):
+                # já estava (pessoa, catálogo, IA online ou a mesma categoria): a decisão confirma — aparece na coluna Decisão
+                eventos.lista("aprovado", r["name"], f"wl:{ja['category']}", f"confirmou (já estava na whitelist) · {_fonte(r)}",
+                              r["id"], origem(r), cls)
+                return
+            # posta antes pela IA local (provisória): a categoria da resposta nova (IA online ou IA local que decide) vale
+            c.execute("DELETE FROM whitelist_domains WHERE domain = %s AND added_by LIKE 'IA local%%'", (r["name"],))
         listas.contexto(c, por, f"liberado: {whitelist.CATEGORIAS[wl]} · {_fonte(r)}")
         c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES (%s, %s, %s, false) "
                   "ON CONFLICT DO NOTHING", (wl, r["name"], por))
@@ -421,6 +426,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         humano_contra = bool(cat) and cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
 
         if humano_contra:
+            out["local"][r["id"]] = ("humano",)
             continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
         local_decide = False
         if not online and online_ok:   # IA local (fases 1-3)
@@ -428,7 +434,11 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             sem_online = "UPDATE domains SET lista_duvida = false WHERE id = %s AND lista_duvida"
             if fixas or (cat and cat in em):
                 c.execute(sem_online, (r["id"],))
-                out["local"][r["id"]] = ("mantida",)
+                if cat and cat in em and certo and decide_sozinho(r["lista_modelo"]):   # já estava na lista: confirmou
+                    out["local"][r["id"]] = ("decide",)
+                    eventos.lista("lista_add", r["name"], cat, f"confirmou (já estava na lista) · {_fonte(r)}", r["id"], origem(r), cls)
+                else:
+                    out["local"][r["id"]] = ("mantida",)
                 continue
             # confiança alta de um modelo que passou na prova (LOCAL_DECIDE_MODELS: gemma4) = a IA local decide sozinha
             # (lista de bloqueio ou whitelist), com as travas: coerência, guardado (DoH 2 modelos online, protegido,

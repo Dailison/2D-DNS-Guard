@@ -804,3 +804,33 @@ def test_confianca_alta_com_trava_passa_pelas_fases_2_e_3(env, monkeypatch):
     with db.conn() as c:   # nova resposta (ex.: fase 3 viu que é malicioso) zera o "segue"
         listas_ia.salvar(c, i, "ameaca", 1.0, "", "", "local", 3, "gemma4:26b")
         assert not c.execute("SELECT lista_segue FROM domains WHERE id = %s", (i,)).fetchone()["lista_segue"]
+
+
+def test_decisao_da_ia_local_que_nao_muda_nada_aparece_e_o_log_diz_a_verdade(env, monkeypatch):
+    """gemma4 confirmando a whitelist/lista em que o site já está = decisão (evento na coluna Decisão); resposta nova
+    substitui a categoria provisória posta pela IA local; "manter liberado" de uma pessoa: o log não diz "decide"."""
+    from dnsanalyzer import config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        ids = {}
+        for n in ("ja-wl.com", "prov-wl.com", "ja-bl.com", "humano-lib.com"):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
+                               "VALUES (%s, 'NAO_TRABALHO', 'outros', now() - interval '1 minute', 5, now(), now()) RETURNING id",
+                               (n,)).fetchone()["id"]
+        c.execute("UPDATE domains SET classification = 'TRABALHO' WHERE name IN ('ja-wl.com', 'prov-wl.com')")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES ('produtividade', 'ja-wl.com', 'IA online', false), "
+                  "('comunicacao', 'prov-wl.com', 'IA local (fase 1)', false)")
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'ja-bl.com', 'IA automática (jogos)')")
+        c.execute("INSERT INTO policies (scope, lists) VALUES ('pol-humano', ARRAY['publicidade'])")
+        c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'allowed', 'ti@empresa')", (ids["humano-lib.com"],))
+        for n, lista in (("ja-wl.com", "wl:produtividade"), ("prov-wl.com", "wl:produtividade"), ("ja-bl.com", "jogos"),
+                         ("humano-lib.com", "publicidade")):
+            listas_ia.salvar(c, ids[n], lista, 0.95, "", "", "local", 1, "gemma4:26b")
+        ap = listas_ia.aplicar(c)
+        ev = {(r["name"], r["kind"]): r["detail"] for r in c.execute("SELECT name, kind, detail FROM ai_events WHERE name = ANY(%s)",
+                                                                     (list(ids),))}
+        wl = {r["domain"]: (r["category"], r["added_by"]) for r in c.execute("SELECT domain, category, added_by FROM whitelist_domains")}
+    assert "confirmou" in ev[("ja-wl.com", "aprovado")] and wl["ja-wl.com"] == ("produtividade", "IA online"), ev
+    assert wl["prov-wl.com"] == ("produtividade", "IA local (fase 1)") and ("prov-wl.com", "aprovado") in ev, wl
+    assert "confirmou" in ev[("ja-bl.com", "lista_add")] and ap["local"][ids["ja-bl.com"]] == ("decide",)
+    assert ap["local"][ids["humano-lib.com"]] == ("humano",) and listas_ia._proximo(("humano",), True) == " · decisão humana mantida (liberado)"

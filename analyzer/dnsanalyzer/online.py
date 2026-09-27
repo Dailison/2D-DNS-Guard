@@ -58,6 +58,9 @@ Para o domínio, diga:
   infraestrutura GENÉRICA (AWS, Azure, Google Cloud, certificados, atualizações de sistema), CDN GENÉRICA sem serviço
   identificado (CloudFront, Akamai, Fastly, Cloudflare, subdomínio aleatório de CDN) = "wl:cdn" etc.
   Domínio que imita marca famosa com letras trocadas (ffacebook, g00gle) e não é o oficial = "ameaca";
+  Variação/espelho de uma marca (mesmo nome com sufixo diferente, ex.: cs8sp.com da marca de cassino CS8) = a lista da marca;
+  Domínio que você NÃO consegue identificar (nome aleatório, sem presença na web, registro recente/titular oculto) =
+  "nao_identificado" — nunca whitelist para o que não foi identificado;
 - "confianca": 1.0 só se tem certeza; 0.7 provável; 0.4 ou menos se está chutando;
 - "motivo": 1 a 3 frases para a equipe de TI decidir: o que é o site/empresa, qual evidência você usou (seu
   conhecimento, WHOIS/CNPJ, página, busca na web) e por que esta lista (ou por que não tem certeza).

@@ -20,7 +20,8 @@ CATEGORIAS_RISCO = ("jogos", "apostas", "adulto", "vpn_proxy", "ameaca")
 # nova organização (pedido do usuário 2026-09-26): a IA põe o site em QUALQUER destas listas quando tem
 # certeza (etapa "lista", listas_ia.py); sem certeza, vai p/ Para revisar com a sugestão
 CATEGORIAS_CURADAS = ("doh_dns", "adware", "redes_sociais", "streaming", "mensageiros", "cripto_trading", "publicidade",
-                      "compras", "noticias", "pirataria", "ia_chatbots", "nuvem_remoto")
+                      "compras", "noticias", "pirataria", "ia_chatbots", "nuvem_remoto",
+                      "nao_identificado")   # (27/09) não identificado depois das 4 fases: bloqueável, nunca whitelist
 CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado)
 # Sistema = só manual. infra_bloqueio ("Infraestrutura"): NÃO é a categoria "infraestrutura" da IA (serviços
 # de trabalho); outros_bloqueios ("Outros"); para_revisar: dúvidas da IA + sobras da migração, ninguém aplica
@@ -358,12 +359,12 @@ SEM_DESTINO_BY = "decisão humana (liberado)"
 
 def sem_destino(c) -> dict:
     """Nada fica solto (pedido do usuário 27/09) e sem fase 5. Quem terminou a análise sem nenhuma lista: malicioso ou
-    em feed de ameaça -> Ameaças; liberado por pessoa -> whitelist (a categoria que a IA sugeriu, ou Outros
+    em feed de ameaça -> Ameaças; DESCONHECIDO sem pessoa -> Não identificados; liberado por pessoa -> whitelist (a categoria que a IA sugeriu, ou Outros
     liberados/de trabalho), só na lista (não vai ao DNS); com resposta de lista da IA -> `listas_ia.aplicar` decide de
     novo (a resposta é a última); sem resposta nenhuma -> whitelist pela classificação."""
     from . import eventos, whitelist
     nomes = [x["domain"] for x in sem_lista(c, limit=5000)["items"]]
-    out = {"whitelist": [], "ameaca": [], "reaplicar": []}
+    out = {"whitelist": [], "ameaca": [], "reaplicar": [], "nao_identificado": []}
     if not nomes:
         return out
     rows = c.execute(
@@ -380,6 +381,11 @@ def sem_destino(c) -> dict:
             out["ameaca"].append(r)
         elif not r["humano"] and r["lista_ia"] and r["lista_at"]:
             out["reaplicar"].append(r["id"])
+        elif not r["humano"] and r["classification"] == "DESCONHECIDO":   # não identificado não é liberado
+            contexto(c, "IA (não identificado)", "terminou a análise sem identificação: Não identificados")
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('nao_identificado', %s, %s) "
+                      "ON CONFLICT DO NOTHING", (r["name"], "IA (não identificado)"))
+            out["nao_identificado"].append(r)
         else:
             wl = (r["lista_wl"] if r["lista_wl"] in whitelist.CATEGORIAS and r["lista_wl"] != whitelist.SEM_RESPOSTA else
                   whitelist._categoria(r["category"], r["classification"]) if r["classification"] == "TRABALHO" else "outros_liberados")
@@ -397,9 +403,12 @@ def sem_destino(c) -> dict:
         for r in out["ameaca"]:
             eventos.lista("lista_add", r["name"], "ameaca", "sem lista depois da análise: malicioso/feed de ameaça", r["id"], "regras",
                           r["classification"])
+        for r in out["nao_identificado"]:
+            eventos.lista("lista_add", r["name"], "nao_identificado", "sem lista e sem identificação depois da análise", r["id"],
+                          "regras", r["classification"])
     else:
         eventos.registrar("decisao", None, detail=f"wl|{len(out['whitelist'])} sem lista foram p/ a whitelist, {len(out['ameaca'])} "
-                                                  f"p/ Ameaças e {len(out['reaplicar'])} voltaram p/ a IA decidir", origem="regras")
+                                                  f"p/ Ameaças, {len(out['nao_identificado'])} p/ Não identificados e {len(out['reaplicar'])} voltaram p/ a IA decidir", origem="regras")
     return out
 
 

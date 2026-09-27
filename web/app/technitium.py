@@ -243,7 +243,7 @@ def grupo_da_rede(cidr, ngm):
 # organização das listas (pedido do usuário 2026-09-26): seções só p/ a tela; ⚡ = risco (só destaque)
 SECOES_LISTA = [
     ("🔒 Segurança", [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
-                     ("adware", "Adware / Apps indesejados")]),
+                     ("adware", "Adware / Apps indesejados"), ("nao_identificado", "Não identificados")]),
     ("🚫 Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
                     ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
     ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),
@@ -268,7 +268,7 @@ CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividad
 # as que vão p/ o DNS (allowListUrls): "Sem resposta" só organiza (nunca é publicada)
 CATEGORIAS_WHITELIST_DNS = [x for x in CATEGORIAS_WHITELIST if x[0] != "sem_resposta"]
 _WL_RE = re.compile(r"/whitelist/([a-z_]+)\.txt$")
-CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas"}   # ⚡ (só destaque visual)
+CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas", "nao_identificado"}   # ⚡ (só destaque visual)
 CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # a IA não põe sozinha
 
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")

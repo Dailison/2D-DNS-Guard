@@ -50,7 +50,12 @@ LISTAS_IA = {
                     "acesso remoto a computadores (AnyDesk, TeamViewer, RustDesk, Chrome Remote Desktop). Nuvem PARA SISTEMAS "
                     "(AWS, Azure, Google Cloud, APIs, login/autenticação, hospedagem), Microsoft 365, SharePoint, OneDrive "
                     "da empresa e Google Workspace são nenhuma",
+    "nao_identificado": "NÃO IDENTIFICADO: depois de todas as evidências não dá para saber o que o site é (nome aleatório "
+                        "ou gerado, sem presença na web, registro recente ou titular oculto, nenhum serviço reconhecido). "
+                        "O que não foi identificado NÃO vai para whitelist (espelho de cassino, golpe e rastreador têm esse perfil); "
+                        "se o site foi identificado, use a lista ou a whitelist dele",
 }
+NAO_IDENT = "nao_identificado"
 NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
 # destino de quem é liberado: uma whitelist por categoria ("wl:financas"); todo site vai p/ alguma fila
@@ -469,6 +474,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                          (_incoerencia(cat, cls, r["category"]) or guardado(r, cat)) if cat else _suspeito(r))
                 if not decide_sozinho(r["lista_modelo"]):
                     trava = trava or f"modelo {r['lista_modelo'] or 'antigo'} não decide sozinho"
+                if cat == NAO_IDENT:
+                    trava = trava or "não identificado: só depois das fases 2 a 4"
             prox = proxima_fase(r)
             if certo and not trava:
                 local_decide = True
@@ -490,6 +497,10 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         if fixas and (not cat or cat not in em):   # pessoa/migração pôs noutra lista: vale a decisão dela
             sai_revisao(r, em)
             continue
+        if not cat and cls == "DESCONHECIDO" and (r["lista_wl"] or "outros_liberados") == "outros_liberados":
+            # não identificado depois das 4 fases não é liberado (27/09: espelhos de cassino como cs8sp.com iam p/
+            # "Outros liberados"); infraestrutura/CDN reconhecida como tal (wl:infraestrutura, wl:cdn) segue liberada
+            cat = NAO_IDENT
         if not cat:   # liberar: sai das listas que a IA pôs e vai p/ a whitelist
             # da Infraestrutura (migração) só com certeza, a resposta do modelo maior (ou dois modelos) e sem suspeita:
             # senão fica lá (bloqueado como estava)

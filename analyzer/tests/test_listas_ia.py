@@ -177,7 +177,8 @@ def test_fase3_gemini(env, monkeypatch):
     assert ("jogos", "duv1.com") in em and ("jogos", "duv2.com") in em, "sem certeza depois da segunda opinião: vale a IA"
     assert ("compras", "misterio.com.br") in em, "Compras conta como trabalho"
     assert m == {"classification": "TRABALHO", "classified_by": "online", "topic": "Loja de ferramentas"}
-    assert "ninguem-sabe.com" in wl and not any(d == "ninguem-sabe.com" for _, d in em), "nem a IA online sabe: whitelist"
+    assert ("nao_identificado", "ninguem-sabe.com") in em and "ninguem-sabe.com" not in wl, \
+        "nem a IA online sabe: Não identificados (27/09; antes ia p/ a whitelist)"
     assert env.get("/online/pendentes", headers=H).json() == []
 
 
@@ -1067,3 +1068,38 @@ def test_nada_fica_solto_sem_destino(env):
     assert not {"solto-susp.com", "solto-ninguem.com"} & rev, "sem fase 5"
     assert wl["solto-susp.com"] == ("outros_liberados", False) and wl["solto-ninguem.com"] == ("outros_liberados", False), wl
     assert not set(ids) & depois, depois
+
+
+def test_desconhecido_na_fase4_vai_p_nao_identificados(env, monkeypatch):
+    """Não identificado depois das 4 fases não é liberado (27/09: cs8sp.com, espelho de cassino, ia p/ Outros liberados):
+    DESCONHECIDO + Outros liberados -> lista Não identificados; DESCONHECIDO reconhecido como CDN segue na whitelist."""
+    from dnsanalyzer import config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        ids = {}
+        for n in ("x7k2q9.com", "cdn-aleatorio.cloudfront.net"):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
+                               "VALUES (%s, 'DESCONHECIDO', 'outros', now() - interval '1 minute', 1, now(), now()) RETURNING id", (n,)).fetchone()["id"]
+        listas_ia.salvar(c, ids["x7k2q9.com"], "wl:outros_liberados", 0.3, "", "", "online:gemini", 4)
+        listas_ia.salvar(c, ids["cdn-aleatorio.cloudfront.net"], "wl:cdn", 0.8, "", "", "online:gemini", 4)
+        c.execute("UPDATE domains SET online_resp = '{\"classificacao\": \"DESCONHECIDO\"}' WHERE id = ANY(%s)", (list(ids.values()),))
+        listas_ia.aplicar(c)
+        ni = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'nao_identificado' "
+                                             "AND domain = ANY(%s)", (list(ids),))}
+        wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains")}
+    assert ni == {"x7k2q9.com"} and "x7k2q9.com" not in wl
+    assert wl.get("cdn-aleatorio.cloudfront.net") == "cdn"
+
+
+def test_ia_local_nao_poe_sozinha_em_nao_identificados(env, monkeypatch):
+    """A IA local (fase 1) com 95% em "nao_identificado" não decide: o domínio segue p/ as fases 2-4."""
+    from dnsanalyzer import config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        did = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
+                        "VALUES ('q1z7p.com', 'DESCONHECIDO', 'outros', now() - interval '1 minute', 1) RETURNING id").fetchone()["id"]
+        listas_ia.salvar(c, did, "nao_identificado", 0.95, "", "", "local", 1, "gemma4:26b")
+        listas_ia.aplicar(c)
+        ni = c.execute("SELECT count(*) AS n FROM category_lists WHERE category = 'nao_identificado' AND domain = 'q1z7p.com'").fetchone()["n"]
+        segue = c.execute("SELECT lista_segue FROM domains WHERE id = %s", (did,)).fetchone()["lista_segue"]
+    assert ni == 0 and segue

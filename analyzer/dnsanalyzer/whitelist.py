@@ -74,7 +74,8 @@ DESCRICOES = {
     "utilidades": "ferramentas online legítimas: conversores de arquivo, PDF, tradutores, calculadoras, encurtadores",
     "servicos": "mapas, trânsito, clima, viagens, mobilidade, serviços do dia a dia",
     "outros_trabalho": "trabalho, mas nenhuma das categorias acima",
-    "outros_liberados": "não é de trabalho e não se encaixa em nenhuma lista de bloqueio (religião, cultura, ONGs, pessoal)",
+    "outros_liberados": "IDENTIFICADO, não é de trabalho e não se encaixa em nenhuma lista de bloqueio (religião, cultura, "
+                        "ONGs, pessoal) — o que não foi identificado é nao_identificado",
 }
 AUTO_BY = "IA whitelist"
 CATALOGO_BY = "catálogo (protegido)"

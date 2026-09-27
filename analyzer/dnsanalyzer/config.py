@@ -65,6 +65,9 @@ class Settings:
     llm_enabled: bool
     ollama_url: str
     ollama_model: str
+    ollama_extra_model: str   # modelo dos Ollamas de reforço (GPU); vazio = o mesmo da VM
+    local_decide_models: list  # modelos locais que decidem sozinhos com confiança alta (os outros passam pela IA online)
+    llm_vm_reserva: bool       # IA da VM só trabalha com o reforço (GPU) fora do ar
     llm_timeout: int
     llm_num_ctx: int
     llm_num_thread: int
@@ -147,6 +150,12 @@ def load_settings() -> Settings:
         llm_enabled=_bool(os.environ.get("LLM_ENABLED"), True),
         ollama_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/"),
         ollama_model=os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
+        # o reforço com GPU (PC 10.100.50.201) roda um modelo maior que a VM (só CPU)
+        ollama_extra_model=os.environ.get("OLLAMA_EXTRA_MODEL") or os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
+        # prova de 27/09 (10 domínios difíceis, fases 1-3 x IA online): gemma4:31b 9/9, gemma4:26b 7/8 (usuário escolheu o
+        # 26b, MoE ~4B ativos, rápido também na CPU); qwen3:8b 5/9, qwen3:14b 6/10 — esses não decidem sozinhos
+        local_decide_models=_list("LOCAL_DECIDE_MODELS", "gemma4:26b,gemma4:31b"),
+        llm_vm_reserva=_bool(os.environ.get("LLM_VM_RESERVA"), True),
         llm_timeout=_int("LLM_TIMEOUT_SECONDS", 600),
         llm_num_ctx=_int("LLM_NUM_CTX", 4096),
         llm_num_thread=_int("LLM_NUM_THREAD", 0),

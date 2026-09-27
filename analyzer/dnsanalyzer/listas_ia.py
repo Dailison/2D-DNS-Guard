@@ -217,7 +217,7 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
                       "lista_at = now(), lista_claimed_at = NULL WHERE id = %s", (str(e)[:200], d["id"]))
         return "done"
     with db.conn() as c:
-        salvar(c, d["id"], res.lista, res.confianca, res.motivo, res.servico, FONTE_LOCAL, fase_n)
+        salvar(c, d["id"], res.lista, res.confianca, res.motivo, res.servico, FONTE_LOCAL, fase_n, getattr(client, "model", None))
         aplicar(c, ids=[d["id"]])   # na hora (o ciclo de 5 min do classificador é a rede de segurança)
     log.debug("lista %s -> %s (%.2f, %.1fs)", d["name"], res.lista, res.confianca, meta["seconds"])
     alta = (res.confianca or 0) >= settings().lista_confianca_min
@@ -225,17 +225,24 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
     eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), meta.get("seconds"),
                       detail=f"{fase_n}|lista {res.lista} {float(res.confianca or 0) * 100:.0f}%"
                       + (f" · {res.servico}" if res.servico else "") + (f" — {res.motivo}" if res.motivo else "")
-                      + (" · confiança alta: vai p/ a IA online validar (fase 4)" if alta else
+                      + ((" · confiança alta: a IA local decide" if decide_sozinho(getattr(client, "model", None)) else
+                          " · confiança alta: vai p/ a IA online validar (fase 4)") if alta else
                          f" · confiança baixa: segue p/ a fase {prox}" + (" (IA online)" if prox == 4 else "")))
     return "done"
 
 
-def salvar(c, domain_id: int, lista: str, conf: float, motivo: str, servico: str, fonte: str, fase: int | None = None) -> None:
+def salvar(c, domain_id: int, lista: str, conf: float, motivo: str, servico: str, fonte: str, fase: int | None = None,
+           modelo: str | None = None) -> None:
     wl = lista[3:] if e_wl(lista) else None
     c.execute("UPDATE domains SET lista_ia = %s, lista_wl = %s, lista_conf = %s, lista_motivo = %s, lista_servico = %s, "
-              "lista_fonte = %s, lista_fase = %s, lista_at = now(), lista_claimed_at = NULL WHERE id = %s",
+              "lista_fonte = %s, lista_fase = %s, lista_modelo = %s, lista_at = now(), lista_claimed_at = NULL WHERE id = %s",
               (None if lista == NENHUMA or wl else lista, wl, conf, (motivo or "")[:500], (servico or "")[:200], fonte, fase,
-               domain_id))
+               modelo, domain_id))
+
+
+def decide_sozinho(modelo: str | None) -> bool:
+    """O modelo local passou na prova (critério do usuário) e decide sozinho quando tem confiança alta."""
+    return bool(modelo) and modelo in settings().local_decide_models
 
 
 def origem(r: dict) -> str:
@@ -340,7 +347,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
-        " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.lista_fase, d.lista_wl, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
+        " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.lista_fase, d.lista_wl, d.lista_modelo, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
         " d.online_resp->'_meta'->'antes' AS antes, coalesce((d.online_resp->'_meta'->>'nivel_reforco')::boolean, false) AS reforco, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
@@ -395,27 +402,35 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
 
         if humano_contra:
             continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
+        local_decide = False
         if not online and online_ok:   # IA local (fases 1-3)
             # resposta nova da IA local: a ida p/ a IA online de uma rodada anterior não vale mais
             sem_online = "UPDATE domains SET lista_duvida = false WHERE id = %s AND lista_duvida"
             if fixas or (cat and cat in em):
                 c.execute(sem_online, (r["id"],))
                 continue
-            # a IA local não decide sozinha (critério do usuário: 100% de acerto): toda resposta dela — lista de bloqueio
-            # ou whitelist — passa pela IA online. Provas de 27/09: "bloquear" 6/8 (typosquat -> redes_sociais,
-            # adguard -> adware); com as whitelists como opção, "liberar" com 100% p/ mensageiro (zaloapp.com ->
-            # wl:comunicacao), rede social (masto.pt) e CDN de apostas. Sem confiança alta: fases 2 e 3 antes.
-            if not certo and proxima_fase(r) < 4:
+            # confiança alta de um modelo que passou na prova (LOCAL_DECIDE_MODELS: gemma4) = a IA local decide sozinha
+            # (lista de bloqueio ou whitelist), com as travas: coerência, guardado (DoH 2 modelos online, protegido,
+            # trabalho) e tirar da Infraestrutura (libera o site nas empresas) seguem p/ a IA online. Modelo fraco
+            # (qwen3:8b: liberou mensageiro, rede social e CDN de apostas com 100%) sempre passa pela IA online.
+            tira_infra = not cat and INFRA in moveis and INFRA in em
+            if certo and decide_sozinho(r["lista_modelo"]) and not tira_infra \
+                    and (not cat or (_coerente(cat, cls, r["category"]) and not guardado(r, cat))):
+                local_decide = True
+            elif not certo and proxima_fase(r) < 4:
                 c.execute(sem_online, (r["id"],))
                 continue   # sem confiança alta: fase 2 (WHOIS) / 3 (busca na web) primeiro
-            # confiança alta (validação) ou sem confiança alta depois da fase 3: fase 4 (IA online)
-            c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
-            out["online"].append((r["name"], cat))
-            continue
+            else:   # confiança alta sem autorização p/ decidir, trava, ou sem confiança depois da fase 3: IA online
+                c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
+                out["online"].append((r["name"], cat))
+                continue
+        if local_decide:   # avaliado pela IA local (sem reanálise) e fim da revisão pedida
+            c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false, lista_duvida = false WHERE id = %s",
+                      (r["id"],))
 
         if fixas and (not cat or cat not in em):
             continue   # alguém pôs noutra lista: fica
-        if certo and not cat and online:
+        if certo and not cat and (online or local_decide):
             # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs). Da
             # Infraestrutura só com a resposta do modelo maior (ou dois modelos) e sem suspeita; senão, Decisões
             sai_infra = cls not in ("SUSPEITO", "MALICIOSO") and (r["reforco"] or _dois_nenhuma(r))
@@ -424,7 +439,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                 para_decisoes(r, None, "IA online: não é de lista nenhuma, sem confirmação do modelo maior — "
                               "tirar da Infraestrutura?")
             if tirar:
-                listas.contexto(c, _fonte(r), "IA online: não é de lista nenhuma")
+                listas.contexto(c, _fonte(r), ("IA online" if online else "IA local") + ": não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
                 out["resolvidos"].append(r["name"])
                 eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r), cls)

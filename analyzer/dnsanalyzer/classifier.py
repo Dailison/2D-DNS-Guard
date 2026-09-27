@@ -611,7 +611,8 @@ def run_forever(stop=lambda: False) -> None:
             if not cfg.llm_enabled:
                 time.sleep(30)
                 continue
-            status = phase_b(client, cats)
+            # IA da VM (só CPU) como reserva: com o reforço (GPU) no ar, o laço principal também usa a GPU
+            status = phase_b(cliente_etapa2() if cfg.llm_vm_reserva else client, cats)
             if status == "idle":            # etapa 1 vazia: etapa 2 (busca na web); a 3 tem workers próprios
                 status = phase_c(cliente_etapa2(), cats)
             if status == "idle":            # etapas 1 e 2 vazias: etapa "lista"

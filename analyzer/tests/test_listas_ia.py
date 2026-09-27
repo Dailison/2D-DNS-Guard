@@ -738,3 +738,29 @@ def test_coletor_conta_respostas_sem_ip():
     assert sem_ip({"qtype": "A", "responseType": "Blocked", "rcode": "NoError", "answer": "0.0.0.0"}) == (False, False)
     assert sem_ip({"qtype": "A", "responseType": "Authoritative", "rcode": "Refused", "answer": ""}) == (False, False), "política"
     assert sem_ip({"qtype": "A", "responseType": "Cached", "rcode": "NoError", "answer": ""}) == (True, True)
+
+
+def test_modelo_aprovado_decide_sozinho(env, monkeypatch):
+    """gemma4 (passou na prova) decide sozinho com confiança alta — bloqueio ou whitelist; qwen3:8b vai p/ a IA online;
+    as travas (DoH: dois modelos online) valem p/ qualquer modelo."""
+    from dnsanalyzer import config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        ids = {}
+        for n, cls, cat in (("jogo-gm.com", "NAO_TRABALHO", "jogos"), ("escola-gm.com.br", "TRABALHO", "educacao"),
+                            ("jogo-8b.com", "NAO_TRABALHO", "jogos"), ("doh-gm.net", "NAO_TRABALHO", "infraestrutura")):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
+                               "VALUES (%s, %s, %s, now(), 5) RETURNING id", (n, cls, cat)).fetchone()["id"]
+        listas_ia.salvar(c, ids["jogo-gm.com"], "jogos", 0.95, "jogo online", "Jogo", "local", 1, "gemma4:26b")
+        listas_ia.salvar(c, ids["escola-gm.com.br"], "wl:educacao", 0.95, "escola", "Escola", "local", 2, "gemma4:26b")
+        listas_ia.salvar(c, ids["jogo-8b.com"], "jogos", 0.95, "jogo online", "Jogo", "local", 1, "qwen3:8b")
+        listas_ia.salvar(c, ids["doh-gm.net"], "doh_dns", 1.0, "DoH", "DoH", "local", 1, "gemma4:26b")
+        listas_ia.aplicar(c)
+        em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain LIKE '%%-gm.%%' OR domain LIKE '%%-8b.%%'")}
+        wl = c.execute("SELECT category, added_by FROM whitelist_domains WHERE domain = 'escola-gm.com.br'").fetchone()
+        duv = {r["name"]: r["lista_duvida"] for r in c.execute("SELECT name, lista_duvida FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
+        ev = c.execute("SELECT origem FROM ai_events WHERE kind = 'lista_add' AND name = 'jogo-gm.com'").fetchone()
+    assert ("jogos", "jogo-gm.com") in em and not duv["jogo-gm.com"] and ev["origem"] == "f1:local", (em, duv)
+    assert wl and wl["category"] == "educacao" and wl["added_by"] == "IA local (fase 2)" and not duv["escola-gm.com.br"], wl
+    assert ("jogos", "jogo-8b.com") not in em and duv["jogo-8b.com"], "qwen3:8b não decide sozinho: IA online"
+    assert ("doh_dns", "doh-gm.net") not in em and duv["doh-gm.net"], "DoH: trava de dois modelos online vale p/ qualquer modelo"

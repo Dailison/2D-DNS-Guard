@@ -249,11 +249,11 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
 # fila da fase 3: dúvidas da etapa "lista" + desconhecidos que já passaram pela fase 2
 _NAS_LISTAS_REVISAO = "d.name IN (SELECT domain FROM category_lists WHERE category IN ('para_revisar', 'outros_bloqueios'))"
 _EM_DECISOES = "EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'para_revisar' AND l.domain = d.name)"
-# llm_pending só segura quem a fase 1 ainda vai pegar: domínio decidido a fase 1 nunca pega (ficava preso)
-_FILA = ("d.kind = 'public' AND (NOT d.llm_pending OR dominio_decidido(d.id)) AND (d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') "
+# llm_pending só segura quem a fase 1 ainda vai pegar: decidido sem revisão pedida a fase 1 nunca pega (ficava preso)
+_FILA = ("d.kind = 'public' AND (NOT d.llm_pending OR (dominio_decidido(d.id) AND NOT d.reanalise_pedida)) AND (d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') "
          "AND ((d.lista_duvida AND (d.online_at IS NULL OR d.online_at < d.lista_at)) "
          " OR (d.classification = 'DESCONHECIDO' AND (d.online_at IS NULL OR d.online_at < d.analyzed_at) "
-         "     AND ((d.web_search_at IS NOT NULL AND NOT dominio_decidido(d.id)) OR " + _NAS_LISTAS_REVISAO + ")))")
+         "     AND ((d.web_search_at IS NOT NULL AND (NOT dominio_decidido(d.id) OR d.reanalise_pedida)) OR " + _NAS_LISTAS_REVISAO + ")))")
 
 
 _EM_INFRA = ("EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'infra_bloqueio' AND l.domain = {t}.name "
@@ -350,6 +350,9 @@ def fase(categorias: list[str]) -> str:
         if obj is None:   # nenhum modelo respondeu (cota/sobrecarga): tenta de novo depois
             c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (d["id"],))
             return "unavailable"
+        if d.get("em_infra") and obj.get("lista") in (None, NENHUMA) and not meta.get("nivel_reforco") and reforco:
+            log.info("IA online: %s sem a 2ª opinião (Infraestrutura); tenta de novo em 10 min", d["name"])
+            return "done"   # fica reservado (online_claimed_at): a fila o pega de novo em 10 min
         gravar(c, d, obj, meta, categorias)
     return "done"
 
@@ -370,7 +373,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
     servico, motivo = str(obj.get("servico") or "")[:200], str(obj.get("motivo") or "")[:300]
     salvar(c, d["id"], lista, conf, motivo, servico, fonte)
     c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, lista_duvida = false, online_resp = %s, "
-              "revisado_at = now() WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
+              "revisado_at = now(), reanalise_pedida = false WHERE id = %s", (Jsonb({**obj, "_meta": meta}), d["id"]))
     reconhecido = bool(obj.get("reconhecido")) and cls != "DESCONHECIDO" and conf >= settings().online_confianca_min
     if d["classification"] == "DESCONHECIDO" and reconhecido:
         razoes = [{"evidence_id": "E0", "text": f"IA online ({meta.get('model')}): {servico} — {motivo}"[:400], "by": "online"}]

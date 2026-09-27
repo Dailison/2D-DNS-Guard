@@ -619,7 +619,8 @@ def reanalyze(name: str):
     reg = _domain_name(name)
     with db.conn() as c:
         r = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, "
-                      "llm_attempts=0, revisado_at=NULL WHERE name=%s AND NOT locked RETURNING id", (reg,)).fetchone()
+                      "llm_attempts=0, revisado_at=NULL, reanalise_pedida=true WHERE name=%s AND NOT locked RETURNING id",
+                      (reg,)).fetchone()
         if not r:
             raise HTTPException(404, "domínio não encontrado (ou travado)")
         return {"ok": True, "domain": reg}
@@ -742,7 +743,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                 "(SELECT id, kind, name, classification, risk, work, seconds, detail, created_at FROM ai_events "
                 " WHERE kind = ANY(%(d)s) ORDER BY id DESC LIMIT %(n)s) ORDER BY id DESC",
                 {"d": list(eventos.DECISAO), "n": limit}).fetchall()
-        # o que está em análise agora e em que fase (1-3 = claimed_at; listas; 4 = IA online)
+        # o que está em análise agora e em que fase (1-3 = claimed_at; lista = fase 1; 4 = IA online)
         cur = c.execute(
             "SELECT name, total_queries, fase, extract(epoch from now() - t)::int AS elapsed FROM ("
             " SELECT name, total_queries, claimed_at AS t, CASE WHEN llm_pending THEN '1' "
@@ -751,16 +752,16 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             " FROM domains WHERE claimed_at > now() - interval '30 minutes' "
             " UNION ALL SELECT name, total_queries, online_claimed_at, '4' FROM domains "
             "   WHERE online_claimed_at > now() - interval '10 minutes' "
-            " UNION ALL SELECT name, total_queries, lista_claimed_at, 'L' FROM domains "
+            " UNION ALL SELECT name, total_queries, lista_claimed_at, '1' FROM domains "
             "   WHERE lista_claimed_at > now() - interval '10 minutes') x ORDER BY t DESC LIMIT 1").fetchone()
-        queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS ia, "
+        queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS ia, "
                           "count(*) FILTER (WHERE needs_analysis) AS regras, "
                           "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by='llm' "
                           " AND web_search_at IS NULL AND NOT llm_pending AND kind='public' "
-                          " AND NOT dominio_decidido(id)) AS busca, "   # (a busca espera o WHOIS)
+                          " AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS busca, "   # (a busca espera o WHOIS)
                           "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by IN ('llm','web') "
                           " AND whois_at IS NULL AND NOT llm_pending AND kind='public' "
-                          " AND NOT dominio_decidido(id)) AS whois FROM domains").fetchone()
+                          " AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS whois FROM domains").fetchone()
         from . import listas_ia, online
         queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": online.status(c)["fila"],
                  "online_on": online.habilitado(),
@@ -1474,11 +1475,12 @@ class NomesIn(BaseModel):
 
 @app.post("/domains-reanalyze", dependencies=[Depends(auth)])
 def reanalyze_lote(body: NomesIn):
-    """Nova análise em lote (regras agora; IA + busca na fila). Travados à mão ficam de fora."""
+    """Nova análise em lote (regras agora; IA + busca na fila). Travados à mão ficam de fora. Decidido também passa
+    pela fase 1 de novo (reanalise_pedida): é uma pessoa pedindo."""
     nomes = sorted({_domain_name(x) for x in body.domains if x and x.strip()})
     with db.conn() as c:
         n = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, llm_attempts=0, "
-                      "revisado_at=NULL WHERE name = ANY(%s) AND NOT locked", (nomes,)).rowcount
+                      "revisado_at=NULL, reanalise_pedida=true WHERE name = ANY(%s) AND NOT locked", (nomes,)).rowcount
     return {"ok": True, "enviados": n, "ignorados": len(nomes) - n}
 
 

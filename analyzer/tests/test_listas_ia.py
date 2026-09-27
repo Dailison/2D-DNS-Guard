@@ -481,10 +481,15 @@ def test_revisao_da_infraestrutura(env):
 
     from dnsanalyzer import db, listas_ia
     dois = {"_meta": {"antes": {"lista": "nenhuma", "confianca": 0.95}}}
+    maior = {"_meta": {"nivel_reforco": True}}
+    suspeito = {"classificacao": "SUSPEITO", "_meta": {"nivel_reforco": True}}
     with db.conn() as c:
         casos = (("888win-infra.win", "apostas", 0.95, {}, "migração dos grupos antigos"),
-                 ("telemetria-infra.net", "nenhuma", 0.95, {}, "migração dos grupos antigos"),       # 1 modelo: fica
+                 ("telemetria-infra.net", "nenhuma", 0.95, {}, "migração dos grupos antigos"),       # modelo pequeno: Decisões
                  ("trafficmanager-infra.net", "nenhuma", 0.95, dois, "migração dos grupos antigos"),  # 2 modelos: sai
+                 ("omnichat-infra.net", "nenhuma", 0.9, maior, "migração dos grupos antigos"),        # modelo maior: sai
+                 ("suspeito-infra.net", "nenhuma", 0.9, suspeito, "migração dos grupos antigos"),     # suspeito: Decisões
+                 ("duvida-infra.net", "nenhuma", 0.5, maior, "migração dos grupos antigos"),          # sem certeza: Decisões
                  ("pessoa-infra.net", "nenhuma", 1.0, dois, "op@2d"))                                # posto por pessoa
         for n, lista, conf, resp, por in casos:
             i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at) VALUES (%s, 'TRABALHO', 'infraestrutura', now()) "
@@ -498,9 +503,54 @@ def test_revisao_da_infraestrutura(env):
         for r in c.execute("SELECT domain, category FROM category_lists WHERE domain LIKE '%%-infra.%%'"):
             em.setdefault(r["domain"], set()).add(r["category"])
     assert em.get("888win-infra.win") == {"apostas"}, em
-    assert em.get("telemetria-infra.net") == {"infra_bloqueio"}, "um modelo só: fica bloqueado"
+    assert em.get("telemetria-infra.net") == {"infra_bloqueio", "para_revisar"}, "modelo pequeno só: fica e vai p/ Decisões"
     assert "trafficmanager-infra.net" not in em, "dois modelos: sai"
+    assert "omnichat-infra.net" not in em, "resposta do modelo maior: sai"
+    assert em.get("suspeito-infra.net") == {"infra_bloqueio", "para_revisar"}, "suspeito: não libera"
+    assert em.get("duvida-infra.net") == {"infra_bloqueio", "para_revisar"}, "sem certeza: Decisões, não fica sem destino"
     assert em.get("pessoa-infra.net") == {"infra_bloqueio"}, "posto por pessoa: intocado"
+
+
+def test_nenhuma_da_ia_local_na_infraestrutura_vai_p_validacao(env, monkeypatch):
+    from dnsanalyzer import config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at) VALUES "
+                      "('local-nenhuma-infra.net', 'TRABALHO', 'comunicacao', now()) RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('infra_bloqueio', 'local-nenhuma-infra.net', "
+                  "'migração dos grupos antigos')")
+        listas_ia.salvar(c, i, "nenhuma", 0.95, "", "", listas_ia.FONTE_LOCAL)
+        listas_ia.aplicar(c)
+        assert c.execute("SELECT lista_duvida FROM domains WHERE id = %s", (i,)).fetchone()["lista_duvida"], \
+            "a IA online valida antes de tirar da Infraestrutura"
+
+
+def test_reanalisar_leva_decidido_pela_fase_1(env):
+    from dnsanalyzer import classifier, db, online
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, classification, classified_by, total_queries, analyzed_at) VALUES "
+                      "('decidido-rean.net', 'TRABALHO', 'llm', 10, now()) RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', 'op@2d')", (i,))
+    r = env.post("/domains-reanalyze", json={"domains": ["decidido-rean.net"]}, headers=H)
+    assert r.status_code == 200 and r.json()["enviados"] == 1, r.text
+    with db.conn() as c:
+        c.execute("UPDATE domains SET needs_analysis = false, llm_pending = true WHERE id = %s", (i,))   # (fase A)
+        assert c.execute("SELECT reanalise_pedida FROM domains WHERE id = %s", (i,)).fetchone()["reanalise_pedida"]
+        c.execute("UPDATE domains SET lista_duvida = true, lista_at = now() WHERE id = %s", (i,))
+        pegos = set()
+        for _ in range(500):   # a fase 4 espera a fase 1
+            x = online._reservar(c)
+            if x is None:
+                break
+            pegos.add(x["name"])
+        assert "decidido-rean.net" not in pegos
+        vistos = set()
+        for _ in range(500):
+            x = classifier._claim_llm(c)
+            if x is None:
+                break
+            vistos.add(x["name"])
+        assert "decidido-rean.net" in vistos, "revisão pedida: a fase 1 pega mesmo decidido"
 
 
 def test_revisao_da_infraestrutura_vem_antes_na_fila(env):

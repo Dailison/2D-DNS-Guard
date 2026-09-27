@@ -21,15 +21,14 @@
   .lst.sai{background:#dcfce7;color:#166534} .lst.dec{background:#ffedd5;color:#9a3412}
   .fase{display:inline-block;font-size:.68rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;margin-right:.4rem;background:#e2e8f0;color:#334155;white-space:nowrap}
   .fase.f1{background:#dbeafe;color:#1e40af} .fase.f2{background:#ede9fe;color:#5b21b6} .fase.f3{background:#fef3c7;color:#92400e}
-  .fase.f4{background:#dcfce7;color:#166534} .fase.fL{background:#e0f2fe;color:#075985} .fase.fB{background:#fee2e2;color:#991b1b}
+  .fase.f4{background:#dcfce7;color:#166534} .fase.fB{background:#fee2e2;color:#991b1b}
 </style>
 
 <div class="ia-top">
   <div class="metric"><div class="n" id="st-ia" style="font-size:1rem;padding-top:.4rem">…</div><div class="l" id="st-model">IA</div></div>
-  <div class="metric"><div class="n" id="st-fila">–</div><div class="l">Fase 1 · IA local</div></div>
+  <div class="metric"><div class="n" id="st-fila">–</div><div class="l" title="classificação do site e em qual lista ele entra (IA local)">Fase 1 · IA local</div></div>
   <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado, .br primeiro">Fase 2 · WHOIS</div></div>
   <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web (depois do WHOIS)">Fase 3 · busca na web</div></div>
-  <div class="metric"><div class="n" id="st-lista">–</div><div class="l" title="qual lista de bloqueio cada site analisado recebe (IA local, com a capacidade livre)">Listas · IA local</div></div>
   <div class="metric"><div class="n" id="st-online">–</div><div class="l" title="o que a IA local não resolveu com confiança vai para a IA online (Gemini)">Fase 4 · IA online</div></div>
   <div class="metric"><div class="n" id="st-revisar">–</div><div class="l" title="Decisões: classificação manual pela equipe de TI">Fase 5 · Decisões</div></div>
   <div class="metric"><div class="n" id="st-hora">–</div><div class="l">Analisados na última hora</div></div>
@@ -85,9 +84,9 @@
   // fase de cada evento (fluxo: 1 IA local · 2 WHOIS · 3 busca na web · 4 IA online · 5 Decisões)
   var FASE = {llm_start: '1', llm_done: '1', llm_error: '1', rules_final: '1', rules_alert: '1',
               whois_start: '2', whois_done: '2', whois_error: '2', search_start: '3', search_done: '3', search_error: '3',
-              online_done: '4', lista_ia: 'L', auto_block: 'B', rules_batch: 'R'};
+              online_done: '4', lista_ia: '1', auto_block: 'B', rules_batch: 'R'};
   var FASE_TXT = {'1': 'Fase 1 · IA local', '2': 'Fase 2 · WHOIS', '3': 'Fase 3 · busca na web', '4': 'Fase 4 · IA online',
-                  'L': 'Listas', 'B': 'Bloqueio automático', 'R': 'Regras'};
+                  'B': 'Bloqueio automático', 'R': 'Regras'};
   function faseTag(f){ return f ? el('span', 'fase f' + f, FASE_TXT[f] || f) : null; }
 
   function row(ev){
@@ -161,10 +160,9 @@
     var ia = document.getElementById('st-ia');
     ia.textContent = d.llm && d.llm.ok ? '● no ar' : '● fora'; ia.style.color = d.llm && d.llm.ok ? '#16a34a' : '#b91c1c';
     document.getElementById('st-model').textContent = 'IA (' + ((d.llm && d.llm.model) || '?') + ')';
-    document.getElementById('st-fila').textContent = d.queue ? d.queue.ia : '–';
+    document.getElementById('st-fila').textContent = d.queue ? d.queue.ia + (d.queue.lista || 0) : '–';   // a lista faz parte da fase 1
     document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca + (d.queue.ia ? ' (aguarda)' : '') : '–';
     document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois + (d.queue.ia ? ' (aguarda)' : '') : '–';
-    document.getElementById('st-lista').textContent = d.queue && d.queue.lista != null ? d.queue.lista : '–';
     document.getElementById('st-online').textContent = d.queue && d.queue.online != null ? (d.queue.online_on ? d.queue.online : d.queue.online + ' (sem chave)') : '–';
     document.getElementById('st-revisar').textContent = d.queue && d.queue.revisar != null ? d.queue.revisar : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';

@@ -204,7 +204,7 @@ def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE llm_pending AND NOT locked
-               AND NOT dominio_decidido(id)   -- decidido na tela de Decisões: IA nunca mais reavalia
+               AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY (classification = 'SUSPEITO') DESC, total_queries DESC
              LIMIT 1 FOR UPDATE SKIP LOCKED)
@@ -323,6 +323,11 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     fin = combine(rule, res, ev)
     with db.conn() as c:
         save(c, drow, dossier, rule, fin, False, meta["model"], meta)
+    if fin.classification != "DESCONHECIDO":   # fase 1 inclui a lista (antes era uma fila separada, "Listas")
+        try:
+            listas_ia.sugerir(client, did)
+        except Exception:  # noqa: BLE001 — a fila de listas pega depois
+            log.exception("lista da IA para %s", name)
     svc = (res.service or "").strip() if res.recognized else "não reconhecido pela IA"
     extra = "; ".join(fin.notes)
     scat = next((s["label"] for s in scats if s["code"] == fin.category), fin.category or "")
@@ -346,8 +351,9 @@ def _buscar_antes(d: dict) -> bool:
     return not ident and not d.get("catalog") and not d.get("private_suffix")
 
 
-ETAPA1_PENDENTE = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "
-                   "AND NOT dominio_decidido(id)")
+# decidido não volta à IA sozinho; "Reanalisar" (reanalise_pedida) o leva pelas fases de novo
+DECIDIDO_FORA = "(NOT dominio_decidido(id) OR reanalise_pedida)"
+ETAPA1_PENDENTE = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND " + DECIDIDO_FORA)
 
 
 def _claim_etapa2(c) -> dict | None:
@@ -360,7 +366,7 @@ def _claim_etapa2(c) -> dict | None:
              SELECT id FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by = 'llm'
                AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
                AND (whois_at IS NOT NULL OR NOT %(whois)s)
-               AND NOT dominio_decidido(id)
+               AND (NOT dominio_decidido(id) OR reanalise_pedida)
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
            RETURNING *""", {"whois": settings().whois_enabled}).fetchone()
@@ -386,7 +392,7 @@ def _claim_etapa3(c) -> dict | None:
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')
                AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
-               AND NOT dominio_decidido(id)
+               AND (NOT dominio_decidido(id) OR reanalise_pedida)
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY (name LIKE '%.br') DESC, total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
            RETURNING *""").fetchone()
@@ -589,6 +595,6 @@ def run_forever(stop=lambda: False) -> None:
 def status() -> dict:
     with db.conn() as c:
         r = c.execute(
-            "SELECT count(*) FILTER (WHERE needs_analysis) AS fase_a, count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS fila_ia, "
+            "SELECT count(*) FILTER (WHERE needs_analysis) AS fase_a, count(*) FILTER (WHERE llm_pending AND " + DECIDIDO_FORA + ") AS fila_ia, "
             "count(*) FILTER (WHERE classified_by='llm') AS por_ia, count(*) AS total FROM domains").fetchone()
     return dict(r) | {"at": datetime.now(timezone.utc).isoformat()}

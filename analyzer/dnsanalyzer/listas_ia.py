@@ -139,17 +139,35 @@ def _reservar(c) -> dict | None:
         "UPDATE domains SET lista_claimed_at = now() WHERE id = (SELECT id FROM domains WHERE " + _FILA +
         " AND (lista_claimed_at IS NULL OR lista_claimed_at < now() - interval '10 minutes') "
         "ORDER BY (analyzed_at > now() - interval '1 day') DESC, total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED) "
-        "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence").fetchone()
+        "RETURNING " + _COLUNAS).fetchone()
+
+
+_COLUNAS = "id, name, topic, classification, category, corp_reason, reasons, evidence"
 
 
 def fase(client: OllamaClient) -> str:
-    """Classifica UM domínio na lista. 'idle' = fila vazia."""
+    """Lista de UM domínio classificado sem a IA local (catálogo/regras) — os que passam pela IA local recebem a
+    lista na própria fase 1 (`sugerir`). 'idle' = fila vazia."""
     if not settings().lista_ia_enabled:
         return "idle"
     with db.conn() as c:
         d = _reservar(c)
     if not d:
         return "idle"
+    return _sugerir(client, d)
+
+
+def sugerir(client: OllamaClient, domain_id: int) -> str:
+    """Fase 1, 2ª pergunta à IA local: em qual lista o site entra (logo depois da classificação)."""
+    if not settings().lista_ia_enabled:
+        return "idle"
+    with db.conn() as c:
+        d = c.execute("UPDATE domains SET lista_claimed_at = now() WHERE id = %s AND kind = 'public' "
+                      "RETURNING " + _COLUNAS, (domain_id,)).fetchone()
+    return _sugerir(client, d) if d else "idle"
+
+
+def _sugerir(client: OllamaClient, d: dict) -> str:
     try:
         res, meta = perguntar(client, d)
     except LLMUnavailable:
@@ -184,7 +202,8 @@ def status(c) -> dict:
 AUTO_BY = "IA automática"          # entrou sozinha na lista (certeza)
 OUTROS = "outros_bloqueios"        # como Para revisar: com certeza, o site sai daqui p/ a lista certa
 # Infraestrutura: só as entradas da MIGRAÇÃO (antigo grupo "CDN", nunca revisado) — com certeza vão p/ a lista
-# certa; "nenhuma" só tira com DOIS modelos de acordo (liberaria o site p/ todas as empresas que aplicam a lista)
+# certa; "nenhuma" tira só com a resposta do modelo maior da IA online (ou dois modelos de acordo) e sem
+# suspeita (liberaria o site p/ todas as empresas que aplicam a lista); o resto vai p/ Decisões
 INFRA = "infra_bloqueio"
 DUVIDA_BY = "IA com dúvida"        # foi para Para revisar com a sugestão
 PARA_REVISAR = "para_revisar"
@@ -269,7 +288,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
         " d.popularity_rank, d.corp_action, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
-        " d.online_resp->'_meta'->'antes' AS antes, "
+        " d.online_resp->'_meta'->'antes' AS antes, coalesce((d.online_resp->'_meta'->>'nivel_reforco')::boolean, false) AS reforco, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
         " EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id AND (td.review_status = 'allowed' "
@@ -305,8 +324,8 @@ def aplicar(c, limite: int = 3000) -> dict:
         if humano_contra:
             continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
         if not online and online_ok:   # IA local: espera a validação da IA online
-            if not cat or cat in em or fixas:
-                continue
+            if fixas or (cat in em if cat else not any(x in em for x in moveis if x != OUTROS)):
+                continue   # ("nenhuma" também é validada quando tiraria o site de uma lista)
             c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
             out["online"].append((r["name"], cat))
             continue
@@ -314,8 +333,13 @@ def aplicar(c, limite: int = 3000) -> dict:
         if fixas and (not cat or cat not in em):
             continue   # alguém pôs noutra lista: fica
         if certo and not cat and online:
-            # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs)
-            tirar = [x for x in moveis if x in em and x != OUTROS and (x != INFRA or _dois_nenhuma(r))]
+            # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs). Da
+            # Infraestrutura só com a resposta do modelo maior (ou dois modelos) e sem suspeita; senão, Decisões
+            sai_infra = cls not in ("SUSPEITO", "MALICIOSO") and (r["reforco"] or _dois_nenhuma(r))
+            tirar = [x for x in moveis if x in em and x != OUTROS and (x != INFRA or sai_infra)]
+            if INFRA in moveis and INFRA in em and not sai_infra and PARA_REVISAR not in em:
+                para_decisoes(r, None, "IA online: não é de lista nenhuma, sem confirmação do modelo maior — "
+                              "tirar da Infraestrutura?")
             if tirar:
                 listas.contexto(c, _fonte(r), "IA online: não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
@@ -324,6 +348,9 @@ def aplicar(c, limite: int = 3000) -> dict:
             continue
         if online and not certo and not cat and not em and (cls == "NAO_TRABALHO" or r["corp_action"] == "BLOQUEAR"):
             para_decisoes(r, None, "IA online sem certeza: talvez não seja de lista")
+            continue
+        if online and not certo and not cat and INFRA in moveis and INFRA in em and PARA_REVISAR not in em:
+            para_decisoes(r, None, "IA online sem certeza: tirar da Infraestrutura?")   # revisão não fica sem destino
             continue
         if not cat:
             continue

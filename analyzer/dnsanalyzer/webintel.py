@@ -184,7 +184,9 @@ def _consulta(cfg, q: str, relevante=None) -> tuple[list[dict], list[str]]:
         title, snippet = _clean(x.get("title"), 120), _clean(x.get("content"), 220)
         if not host or not (title or snippet):
             continue
-        if relevante and not relevante(f"{url} {title or ''} {snippet or ''}".lower()):
+        # (sem a query string: o Google Tradutor/busca devolvem links com o termo pesquisado na URL — 27/09)
+        pagina = urllib.parse.urlsplit(url)._replace(query="", fragment="").geturl()
+        if relevante and not relevante(f"{pagina} {title or ''} {snippet or ''}".lower()):
             continue
         out.append({"title": title, "snippet": snippet, "host": host, "url": url[:300]})
         if len(out) >= cfg.web_search_results:
@@ -214,14 +216,23 @@ def search(c, domain: str, fetch: bool, wait: bool = True) -> list[dict] | None:
         _ultima_busca = time.monotonic()
     finally:
         _busca_lock.release()
-    out, fora = _consulta(cfg, f'"{domain}"')
+    label = domain.split(".")[0]
+    alvo = (domain, label) if len(label) >= 5 else (domain,)
+    cita = lambda t: any(a in t for a in alvo)   # noqa: E731
+    # só entram resultados que citam o domínio (ou o nome dele, se distintivo) — até entre aspas vem lixo
+    # (27/09: '"herosistemas-storage.s3.amazonaws.com"' voltou 4 resultados do Google Tradutor)
+    out, fora = _consulta(cfg, f'"{domain}"', cita)
     if not out:
-        # entre aspas o Bing às vezes volta vazio sem erro (e o DuckDuckGo quebra); sem aspas acha,
-        # mas vem ruído: só entram resultados que citam o domínio (ou o nome dele, se distintivo)
-        label = domain.split(".")[0]
-        alvo = (domain, label) if len(label) >= 5 else (domain,)
-        out2, fora2 = _consulta(cfg, domain, lambda t: any(a in t for a in alvo))
+        # entre aspas o Bing às vezes volta vazio sem erro (e o DuckDuckGo quebra); sem aspas acha, com ruído
+        out2, fora2 = _consulta(cfg, domain, cita)
         out, fora = out2, sorted(set(fora) & set(fora2))
+        # nome composto (ex.: herosistemas-storage.s3.amazonaws.com): pelas palavras do nome, só com
+        # resultado que cite a palavra mais distintiva (o nome completo quase nunca aparece na web)
+        palavras = [p for p in re.split(r"[-_]", label) if p.isalpha()]
+        chave = max(palavras, key=len, default="")
+        if not out and len(palavras) >= 2 and len(chave) >= 5:
+            out3, fora3 = _consulta(cfg, " ".join(palavras), lambda t: chave in t)
+            out, fora = out3, sorted(set(fora) & set(fora3))
     # sem resultado só é "indisponível" se NENHUM buscador de web respondeu. Alguns vivem
     # suspensos (captcha): antes, domínio sem presença na web era retentado para sempre.
     if not out and fora and not (_motores_web(cfg) - set(fora)):

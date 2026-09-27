@@ -339,7 +339,9 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
             except (httpx.HTTPError, webintel.BuscaIndisponivel) as e:
                 log.info("busca antes da IA indisponível p/ %s: %s", name, e)   # segue só com a IA
             else:
-                if not dossier["search"]:
+                # sem resultado: dispensa a IA só p/ o que ela não reconheceria (no modo "todos" a IA analisa
+                # mesmo assim — 27/09: herosistemas-storage.s3.amazonaws.com virou DESCONHECIDO sem passar pela IA)
+                if not dossier["search"] and _nao_identificado(dossier):
                     rule0 = evaluate(dossier)
                     if rule0.classification == "DESCONHECIDO":
                         fin = rules_only(rule0, False)
@@ -428,8 +430,11 @@ def _buscar_antes(d: dict) -> bool:
     """Etapa 1: buscar na web antes da IA? Só p/ o que a IA não teria como reconhecer."""
     if not settings().web_search_url or d.get("kind") != "public":
         return False
-    if settings().web_search_before_llm_todos:   # WEB_SEARCH_BEFORE_LLM=todos: todo domínio novo
-        return True
+    return settings().web_search_before_llm_todos or _nao_identificado(d)   # =todos: todo domínio novo
+
+
+def _nao_identificado(d: dict) -> bool:
+    """Fora do top 1M, sem Wikidata/certificado e fora do catálogo: a IA sozinha não reconheceria."""
     if d.get("popularity_rank"):
         return False
     web = d.get("web") or {}

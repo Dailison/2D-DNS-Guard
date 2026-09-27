@@ -32,3 +32,32 @@ def test_busca_antes_todos(monkeypatch):
 def test_sem_searxng_nao_busca(monkeypatch):
     monkeypatch.setattr(classifier, "settings", lambda: SimpleNamespace(web_search_url=""))
     assert not classifier._buscar_antes(_d())
+
+
+def test_busca_pelas_palavras_do_nome_composto(monkeypatch):
+    """Nome composto sem resultado (27/09: herosistemas-storage.s3.amazonaws.com): busca pelas palavras do
+    nome e só fica com o que cita a mais distintiva."""
+    from dnsanalyzer import webintel
+    monkeypatch.setattr(webintel, "settings", lambda: SimpleNamespace(web_search_url="http://x", web_search_min_interval=0,
+                                                                     web_search_results=6))
+    monkeypatch.setattr(webintel, "_ultima_busca", 0.0, raising=False)
+    consultas = []
+
+    def falsa(cfg, q, relevante=None):
+        consultas.append(q)
+        if q == "herosistemas storage":
+            res = [{"title": "Hero Sistemas - ERP", "snippet": "software de gestão herosistemas", "host": "herosistemas.com.br", "url": "u"},
+                   {"title": "Storage barato", "snippet": "nada a ver", "host": "outro.com", "url": "u2"}]
+            return [r for r in res if relevante(f"{r['url']} {r['title']} {r['snippet']}".lower())], []
+        return [], []
+    monkeypatch.setattr(webintel, "_consulta", falsa)
+
+    class C:
+        def execute(self, sql, *a):
+            return self
+
+        def fetchone(self):
+            return None
+    out = webintel.search(C(), "herosistemas-storage.s3.amazonaws.com", fetch=True)
+    assert consultas == ['"herosistemas-storage.s3.amazonaws.com"', "herosistemas-storage.s3.amazonaws.com", "herosistemas storage"]
+    assert [r["host"] for r in out] == ["herosistemas.com.br"]

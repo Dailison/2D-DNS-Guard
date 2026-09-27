@@ -167,42 +167,25 @@ def _por_categoria(tid: int, dias: int, tenant: dict | None) -> list[dict]:
 @analise_bp.get("")
 def painel():
     ctx = _ctx()
-    s, fila, porcat, st = None, [], [], {}
+    s, porcat, st = None, [], {}
     if ctx["tid"] is not None:
         try:
             s = api.get(f"/tenants/{ctx['tid']}/summary", days=ctx["dias"])
-            fila = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, fase5=True, ordem="consultas", limit=10)
         except AnalyzerError as e:
             flash(f"Falha ao carregar o painel: {e}", "erro")
         if s:
             porcat = _por_categoria(ctx["tid"], ctx["dias"], ctx["tenant"])
             nomes = [d["name"] for k in ("top_nonwork", "top_risk", "top_domains") for d in s.get(k, [])]
             st = _status(nomes, ctx["tenant"])
-    return render_template("admin/analise/painel.html", s=s, fila=fila, porcat=porcat, st=st,
+    return render_template("admin/analise/painel.html", s=s, porcat=porcat, st=st,
                            scats=_site_cats(), grp=_grp_ctx(ctx["tenants"]), aba="painel", **ctx)
 
 
 # ------------------------------------------------------------------ fila de decisão
 @analise_bp.get("/decisoes")
 def decisoes():
-    """Fase 5 (manual): o que a IA não resolveu com confiança nas fases 1-4 (IA local; WHOIS; busca na
-    web; IA online). É a lista "Para revisar", com as empresas que acessaram cada site."""
-    from app.dns import _DET_VAZIO, _det_filtros, _det_params, _pag_url
-    from app.dns import _site_cats as _rotulos_cat
-    ctx = _ctx()
-    fd = _det_filtros("consultas")
-    det = _DET_VAZIO
-    if ctx["tid"] is not None:
-        try:
-            det = api.get("/listas/para_revisar/detalhes", tid=ctx["tid"] or None, fase5=True, **_det_params(fd))
-        except AnalyzerError as e:
-            flash(f"Falha ao carregar as decisões: {e}", "erro")
-    if request.headers.get("X-Partial"):
-        return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="decisoes", det=det, fd=fd, cat="para_revisar",
-                               categorias=dnslib.CATEGORIAS_LISTA, scats=_rotulos_cat(), pag_url=_pag_url, tid=ctx["tid"])
-    return render_template("admin/analise/decisoes.html", det=det, fd=fd, cat="para_revisar",
-                           categorias=dnslib.CATEGORIAS_LISTA, scats=_rotulos_cat(), pag_url=_pag_url,
-                           aba="decisoes", **ctx)
+    """A fase 5 (Decisão Humana) foi removida em 27/09: a IA decide tudo na fase 4 (os erros a TI corrige nas listas)."""
+    return redirect(url_for("analise.ia_ao_vivo", **request.args))
 
 
 @analise_bp.post("/decisoes/lote")

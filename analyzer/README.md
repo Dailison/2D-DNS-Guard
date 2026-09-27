@@ -85,10 +85,11 @@ dela — lista de bloqueio ou whitelist ("wl:<categoria>") — espera a IA onlin
 27/09 ela errou com 100% de confiança tanto no bloqueio (typosquat -> redes_sociais) quanto na liberação (mensageiro ->
 wl:comunicacao). A resposta de cada fase é aplicada na hora (`aplicar(ids=...)`). Depois da resposta online,
 `listas_ia.aplicar`:
-- aplica a resposta online com confiança ≥ `ONLINE_CONFIANCA_MIN` (0,8) quando ela é coerente.
-  Com `MALICIOSO`, o domínio vai para **Ameaças**;
-- com "nenhuma lista" certa, tira o domínio de Decisões e das listas que a IA tinha posto;
-- manda o resto para a Decisão Humana (fase 5).
+- aplica a resposta online (a última, com ou sem certeza — sem fase 5 desde 27/09). Com `MALICIOSO`, o domínio vai
+  para **Ameaças**; "nenhuma lista"/whitelist tira o domínio das listas que a IA tinha posto e o põe na whitelist;
+- com trava (`guardado`, incoerência), não bloqueia: whitelist só na lista; decisão de pessoa vale sempre;
+- sem resposta válida da IA online (3 rodadas), vale a sugestão da IA local (`lista_fonte` `online:sem_resposta`);
+- `listas.sem_destino` (a cada 5 min) garante que nenhum domínio analisado fique sem lista.
 
 Salvaguardas (`guardado`):
 - infraestrutura protegida do catálogo nunca é bloqueada;
@@ -270,7 +271,7 @@ A lista completa está em `dnsanalyzer/api.py`. Os principais grupos:
 - **Whitelists e liberações:** `GET /whitelist/{cat}.txt` · `GET /whitelist` ·
   `GET /whitelist/{cat}/detalhes` · `POST /whitelist/{cat}` · `POST /whitelist-remover` ·
   `GET/POST /liberacao` · `GET /servico/{slug}.txt` · `GET /liberacao/{slug}.txt`.
-- **Decisão Humana (fase 5):** `GET /online/pendentes` · `POST /online/decisao`.
+- **Fila da IA online (manual):** `GET /online/pendentes` · `POST /online/decisao`.
 - **Políticas e console:** `GET /policies` · `PUT/DELETE /policies/{escopo}` ·
   `GET /policies/impacto` · `GET/POST /console/excecoes` · `POST /console/excecoes/remover` ·
   `GET/POST /console/technitium-backups` · `/console/operators` · `GET /logs/grouped`.

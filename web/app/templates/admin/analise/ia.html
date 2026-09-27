@@ -34,7 +34,6 @@
   <div class="metric"><div class="n" id="st-whois">–</div><div class="l" title="desconhecidos que terão o WHOIS (titular, CNPJ e atividade na Receita) consultado, .br primeiro">Fase 2 · WHOIS</div></div>
   <div class="metric"><div class="n" id="st-busca">–</div><div class="l" title="desconhecidos que serão pesquisados na web (depois do WHOIS)">Fase 3 · busca na web</div></div>
   <div class="metric"><div class="n" id="st-online">–</div><div class="l" title="o que a IA local não resolveu com confiança vai para a IA online (Gemini)">Fase 4 · IA online</div></div>
-  <div class="metric"><div class="n" id="st-revisar">–</div><div class="l" title="classificação manual pela equipe de TI">Fase 5 · Decisão Humana</div></div>
 </div>
 
 <div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div>
@@ -65,10 +64,10 @@
   var feed = document.getElementById('feed'), feedDec = document.getElementById('feedDec');
   var LROT = {{ LISTAS_ROT|tojson }};
   var DEC = {lista_add: 1, lista_rem: 1, fase5: 1, decisao: 1, auto_block: 1, lista_ia: 1, lista_recusada: 1, aprovado: 1};
-  // quem decidiu (coluna Decisão): fase 1-3 = IA local, 4 = IA online, 5 = Decisão Humana
+  // quem decidiu (coluna Decisão): fase 1-3 = IA local, 4 = IA online, pessoa (TI) = correção manual; "fase5" só no histórico
   var ORIGEM = {'f1:local': ['Fase 1 · IA local', 'local'], 'f2:local': ['Fase 2 · IA local', 'local'],
                 'f3:local': ['Fase 3 · IA local', 'local'], 'local': ['IA local', 'local'], 'f4:online': ['Fase 4 · IA online', 'online'],
-                'f5:ti': ['Fase 5 · Decisão Humana', 'ti'], 'auto': ['Bloqueio automático', 'auto'], 'regras': ['Regras / feeds', 'regras'],
+                'f5:ti': ['Pessoa (TI)', 'ti'], 'auto': ['Bloqueio automático', 'auto'], 'regras': ['Regras / feeds', 'regras'],
                 'catalogo': ['Catálogo', 'catalogo']};
   function origemDe(ev){   // eventos antigos (sem origem gravada): deduz pelo texto
     if (ev.origem) return ev.origem;
@@ -101,7 +100,7 @@
     return ev.kind === 'online_done' || (ev.kind === 'lista_local' && /confiança alta: a IA local decide/.test(ev.detail || ''));
   }
 
-  // fase de cada evento (fluxo: 1 IA local · 2 WHOIS · 3 busca na web · 4 IA online · 5 Decisões)
+  // fase de cada evento (fluxo: 1 IA local · 2 WHOIS · 3 busca na web · 4 IA online, a última)
   var FASE = {llm_start: '1', llm_done: '1', llm_error: '1', rules_final: '1R', rules_alert: '1R',
               whois_start: '2', whois_done: '2', whois_error: '2', search_start: '3', search_done: '3', search_error: '3',
               online_done: '4', lista_ia: '1', auto_block: 'B', rules_batch: 'R'};
@@ -193,10 +192,10 @@
     ia.textContent = d.llm && d.llm.ok ? '● no ar' : '● fora'; ia.style.color = d.llm && d.llm.ok ? '#16a34a' : '#b91c1c';
     document.getElementById('st-model').textContent = 'IA (' + ((d.llm && d.llm.model) || '?') + ')';
     document.getElementById('st-fila').textContent = d.queue ? d.queue.ia + (d.queue.lista || 0) : '–';   // a lista faz parte da fase 1
+    document.getElementById('st-fila').title = d.queue && d.queue.aguarda ? '+ ' + d.queue.aguarda + ' de pouco acesso aguardam recorrência (só regras até serem acessados de novo)' : '';
     document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca : '–';
     document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois : '–';
     document.getElementById('st-online').textContent = d.queue && d.queue.online != null ? (d.queue.online_on ? d.queue.online : d.queue.online + ' (sem chave)') : '–';
-    document.getElementById('st-revisar').textContent = d.queue && d.queue.revisar != null ? d.queue.revisar : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';
     document.getElementById('st-media').textContent = d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–';
     cur = d.current; curBase = cur ? (cur.elapsed - (Date.now()/1000)) : 0;

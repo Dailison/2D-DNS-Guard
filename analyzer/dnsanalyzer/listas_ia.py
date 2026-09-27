@@ -240,8 +240,6 @@ def _proximo(fim: tuple | None, alta: bool) -> str:
         return " · lista atual mantida"
     if fim[0] == "humano":
         return " · decisão humana mantida (liberado)"
-    if fim[0] == "humano_revisar":
-        return f" · confiança alta, contraria decisão humana ({fim[1]}): vai p/ a Decisão Humana"
     conf = "confiança alta" + (f", trava: {fim[-1]}" if fim[-1] else "") if alta else "confiança baixa"
     return f" · {conf}: segue p/ a fase {fim[1]}" if fim[0] == "segue" else f" · {conf}: vai p/ a fase 4 (IA online)"
 
@@ -369,12 +367,12 @@ def _incoerencia(cat: str, cls: str | None, categoria: str | None) -> str | None
 def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
     """Resultados novos da etapa "lista" e da IA online -> listas.
 
-    Com a IA online ligada, ela é a VALIDADORA: a sugestão da IA local (com ou sem certeza) espera a
-    fase 4 (lista_duvida); a resposta da IA online com certeza e coerente (pela classificação DELA) põe o
-    site na lista — e corrige o que a IA local tinha posto sozinha; sem certeza -> Decisões (fase 5),
-    a menos que o site já esteja numa lista. Sem IA online: a certeza da IA local basta (como antes).
-    Site posto numa lista por pessoa/migração fica onde está; com decisão humana "manter liberado" (numa
-    lista que bloqueia alguém), a IA não mexe: decidido uma vez não volta."""
+    Sem fase 5 (pedido do usuário 27/09: "deixar que a IA tome todas as decisões na fase 4, 100% automatizado; os
+    erros eu trato manualmente"). A IA local (gemma4) decide sozinha com confiança alta; senão, fases 2/3 e a IA online.
+    A resposta da IA online é a ÚLTIMA: com ou sem certeza, vale — lista de bloqueio ou whitelist. Travas (protegido do
+    catálogo, site de trabalho, DoH sem dois modelos, incoerência): a IA não bloqueia, o site vai p/ a whitelist (só na
+    lista: nada muda no DNS). Decisão de pessoa vale sempre ("manter liberado" ou lista posta por ela): a IA não desfaz
+    a correção humana. Sem IA online: a resposta da IA local é a última."""
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
@@ -389,18 +387,32 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         " AND d.lista_aplicada_at IS DISTINCT FROM d.lista_at" + (" AND d.id = ANY(%s)" if ids else "")
         + " ORDER BY d.lista_at LIMIT %s", (ids, limite) if ids else (limite,)).fetchall()
     aplicadas = {x for r in c.execute("SELECT lists FROM policies") for x in (r["lists"] or [])}
-    out = {"direto": [], "revisar": [], "resolvidos": [], "online": [], "local": {}}   # local: {id: destino da resposta}
+    out = {"direto": [], "travados": [], "resolvidos": [], "online": [], "local": {}}   # local: {id: destino da resposta}
     from . import online as _online
     online_ok = _online.habilitado()
 
-    def liberar(r, cls):
+    def sai_revisao(r, em):
+        """Para revisar (antiga fila da fase 5) não recebe mais nada: quem estava lá sai quando a IA decide."""
+        if PARA_REVISAR in em:
+            c.execute("DELETE FROM category_lists WHERE category = %s AND domain = %s", (PARA_REVISAR, r["name"]))
+
+    def liberar(r, cls, humano=False, trava=None):
         """Decisão final de liberar: o site entra numa whitelist (Domínios liberados), na categoria escolhida pela IA.
         Não é publicado no DNS (fora de listas de bloqueio já está liberado; a whitelist vence qualquer bloqueio em
-        todas as empresas) — whitelist.aplicar publica o que tiver pessoa, catálogo ou dois modelos online."""
+        todas as empresas) — whitelist.aplicar publica o que tiver pessoa, catálogo ou dois modelos online.
+        humano: decisão de pessoa ("manter liberado") com resposta de bloqueio da IA; trava: a IA recomendou bloquear."""
         on = (r["lista_fonte"] or "").startswith("online")
         wl = r["lista_wl"] or whitelist._categoria(r["cat_online"] if on else r["category"], cls)
+        if wl == whitelist.SEM_RESPOSTA or wl not in whitelist.CATEGORIAS:
+            wl = "outros_liberados"
+        if humano:
+            c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) SELECT %s, %s, %s, false "
+                      "WHERE NOT EXISTS (SELECT 1 FROM whitelist_domains WHERE domain = %s)", (wl, r["name"], listas.SEM_DESTINO_BY, r["name"]))
+            return
         por = "IA online" if on else f"IA local (fase {r['lista_fase']})" if r["lista_fase"] else "IA local"
         ja = c.execute("SELECT category, added_by FROM whitelist_domains WHERE domain = %s", (r["name"],)).fetchone()
+        if ja and trava:
+            return
         if ja:
             if not ((ja["added_by"] or "").startswith("IA local") and ja["category"] != wl):
                 # já estava (pessoa, catálogo, IA online ou a mesma categoria): a decisão confirma — aparece na coluna Decisão
@@ -409,18 +421,11 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                 return
             # posta antes pela IA local (provisória): a categoria da resposta nova (IA online ou IA local que decide) vale
             c.execute("DELETE FROM whitelist_domains WHERE domain = %s AND added_by LIKE 'IA local%%'", (r["name"],))
-        listas.contexto(c, por, f"liberado: {whitelist.CATEGORIAS[wl]} · {_fonte(r)}")
+        listas.contexto(c, por, f"liberado: {whitelist.CATEGORIAS[wl]} · {_fonte(r)}" + (f" · {trava}" if trava else ""))
         c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES (%s, %s, %s, false) "
                   "ON CONFLICT DO NOTHING", (wl, r["name"], por))
-        eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{whitelist.CATEGORIAS[wl]} · {_fonte(r)}", r["id"], origem(r), cls)
-
-    def para_decisoes(r, cat, motivo=None, por=DUVIDA_BY):
-        listas.contexto(c, por, motivo or "nenhuma fase teve certeza")
-        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                  (PARA_REVISAR, r["name"], f"{por} ({cat or 'nenhuma'})" + (f" · {motivo}" if motivo else "")))
-        out["revisar"].append((r["name"], cat))
-        eventos.lista("fase5", r["name"], cat, (motivo or "nenhuma fase teve certeza")
-                      + (f" · {_fonte(r)}" if r["lista_fonte"] else ""), r["id"], origem(r), cls)
+        eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{whitelist.CATEGORIAS[wl]} · {_fonte(r)}" + (f" · {trava}" if trava else ""),
+                      r["id"], origem(r), cls)
 
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
@@ -434,16 +439,11 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         cls = r["cls_online"] if online and r["cls_online"] else r["classification"]
         humano_contra = bool(cat) and cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
 
-        # resposta em que dá p/ confiar (IA online, ou modelo local aprovado e coerente) que contraria uma decisão humana:
-        # vai p/ a Decisão Humana com o parecer da IA — a pessoa revê (pedido do usuário 27/09); a IA não muda sozinha
-        confiavel = certo and (online or (decide_sozinho(r["lista_modelo"]) and (not cat or _coerente(cat, cls, r["category"]))))
-        recomenda = cat or (f"wl:{r['lista_wl']}" if r["lista_wl"] else "whitelist")
-        if humano_contra:   # alguém decidiu "manter liberado" e a IA recomenda uma lista de bloqueio
-            if confiavel and cat not in em and PARA_REVISAR not in em:
-                para_decisoes(r, recomenda, "contraria decisão humana (liberado)", REVER_BY)
-                out["local"][r["id"]] = ("humano_revisar", "liberado")
-            else:
-                out["local"][r["id"]] = ("humano",)
+        if humano_contra:   # uma pessoa decidiu "manter liberado": vale a pessoa (a IA não desfaz a correção humana)
+            out["local"][r["id"]] = ("humano",)
+            sai_revisao(r, em)
+            if not (set(em) - {PARA_REVISAR}):   # sem lista de bloqueio: whitelist (só na lista), como decisão humana
+                liberar(r, cls, humano=True)
             continue
         local_decide = False
         if not online and online_ok:   # IA local (fases 1-3)
@@ -454,10 +454,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                 if cat and cat in em and certo and decide_sozinho(r["lista_modelo"]):   # já estava na lista: confirmou
                     out["local"][r["id"]] = ("decide",)
                     eventos.lista("lista_add", r["name"], cat, f"confirmou (já estava na lista) · {_fonte(r)}", r["id"], origem(r), cls)
-                elif confiavel and PARA_REVISAR not in em:   # pessoa/migração pôs noutra lista: a pessoa revê
-                    para_decisoes(r, recomenda, f"contraria decisão humana ({', '.join(sorted(fixas))})", REVER_BY)
-                    out["local"][r["id"]] = ("humano_revisar", ", ".join(sorted(fixas)))
-                else:
+                    sai_revisao(r, em)
+                else:   # pessoa/migração pôs noutra lista: vale a decisão dela
                     out["local"][r["id"]] = ("mantida",)
                 continue
             # confiança alta de um modelo que passou na prova (LOCAL_DECIDE_MODELS: gemma4) = a IA local decide sozinha
@@ -488,68 +486,53 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false, lista_duvida = false WHERE id = %s",
                       (r["id"],))
 
-        if fixas and (not cat or cat not in em):
-            if online and confiavel and PARA_REVISAR not in em:   # alguém pôs noutra lista: fica, e a pessoa revê
-                para_decisoes(r, recomenda, f"contraria decisão humana ({', '.join(sorted(fixas))})", REVER_BY)
+        # daqui p/ baixo a resposta é a ÚLTIMA (IA online, IA local que decide, ou sem IA online): sempre há destino
+        if fixas and (not cat or cat not in em):   # pessoa/migração pôs noutra lista: vale a decisão dela
+            sai_revisao(r, em)
             continue
-        if certo and not cat and (online or local_decide) and _suspeito(r):
-            # recomenda liberar um site SUSPEITO/MALICIOSO: a whitelist não aceita (sairia sozinho e o site ficava sem
-            # fila nenhuma, em "Aprovados" — 69 casos em 27/09); a pessoa decide
-            if PARA_REVISAR not in em:
-                para_decisoes(r, recomenda, _suspeito(r))
-            continue
-        if certo and not cat and (online or local_decide):
-            # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs). Da
-            # Infraestrutura só com a resposta do modelo maior (ou dois modelos) e sem suspeita; senão, Decisões
-            sai_infra = cls not in ("SUSPEITO", "MALICIOSO") and (r["reforco"] or _dois_nenhuma(r))
+        if not cat:   # liberar: sai das listas que a IA pôs e vai p/ a whitelist
+            # da Infraestrutura (migração) só com certeza, a resposta do modelo maior (ou dois modelos) e sem suspeita:
+            # senão fica lá (bloqueado como estava)
+            sai_infra = certo and cls not in ("SUSPEITO", "MALICIOSO") and (r["reforco"] or _dois_nenhuma(r))
             tirar = [x for x in moveis if x in em and x != OUTROS and (x != INFRA or sai_infra)]
-            if INFRA in moveis and INFRA in em and not sai_infra and PARA_REVISAR not in em:
-                para_decisoes(r, None, "IA online: não é de lista nenhuma, sem confirmação do modelo maior — "
-                              "tirar da Infraestrutura?")
             if tirar:
                 listas.contexto(c, _fonte(r), ("IA online" if online else "IA local") + ": não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
                 out["resolvidos"].append(r["name"])
-                eventos.lista("lista_rem", r["name"], ",".join(tirar), f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r), cls)
+                if set(tirar) - {PARA_REVISAR}:
+                    eventos.lista("lista_rem", r["name"], ",".join(sorted(set(tirar) - {PARA_REVISAR})),
+                                  f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r), cls)
             if not (set(em) - set(tirar)):   # não sobrou lista de bloqueio: vai p/ a whitelist
                 liberar(r, cls)
             continue
-        if online and not certo and not cat and not em and (cls == "NAO_TRABALHO" or r["corp_action"] == "BLOQUEAR"):
-            para_decisoes(r, None, "IA online sem certeza: talvez não seja de lista")
+        # lista de bloqueio. A lista diz O QUE O SITE É; p/ a IA online, "ameaça" só com classificação suspeita/maliciosa
+        coerente = (cat != "ameaca" or cls in ("MALICIOSO", "SUSPEITO")) if online else _coerente(cat, cls, r["category"])
+        trava = None if cat in em else (guardado(r, cat) if coerente else f"{cat} com classificação {cls}")
+        if trava:   # a IA não bloqueia sozinha: fica como está; sem lista de bloqueio, vai p/ a whitelist (nada muda no DNS)
+            out["travados"].append((r["name"], cat, trava))
+            sai_revisao(r, em)
+            if not (set(em) - {PARA_REVISAR}):
+                liberar(r, cls, trava=f"trava: {trava} (a IA recomendou {cat})")
             continue
-        if online and not certo and not cat and INFRA in moveis and INFRA in em and PARA_REVISAR not in em:
-            para_decisoes(r, None, "IA online sem certeza: tirar da Infraestrutura?")   # revisão não fica sem destino
-            continue
-        if not cat:
-            continue
-        # a lista diz O QUE O SITE É (não se é de trabalho): p/ a IA online só Ameaças segue manual (sem lista
-        # de ameaça confirmando); as travas de coerência completas valem p/ a IA local (modelo pequeno)
-        coerente = (cat != "ameaca" or cls == "MALICIOSO") if online else _coerente(cat, cls, r["category"])
-        motivo = guardado(r, cat) if certo and coerente and cat not in em else None
-        if motivo:   # trava: não entra sozinho, vai p/ Decisões (a menos que já esteja numa lista da IA)
-            if not da_ia and PARA_REVISAR not in em:
-                para_decisoes(r, cat, motivo)
-        elif certo and coerente:
-            listas.contexto(c, f"{AUTO_BY} ({cat})", _fonte(r))
-            if cat not in em:
-                por = f"{AUTO_BY} ({cat})"
-                c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                          (cat, r["name"], por))
-                if cat in aplicadas:   # passou a bloquear alguém: conta como decidido
-                    c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
-                              "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
-                out["direto"].append((r["name"], cat))
-                eventos.lista("lista_add", r["name"], cat, _fonte(r)
-                              + (f" · saiu de {', '.join(x for x in moveis if x in em)}" if any(x in em for x in moveis) else ""),
-                              r["id"], origem(r), cls)
-            elif online:   # já estava na lista: a IA online confirmou (a decisão aparece na coluna "Decisão")
-                eventos.lista("lista_add", r["name"], cat, f"confirmou (já estava na lista) · {_fonte(r)}", r["id"], origem(r), cls)
-            tirar = [x for x in moveis if x in em and x != cat]
-            if tirar:
-                c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
-        elif not da_ia and PARA_REVISAR not in em and OUTROS not in em:
-            para_decisoes(r, cat)   # sem certeza em nenhuma fase: fase 5 (Outros fica lá, bloqueado, com a sugestão)
-    if out["direto"] or out["revisar"] or out["online"] or out["resolvidos"]:
-        log.info("listas pela IA: %d direto, %d p/ a IA online, %d p/ Decisões, %d resolvidos", len(out["direto"]),
-                 len(out["online"]), len(out["revisar"]), len(out["resolvidos"]))
+        # com ou sem certeza: a fase 4 é a última (sem Decisão Humana)
+        por = f"{AUTO_BY} ({cat})"
+        listas.contexto(c, por, _fonte(r) + ("" if certo else " · sem certeza"))
+        if cat not in em:
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                      (cat, r["name"], por))
+            if cat in aplicadas:   # passou a bloquear alguém: conta como decidido
+                c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', %s) "
+                          "ON CONFLICT (domain_id) DO NOTHING", (r["id"], por))
+            out["direto"].append((r["name"], cat))
+            eventos.lista("lista_add", r["name"], cat, _fonte(r) + ("" if certo else " · sem certeza")
+                          + (f" · saiu de {', '.join(sorted(x for x in moveis if x in em))}" if any(x in em for x in moveis) else ""),
+                          r["id"], origem(r), cls)
+        elif online:   # já estava na lista: a IA online confirmou (a decisão aparece na coluna "Decisão")
+            eventos.lista("lista_add", r["name"], cat, f"confirmou (já estava na lista) · {_fonte(r)}", r["id"], origem(r), cls)
+        tirar = [x for x in moveis if x in em and x != cat]
+        if tirar:
+            c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
+    if out["direto"] or out["travados"] or out["online"] or out["resolvidos"]:
+        log.info("listas pela IA: %d direto, %d p/ a IA online, %d travados (whitelist), %d resolvidos", len(out["direto"]),
+                 len(out["online"]), len(out["travados"]), len(out["resolvidos"]))
     return out

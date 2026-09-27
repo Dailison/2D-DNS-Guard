@@ -248,7 +248,7 @@ SECOES_LISTA = [
                     ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
     ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),
     ("🏢 Trabalho", [("compras", "Compras"), ("ia_chatbots", "IA / Chatbots"), ("nuvem_remoto", "Nuvem / Acesso remoto")]),
-    ("🔧 Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros"), ("para_revisar", "Para revisar")]),
+    ("🔧 Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros")]),   # (Para revisar/fase 5: removida em 27/09)
 ]
 CATEGORIAS_LISTA = [x for _, itens in SECOES_LISTA for x in itens]
 # whitelists por categoria (analisador: whitelist.py) — assinadas por TODOS os grupos (vencem qualquer bloqueio)

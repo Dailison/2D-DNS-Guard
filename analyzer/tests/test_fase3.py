@@ -416,3 +416,41 @@ def test_precisao_da_ia(api):
     on = next(f for f in j["fontes"] if f["fonte"] == "IA online")
     assert on["aplicadas"] >= 2 and on["corrigidas"] >= 1 and on["pct_corrigidas"] > 0
     assert set(j["decisoes"]) == {"aprovou_sugestao", "outra_lista", "manteve_liberado"}
+
+
+# ---------------------------------------------------------------- triagem por acesso (performance, 27/09)
+def test_pouco_acesso_espera_recorrencia(api):
+    """Domínio com < 3 consultas de 1 computador fica na fila com a prioridade suspensa (só regras); quem uma pessoa
+    mandou reanalisar não espera; ao recorrer (3 consultas ou 2 computadores) volta à fila normal."""
+    from dnsanalyzer import classifier, db
+    with db.conn() as c:
+        t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
+        ids = {}
+        for n, pedido in (("raro-teste.com", False), ("raro-pedido.com", True)):
+            ids[n] = c.execute("INSERT INTO domains (name, kind, needs_analysis, total_queries, reanalise_pedida) "
+                               "VALUES (%s, 'public', true, 1, %s) RETURNING id", (n, pedido)).fetchone()["id"]
+            c.execute("INSERT INTO tenant_domains (tenant_id, domain_id, first_seen, last_seen, total_queries, clients_count) "
+                      "VALUES (%s, %s, %s, %s, 1, 1)", (t, ids[n], AGORA, AGORA))
+    classifier.phase_a()
+    with db.conn() as c:
+        st = {r["name"]: (r["llm_pending"], r["aguarda_recorrencia"]) for r in
+              c.execute("SELECT name, llm_pending, aguarda_recorrencia FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
+    assert st["raro-teste.com"] == (True, True), st      # na fila, mas suspenso
+    assert st["raro-pedido.com"] == (True, False), st    # pessoa pediu: não espera
+    # a fila da IA não pega o suspenso (os outros pendentes ficam "reservados" só durante este teste)
+    with db.conn() as c:
+        c.execute("UPDATE domains SET claimed_at = now() WHERE llm_pending AND id <> ALL(%s)", (list(ids.values()),))
+        pego = classifier._claim_llm(c)
+        c.execute("UPDATE domains SET claimed_at = NULL WHERE llm_pending")
+    assert pego and pego["name"] == "raro-pedido.com", pego and pego["name"]
+    assert classifier.status()["aguarda"] >= 1
+    # recorreu (3 consultas): volta à fila normal
+    with db.conn() as c:
+        c.execute("UPDATE domains SET total_queries = 3 WHERE id = %s", (ids["raro-teste.com"],))
+        assert classifier.reenfileirar_recorrentes(c) == 1
+        assert not c.execute("SELECT aguarda_recorrencia FROM domains WHERE id = %s", (ids["raro-teste.com"],)).fetchone()["aguarda_recorrencia"]
+    # 2 computadores também bastam
+    with db.conn() as c:
+        c.execute("UPDATE domains SET aguarda_recorrencia = true, total_queries = 1 WHERE id = %s", (ids["raro-teste.com"],))
+        c.execute("UPDATE tenant_domains SET clients_count = 2 WHERE domain_id = %s", (ids["raro-teste.com"],))
+        assert classifier.reenfileirar_recorrentes(c) == 1

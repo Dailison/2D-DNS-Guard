@@ -83,58 +83,55 @@ def test_fila_classifica_e_aplica(env, monkeypatch):
         g = {r["name"]: r["reviewed_by"] for r in c.execute(
             "SELECT d.name, g.reviewed_by FROM global_reviews g JOIN domains d ON d.id = g.domain_id")}
         st = listas_ia.status(c)
+        wl = {r["domain"]: r["added_by"] for r in c.execute("SELECT domain, added_by FROM whitelist_domains")}
     assert ("ia_chatbots", "chatgpt.com") in em and em[("jogos", "roblox.com")] == "IA automática (jogos)"
     assert ("redes_sociais", "tiktok.com") in em
-    assert em[("para_revisar", "talvez-jogo.com")] == "IA com dúvida (jogos)", "confiança baixa"
-    assert ("para_revisar", "loja-trab.com") in em, "jogos + TRABALHO = incoerente"
-    assert ("para_revisar", "whatsapp.com") not in em and ("mensageiros", "whatsapp.com") not in em, "decisão humana: não volta"
-    assert ("pirataria", "sobra.com") in em and ("para_revisar", "sobra.com") not in em, "sobra da migração movida"
-    assert em[("para_revisar", "duvida-sobra.com")] == "migração dos grupos antigos"
+    assert not any(cat == "para_revisar" for cat, _ in em), "sem fase 5: nada vai p/ Para revisar (e quem estava sai)"
+    assert em[("jogos", "talvez-jogo.com")] == "IA automática (jogos)", "sem certeza, mas é a última resposta: vale"
+    assert ("jogos", "loja-trab.com") not in em and wl.get("loja-trab.com"), "jogos + TRABALHO = incoerente: trava -> whitelist"
+    assert ("mensageiros", "whatsapp.com") not in em and wl.get("whatsapp.com") == "decisão humana (liberado)", "decisão humana vale"
+    assert ("pirataria", "sobra.com") in em, "sobra da migração movida"
+    assert ("streaming", "duvida-sobra.com") in em, "sobra da migração sem certeza: vale a IA"
     assert ("compras", "ja-listado.com") not in em, "já numa lista manual (Infraestrutura): fica onde está"
     assert ("jogos", "de-outros.com") in em and ("outros_bloqueios", "de-outros.com") not in em, "Outros = como Para revisar"
-    assert ("para_revisar", "cognito.aws.com") in em and ("nuvem_remoto", "cognito.aws.com") not in em, "infra: revisão"
+    assert ("nuvem_remoto", "cognito.aws.com") not in em and wl.get("cognito.aws.com"), "infra de sistemas: trava -> whitelist"
     assert not any(d == "erp.com.br" for _, d in em)
     assert g.get("roblox.com") == "IA automática (jogos)", "jogos é aplicada: decidido"
     assert "chatgpt.com" not in g, "ninguém aplica IA/Chatbots: não vira decisão"
     assert st["fila"] == 0 and st["com_lista"] == 11
     with db.conn() as c:
-        assert listas_ia.aplicar(c) == {"direto": [], "revisar": [], "resolvidos": [], "online": [], "local": {}}, "não reaplica"
+        assert listas_ia.aplicar(c) == {"direto": [], "travados": [], "resolvidos": [], "online": [], "local": {}}, "não reaplica"
 
 
 def test_detalhes_mostram_sugestao_e_aprovar(env):
-    j = env.get("/listas/para_revisar/detalhes", headers=H).json()
+    """(sem fase 5, Para revisar fica vazia) a sugestão da IA aparece nas listas manuais e "Aprovar" move p/ a sugerida."""
+    j = env.get("/listas/infra_bloqueio/detalhes", headers=H).json()
     it = {r["domain"]: r for r in j["items"]}
-    assert it["talvez-jogo.com"]["lista_ia"] == "jogos" and it["talvez-jogo.com"]["lista_conf"] == pytest.approx(0.6)
-    assert j["facetas"]["sugestao"]["jogos"] == 2
-    j = env.get("/listas/para_revisar/detalhes", headers=H, params={"sug": "streaming"}).json()
-    assert [r["domain"] for r in j["items"]] == ["duvida-sobra.com"]
-    r = env.post("/listas-aprovar", headers=H, json={"domains": ["talvez-jogo.com", "duvida-sobra.com", "x.com"],
-                                                    "de": "para_revisar", "by": "op"}).json()
-    assert r["movidos"] == {"jogos": ["talvez-jogo.com"], "streaming": ["duvida-sobra.com"]} and r["sem_sugestao"] == ["x.com"]
-    nomes = {x["domain"] for x in env.get("/listas/para_revisar/detalhes", headers=H).json()["items"]}
-    assert "talvez-jogo.com" not in nomes and "whatsapp.com" not in nomes
-    r = env.post("/listas-aprovar", headers=H, json={"domains": ["ja-listado.com"], "de": "infra_bloqueio"}).json()
-    assert r["movidos"] == {"compras": ["ja-listado.com"]}
+    assert it["ja-listado.com"]["lista_ia"] == "compras" and it["ja-listado.com"]["lista_conf"] == pytest.approx(1.0)
+    assert j["facetas"]["sugestao"]["compras"] == 1
+    assert env.get("/listas/para_revisar/detalhes", headers=H).json()["items"] == []
+    r = env.post("/listas-aprovar", headers=H, json={"domains": ["ja-listado.com", "x.com"], "de": "infra_bloqueio", "by": "op"}).json()
+    assert r["movidos"] == {"compras": ["ja-listado.com"]} and r["sem_sugestao"] == ["x.com"]
 
 
 def test_online_decisao_manual(env):
     from dnsanalyzer import db, listas_ia
     p = env.get("/online/pendentes", headers=H).json()
-    assert p == [], "sem GEMINI_API_KEY a dúvida vai direto p/ Para revisar (nada na fila da fase 3)"
+    assert p == [], "sem GEMINI_API_KEY a resposta da IA local é a última (nada na fila da fase 4)"
     assert env.post("/online/decisao", headers=H, json={"domain": "loja-trab.com", "lista": "nenhuma", "confianca": 1.0,
                                                          "motivo": "loja de peças", "fonte": "claude"}).json()["ok"]
     assert env.post("/online/decisao", headers=H, json={"domain": "x.com", "lista": "jogos", "confianca": 1}).status_code == 404
     assert env.post("/online/decisao", headers=H, json={"domain": "loja-trab.com", "lista": "zz", "confianca": 1}).status_code == 422
     with db.conn() as c:
-        ap = listas_ia.aplicar(c)
-    assert ap["resolvidos"] == ["loja-trab.com"]
-    nomes = {x["domain"] for x in env.get("/listas/para_revisar/detalhes", headers=H).json()["items"]}
-    assert "loja-trab.com" not in nomes
+        listas_ia.aplicar(c)
+        wl = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'loja-trab.com'").fetchone()
+        bl = c.execute("SELECT 1 FROM category_lists WHERE domain = 'loja-trab.com'").fetchone()
+    assert wl and not bl, "liberado: whitelist, fora das listas de bloqueio"
 
 
 def test_fase3_gemini(env, monkeypatch):
-    """Com a chave: dúvida local -> fila da fase 3 (não vai p/ Para revisar); resposta do Gemini com
-    certeza -> lista; sem certeza -> Para revisar; desconhecido reconhecido -> classificação 'online'."""
+    """Com a chave: dúvida local -> fila da fase 4; a resposta do Gemini é a última (sem fase 5): com ou sem certeza ->
+    lista; nem a IA online identifica -> whitelist; desconhecido reconhecido -> classificação 'online'."""
     from dnsanalyzer import config, db, listas_ia, online
     monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
     with db.conn() as c:
@@ -147,7 +144,7 @@ def test_fase3_gemini(env, monkeypatch):
                   "VALUES ('misterio.com.br', 'DESCONHECIDO', 'desconhecido', now(), now(), 99, 'web'), "
                   "('ninguem-sabe.com', 'DESCONHECIDO', 'desconhecido', now(), now(), 1, 'web')")
         ap = listas_ia.aplicar(c)
-    assert sorted(n for n, _ in ap["online"]) == ["duv1.com", "duv2.com"] and not ap["revisar"]
+    assert sorted(n for n, _ in ap["online"]) == ["duv1.com", "duv2.com"] and not ap["travados"]
     fila = [x["domain"] for x in env.get("/online/pendentes", headers=H).json()]
     assert sorted(fila[:2]) == ["duv1.com", "duv2.com"] and "misterio.com.br" in fila, fila
     resp = {"duv1.com": {"lista": "jogos", "confianca": 1.0, "classificacao": "NAO_TRABALHO", "reconhecido": True},
@@ -176,10 +173,11 @@ def test_fase3_gemini(env, monkeypatch):
         listas_ia.aplicar(c)
         em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists")}
         m = c.execute("SELECT classification, classified_by, topic FROM domains WHERE name='misterio.com.br'").fetchone()
-    assert ("jogos", "duv1.com") in em and ("para_revisar", "duv2.com") in em
+        wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains")}
+    assert ("jogos", "duv1.com") in em and ("jogos", "duv2.com") in em, "sem certeza depois da segunda opinião: vale a IA"
     assert ("compras", "misterio.com.br") in em, "Compras conta como trabalho"
     assert m == {"classification": "TRABALHO", "classified_by": "online", "topic": "Loja de ferramentas"}
-    assert ("para_revisar", "ninguem-sabe.com") in em, "nem a IA online sabe: fase 5 (Decisões)"
+    assert "ninguem-sabe.com" in wl and not any(d == "ninguem-sabe.com" for _, d in em), "nem a IA online sabe: whitelist"
     assert env.get("/online/pendentes", headers=H).json() == []
 
 
@@ -243,7 +241,7 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
     assert ("jogos", "playrix.com") in em, "coerência pela classificação da IA online"
     assert ("compras", "slatic.net") in em, "vale a resposta do modelo maior"
     assert ("para_revisar", "v-sobra.com") not in em, "nenhuma com certeza: sai de Decisões (na hora, sem esperar o ciclo)"
-    assert ("streaming", "v-talvez.com") in em and ("para_revisar", "v-talvez.com") not in em, "sem certeza: fica onde a IA pôs"
+    assert ("compras", "v-talvez.com") in em and ("streaming", "v-talvez.com") not in em, "sem certeza: vale a última resposta"
     assert ("publicidade", "cookiefirst.com") in em and ("para_revisar", "cookiefirst.com") not in em, \
         "IA online: TRABALHO + publicidade 0,8 = lista (a lista diz o que o site é)"
 
@@ -254,10 +252,10 @@ def test_eventos_da_coluna_decisao(env, monkeypatch):
     with db.conn() as c:
         kinds = {r["kind"] for r in c.execute("SELECT kind FROM ai_events")}
         ev = {(r["kind"], r["name"]): r["detail"] for r in c.execute("SELECT kind, name, detail FROM ai_events")}
-    assert {"lista_add", "fase5", "decisao"} <= kinds, kinds
+    assert {"lista_add", "decisao"} <= kinds and "fase5" not in kinds, kinds
     assert ev[("lista_add", "roblox.com")].startswith("jogos|IA local")
-    assert ev[("fase5", "talvez-jogo.com")].startswith("jogos|nenhuma fase teve certeza")
-    assert any(k == "decisao" and d.startswith("jogos|op: aprovou a sugestão") for (k, _), d in ev.items())
+    assert ev[("lista_add", "talvez-jogo.com")].startswith("jogos|IA local") and "sem certeza" in ev[("lista_add", "talvez-jogo.com")]
+    assert any(k == "decisao" and d.startswith("compras|op: aprovou a sugestão") for (k, _), d in ev.items())
     with db.conn() as c:   # muita classificação depois: a carga inicial ainda traz a coluna "Decisão"
         for i in range(80):
             c.execute("INSERT INTO ai_events (kind, name) VALUES ('llm_done', %s)", (f"x{i}.com",))
@@ -266,15 +264,12 @@ def test_eventos_da_coluna_decisao(env, monkeypatch):
     assert ks.count("llm_done") == 30 and any(k in ("lista_add", "fase5", "decisao") for k in ks)
 
 
-def test_decisoes_so_fase5_e_contexto_completo(env):
+def test_sem_fase5_e_contexto_completo(env):
     import json as _j
 
     from dnsanalyzer import db, online
     j = env.get("/listas/para_revisar/detalhes", headers=H, params={"fase5": True, "limit": 500}).json()
-    nomes = {r["domain"] for r in j["items"]}
-    assert "duv2.com" in nomes, "a IA online avaliou e ficou sem certeza: fase 5"
-    assert "talvez-jogo.com" not in nomes and "duvida-sobra.com" not in nomes, "sem passar pela fase 4: fora de Decisões"
-    assert j["aguardando_ia"] >= 1
+    assert not j["items"], "sem fase 5: Para revisar fica vazia"
     with db.conn() as c:
         i = c.execute("INSERT INTO domains (name, classification, category, topic, confidence, corp_action, corp_reason, "
                       "classified_by, reasons, evidence, whois_at, web_search_at, analyzed_at) VALUES ('ctx.com.br', 'DESCONHECIDO', "
@@ -337,8 +332,8 @@ def test_repergunta_tem_segunda_opiniao(env, monkeypatch):
 
 
 def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
-    """Plano de confiabilidade, fase 1: protegido/trabalho/popular não entram sozinhos; bloqueio automático
-    espera a IA online; "nenhuma" sem certeza em não trabalho vai p/ Decisões; DoH popular entra."""
+    """Plano de confiabilidade, fase 1: protegido/trabalho/popular não entram sozinhos (sem fase 5: vão p/ a whitelist,
+    só na lista); bloqueio automático espera a IA online; "nenhuma" sem certeza -> whitelist; DoH popular entra."""
     from dnsanalyzer import config, db, listas, listas_ia
     cfg = config.settings()
 
@@ -349,22 +344,25 @@ def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
     def em(c, nome):
         return {r["category"]: r["added_by"] for r in c.execute("SELECT category, added_by FROM category_lists WHERE domain=%s", (nome,))}
 
+    def wl(c, nome):
+        return c.execute("SELECT category FROM whitelist_domains WHERE domain = %s AND NOT publicar", (nome,)).fetchone()
+
     # 1) protegido do catálogo com resposta online "streaming" 0,95 -> Decisões
     monkeypatch.setattr(cfg, "gemini_api_key", "k")
     with db.conn() as c:
         i = novo(c, "microsoft.com", "NAO_TRABALHO", "streaming")
         listas_ia.salvar(c, i, "streaming", 0.95, "", "", "online:gemini")
         listas_ia.aplicar(c)
-        m = em(c, "microsoft.com")
-    assert "streaming" not in m and "trava: infraestrutura protegida" in m.get("para_revisar", ""), m
+        m, w = em(c, "microsoft.com"), wl(c, "microsoft.com")
+    assert not m and w, (m, w)
     # 2) categoria de trabalho (financas), IA local "compras" 0,95, IA online DESLIGADA -> Decisões
     monkeypatch.setattr(cfg, "gemini_api_key", "")
     with db.conn() as c:
         i = novo(c, "banco-x.com.br", "NAO_TRABALHO", "financas")
         listas_ia.salvar(c, i, "compras", 0.95, "", "", "local")
         listas_ia.aplicar(c)
-        m = em(c, "banco-x.com.br")
-    assert "compras" not in m and "trava: categoria de trabalho (financas)" in m.get("para_revisar", ""), m
+        m, w = em(c, "banco-x.com.br"), wl(c, "banco-x.com.br")
+    assert not m and w, (m, w)
     # 3) bloqueio automático com a IA online ligada: fonte local não bloqueia (fila da fase 4); online 0,9 bloqueia
     monkeypatch.setattr(cfg, "gemini_api_key", "k")
     with db.conn() as c:
@@ -384,8 +382,8 @@ def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
         listas_ia.salvar(c, i, "nenhuma", 0.5, "", "", "online:gemini")
         c.execute("UPDATE domains SET online_at = now() WHERE id = %s", (i,))
         listas_ia.aplicar(c)
-        m = em(c, "talvez-nada.com")
-    assert "IA online sem certeza" in m.get("para_revisar", ""), m
+        m, w = em(c, "talvez-nada.com"), wl(c, "talvez-nada.com")
+    assert not m and w, (m, w)
     # 5) DoH/DNS: só com dois modelos online de acordo (≥ 0,95); um só (ou 0,85) -> Decisões
     from psycopg.types.json import Jsonb
     with db.conn() as c:
@@ -401,9 +399,10 @@ def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
                   (Jsonb({"_meta": {"antes": {"lista": "doh_dns", "confianca": 0.85}}}), j3))
         listas_ia.aplicar(c)
         m, m2, m3 = em(c, "dns.google"), em(c, "impervadns.net"), em(c, "bibledns.com")
+        w2, w3 = wl(c, "impervadns.net"), wl(c, "bibledns.com")
     assert "doh_dns" in m and "para_revisar" not in m, m
-    assert "doh_dns" not in m2 and "dois modelos" in m2.get("para_revisar", ""), m2
-    assert "doh_dns" not in m3 and "para_revisar" in m3, m3
+    assert not m2 and w2, "DoH com um modelo só: não bloqueia (whitelist, só na lista)"
+    assert not m3 and w3, m3
     # 5b) uso misto (Mensageiros) popular e "comunicação" entra (só a trava do catálogo vale)
     with db.conn() as c:
         i = novo(c, "viber.com", "TRABALHO", "comunicacao", rank=900)
@@ -419,9 +418,8 @@ def test_fase1_travas_nos_caminhos_automaticos(env, monkeypatch):
         listas_ia.aplicar(c)
         m = em(c, "cookie-cmp.com")
     assert "publicidade" in m and "para_revisar" not in m, m
-    # travado aparece em Decisões (fase 5) mesmo sem a IA online ter avaliado
-    j = env.get("/listas/para_revisar/detalhes", headers=H, params={"fase5": True, "limit": 1000}).json()
-    assert {"banco-x.com.br", "microsoft.com", "talvez-nada.com"} <= {r["domain"] for r in j["items"]}
+    rev = {r["domain"] for r in env.get("/listas/para_revisar/detalhes", headers=H, params={"limit": 1000}).json()["items"]}
+    assert not {"banco-x.com.br", "microsoft.com", "talvez-nada.com", "impervadns.net"} & rev, "sem fase 5"
 
 
 def test_doh_pede_segunda_opiniao(env, monkeypatch):
@@ -458,7 +456,7 @@ def test_malicioso_da_ia_online_com_certeza_entra_em_ameacas(env):
         listas_ia.aplicar(c)
         em = {r["domain"]: r["category"] for r in c.execute(
             "SELECT domain, category FROM category_lists WHERE domain IN ('fdacebook-teste.info', 'talvez-golpe.info')")}
-    assert em == {"fdacebook-teste.info": "ameaca", "talvez-golpe.info": "para_revisar"}, em
+    assert em == {"fdacebook-teste.info": "ameaca", "talvez-golpe.info": "ameaca"}, "sem fase 5: a última resposta vale"
 
 
 def test_candidato_a_whitelist_pede_segunda_opiniao(env, monkeypatch):
@@ -505,12 +503,12 @@ def test_revisao_da_infraestrutura(env):
         for r in c.execute("SELECT domain, category FROM category_lists WHERE domain LIKE '%%-infra.%%'"):
             em.setdefault(r["domain"], set()).add(r["category"])
     assert em.get("888win-infra.win") == {"apostas"}, em
-    assert em.get("telemetria-infra.net") == {"infra_bloqueio", "para_revisar"}, "modelo pequeno só: fica e vai p/ Decisões"
+    assert em.get("telemetria-infra.net") == {"infra_bloqueio"}, "modelo pequeno só: fica na Infraestrutura"
     assert "trafficmanager-infra.net" not in em, "dois modelos: sai"
     assert "omnichat-infra.net" not in em, "resposta do modelo maior: sai"
-    assert em.get("suspeito-infra.net") == {"infra_bloqueio", "para_revisar"}, "suspeito: não libera"
-    assert em.get("duvida-infra.net") == {"infra_bloqueio", "para_revisar"}, "sem certeza: Decisões, não fica sem destino"
-    assert em.get("pessoa-infra.net") == {"infra_bloqueio", "para_revisar"}, "posto por pessoa: fica, e a pessoa revê o parecer"
+    assert em.get("suspeito-infra.net") == {"infra_bloqueio"}, "suspeito: não libera"
+    assert em.get("duvida-infra.net") == {"infra_bloqueio"}, "sem certeza: fica onde está (bloqueado)"
+    assert em.get("pessoa-infra.net") == {"infra_bloqueio"}, "posto por pessoa: vale a pessoa"
 
 
 def test_nenhuma_da_ia_local_na_infraestrutura_vai_p_validacao(env, monkeypatch):
@@ -614,7 +612,7 @@ def test_decidido_com_llm_pending_nao_fica_preso_e_nao_vai_p_decisoes(env):
             online.gravar(c, {"id": ids[n], "name": n, "classification": "DESCONHECIDO"},
                           {"lista": "nenhuma", "confianca": 0.4, "classificacao": "DESCONHECIDO", "reconhecido": False}, {"model": "g"}, [])
         rev = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'para_revisar' AND domain LIKE 'preso-%%'")}
-    assert rev == {"preso-infra.cc"}, "já em Adulto: não vai p/ Decisões; Infraestrutura segue em revisão"
+    assert not rev, "sem fase 5: ninguém vai p/ Para revisar (Adulto e Infraestrutura, postos pela migração, ficam)"
 
 
 def test_cascata_por_confianca(env, monkeypatch):
@@ -833,13 +831,13 @@ def test_decisao_da_ia_local_que_nao_muda_nada_aparece_e_o_log_diz_a_verdade(env
     assert "confirmou" in ev[("ja-wl.com", "aprovado")] and wl["ja-wl.com"] == ("produtividade", "IA online"), ev
     assert wl["prov-wl.com"] == ("produtividade", "IA local (fase 1)") and ("prov-wl.com", "aprovado") in ev, wl
     assert "confirmou" in ev[("ja-bl.com", "lista_add")] and ap["local"][ids["ja-bl.com"]] == ("decide",)
-    assert ap["local"][ids["humano-lib.com"]] == ("humano_revisar", "liberado"), ap["local"]
+    assert ap["local"][ids["humano-lib.com"]] == ("humano",), ap["local"]
     assert listas_ia._proximo(("humano",), True) == " · decisão humana mantida (liberado)"
 
 
-def test_ia_que_contraria_decisao_humana_vai_p_decisao_humana(env, monkeypatch):
-    """Pedido do usuário 27/09: a IA não muda sozinha o que uma pessoa decidiu, mas com confiança alta e recomendação
-    diferente o domínio vai p/ a Decisão Humana com o parecer; aprovar o bloqueio vira a decisão global p/ "bloqueado"."""
+def test_decisao_humana_vale_sem_fase5(env, monkeypatch):
+    """Sem fase 5 (27/09): a IA não desfaz o que uma pessoa decidiu ("manter liberado" -> whitelist como decisão humana;
+    lista posta por pessoa -> fica). Pôr numa lista à mão vira a decisão global p/ "bloqueado"."""
     from dnsanalyzer import config, db, listas_ia
     monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
     with db.conn() as c:
@@ -858,19 +856,20 @@ def test_ia_que_contraria_decisao_humana_vai_p_decisao_humana(env, monkeypatch):
         listas_ia.salvar(c, ids["lib-online.com"], "jogos", 0.95, "jogo", "", "online:gemini", 4)
         c.execute("UPDATE domains SET online_resp = '{\"classificacao\": \"NAO_TRABALHO\"}' WHERE id = %s", (ids["lib-online.com"],))
         ap = listas_ia.aplicar(c)
-        rev = {r["domain"]: r["added_by"] for r in c.execute("SELECT domain, added_by FROM category_lists WHERE category = 'para_revisar'")}
+        rev = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'para_revisar'")}
         bl = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE category <> 'para_revisar'")}
-    assert rev["lib-pessoa.com"].startswith("IA recomenda (publicidade)") and ("publicidade", "lib-pessoa.com") not in bl, rev
-    assert rev["bl-pessoa.com"].startswith("IA recomenda (wl:produtividade) · contraria decisão humana (jogos)") \
-        and ("jogos", "bl-pessoa.com") in bl, rev
-    assert "lib-incerto.com" not in rev and ap["local"][ids["lib-incerto.com"]] == ("humano",), "sem confiança: nada muda"
-    assert rev["lib-online.com"].startswith("IA recomenda (jogos)") and ("jogos", "lib-online.com") not in bl, rev
-    assert "Decisão Humana" in listas_ia._proximo(ap["local"][ids["lib-pessoa.com"]], True)
-    r = env.post("/listas-aprovar", json={"domains": ["lib-pessoa.com"], "de": "para_revisar", "by": "ti@empresa"}, headers=H)
-    assert r.status_code == 200 and r.json()["movidos"] == {"publicidade": ["lib-pessoa.com"]}, r.text
+        wl = {r["domain"]: r["added_by"] for r in c.execute("SELECT domain, added_by FROM whitelist_domains")}
+    assert not set(ids) & rev, rev
+    for n in ("lib-pessoa.com", "lib-incerto.com", "lib-online.com"):
+        assert ap["local"][ids[n]] == ("humano",) and wl.get(n) == "decisão humana (liberado)" and not any(d == n for _, d in bl), n
+    assert ("jogos", "bl-pessoa.com") in bl and "bl-pessoa.com" not in wl, "lista posta por pessoa: fica"
+    assert listas_ia._proximo(("humano",), True) == " · decisão humana mantida (liberado)"
+    r = env.post("/listas/publicidade", json={"domain": "lib-pessoa.com", "by": "ti@empresa"}, headers=H)
+    assert r.status_code == 200, r.text
     with db.conn() as c:
         g = c.execute("SELECT status, reviewed_by FROM global_reviews WHERE domain_id = %s", (ids["lib-pessoa.com"],)).fetchone()
-    assert g["status"] == "blocked" and g["reviewed_by"] == "ti@empresa", g
+        w = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'lib-pessoa.com'").fetchone()
+    assert g["status"] == "blocked" and g["reviewed_by"] == "ti@empresa" and not w, g
 
 
 def test_ia_online_sem_resposta_valida_nao_prende_a_fila(env, monkeypatch):
@@ -904,10 +903,10 @@ def test_ia_online_sem_resposta_valida_nao_prende_a_fila(env, monkeypatch):
         online.fase(["adulto"])
     with db.conn() as c:
         r = c.execute("SELECT online_falhas, online_at, lista_duvida, online_resp FROM domains WHERE id = %s", (i,)).fetchone()
-        rev = c.execute("SELECT added_by FROM category_lists WHERE category = 'para_revisar' AND domain = 'filtrado-adulto.com'").fetchone()
-        ev = c.execute("SELECT detail FROM ai_events WHERE kind = 'fase5' AND name = 'filtrado-adulto.com'").fetchone()
+        em = {r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain = 'filtrado-adulto.com'")}
+        f = c.execute("SELECT lista_fonte FROM domains WHERE id = %s", (i,)).fetchone()["lista_fonte"]
     assert r["online_at"] and not r["lista_duvida"] and r["online_falhas"] == 0 and "erro" in r["online_resp"], r
-    assert rev and "sem resposta válida" in rev["added_by"] and ev and "3 tentativas" in ev["detail"], (rev, ev)
+    assert em == {"adulto"} and f == "online:sem_resposta", "sem fase 5: na 3ª rodada vale a sugestão da IA local"
     with db.conn() as c:
         c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (i,))
     assert online.fase(["adulto"]) == "idle", "saiu da fila da fase 4"
@@ -950,9 +949,9 @@ def test_segunda_chave_gemini_tem_cota_propria(monkeypatch):
     assert online.cota("gemini-3.5-flash-lite", 1).modelo == "gemini-3.5-flash-lite (chave 2)"
 
 
-def test_liberar_site_suspeito_vai_p_decisao_humana(env, monkeypatch):
-    """Whitelist não aceita SUSPEITO/MALICIOSO (sairia sozinho e o site ficava em "Aprovados", sem fila): a IA local
-    não decide sozinha (trava) e a resposta certa da IA online vai p/ a Decisão Humana."""
+def test_liberar_site_suspeito(env, monkeypatch):
+    """Liberar um SUSPEITO: a IA local não decide sozinha (trava -> IA online); a resposta da IA online vale (sem fase 5):
+    whitelist só na lista (SUSPEITO não sai da whitelist, só não vale no DNS)."""
     from dnsanalyzer import config, db, listas_ia
     monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
     with db.conn() as c:
@@ -965,9 +964,9 @@ def test_liberar_site_suspeito_vai_p_decisao_humana(env, monkeypatch):
         ap = listas_ia.aplicar(c)
         wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain LIKE 'susp-%%'")}
         rev = {r["domain"]: r["added_by"] for r in c.execute("SELECT domain, added_by FROM category_lists WHERE category = 'para_revisar'")}
-    assert not wl, wl
+    assert wl == {"susp-online.com"}, "sem fase 5: a IA online liberou -> whitelist (só na lista)"
     assert ap["local"][ids["susp-local.com"]][0] == "online" and "SUSPEITO" in ap["local"][ids["susp-local.com"]][-1], ap["local"]
-    assert "susp-online.com" in rev and "SUSPEITO" in rev["susp-online.com"], rev
+    assert "susp-online.com" not in rev, rev
 
 
 def test_pai_de_algo_bloqueado_fica_na_whitelist_sem_publicar(env):
@@ -1010,5 +1009,6 @@ def test_nada_fica_solto_sem_destino(env):
         rev = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'para_revisar'")}
         depois = {x["domain"] for x in listas.sem_lista(c, limit=5000)["items"]}
     assert wl["solto-trab.com.br"] == ("erp_gestao", False) and wl["solto-desc.com"] == ("outros_liberados", False), wl
-    assert {"solto-susp.com", "solto-ninguem.com"} <= rev and "solto-susp.com" not in wl, rev
+    assert not {"solto-susp.com", "solto-ninguem.com"} & rev, "sem fase 5"
+    assert wl["solto-susp.com"] == ("outros_liberados", False) and wl["solto-ninguem.com"] == ("outros_liberados", False), wl
     assert not set(ids) & depois, depois

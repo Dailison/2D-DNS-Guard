@@ -135,7 +135,7 @@ def save(c, drow: dict, dossier: dict, rule: RuleResult, fin: Final, pending: bo
            corp_action=COALESCE(%s, corp_action), corp_reason=CASE WHEN %s::text IS NULL THEN corp_reason ELSE %s END,
            corp_by=CASE WHEN %s::text IS NULL THEN corp_by ELSE %s END,
            reasons=%s, evidence=%s, recommended_action=%s, classified_by=%s, model=%s, analyzed_at=now(),
-           needs_analysis=false, llm_pending=%s, evidence_hash=%s, ti_hits=%s, ti_signature=%s,
+           needs_analysis=false, llm_pending=%s, aguarda_recorrencia=false, evidence_hash=%s, ti_hits=%s, ti_signature=%s,
            ti_cleared_at=CASE WHEN %s <> '' THEN NULL WHEN ti_signature <> '' THEN now() ELSE ti_cleared_at END,
            popularity_rank=%s, registered_at=COALESCE(%s::date, registered_at), claimed_at=NULL,
            last_error=NULL, llm_attempts=CASE WHEN %s THEN llm_attempts ELSE 0 END
@@ -194,13 +194,22 @@ def phase_a(limit: int = 2000) -> int:
             elif drow["classified_by"] == "llm" and not rule.final and rule.classification != "SUSPEITO" \
                     and cfg.llm_enabled and not skip_llm:
                 # evidências mudaram, mas sem risco novo: mantém a classificação da IA e reenfileira
-                c.execute("UPDATE domains SET needs_analysis=false, llm_pending=true, ti_hits=%s, "
-                          "ti_signature=%s WHERE id=%s", (Jsonb(hits), ti.signature(hits), drow["id"]))
+                # (pouco acesso: fica na fila com a prioridade suspensa até o site recorrer)
+                raro = _pouco_acesso(cfg, drow, dossier, rule)
+                c.execute("UPDATE domains SET needs_analysis=false, llm_pending=true, aguarda_recorrencia=%s, ti_hits=%s, "
+                          "ti_signature=%s WHERE id=%s", (raro, Jsonb(hits), ti.signature(hits), drow["id"]))
+                if raro:
+                    tally["aguarda recorrência"] += 1
             else:
                 pending = bool(cfg.llm_enabled and not skip_llm)
                 save(c, drow, dossier, rule, rules_only(rule, pending), pending, None)
-                tally["→ fila da IA" if pending and rule.classification == "DESCONHECIDO"
-                      else CLASS_LABEL.get(rule.classification, rule.classification)] += 1
+                if pending and _pouco_acesso(cfg, drow, dossier, rule):
+                    # quase ninguém acessou: fica só com as regras até recorrer (a IA vai para o que importa)
+                    c.execute("UPDATE domains SET aguarda_recorrencia=true WHERE id=%s", (drow["id"],))
+                    tally["aguarda recorrência"] += 1
+                else:
+                    tally["→ fila da IA" if pending and rule.classification == "DESCONHECIDO"
+                          else CLASS_LABEL.get(rule.classification, rule.classification)] += 1
                 if rule.classification in ("SUSPEITO", "MALICIOSO"):
                     motivo = next((r["text"] for r in rule.reasons if r.get("evidence_id") != "E0"), "")
                     alerts.append((drow["name"], drow["id"], rule.classification, rule.risk, rule.work, motivo))
@@ -213,10 +222,36 @@ def phase_a(limit: int = 2000) -> int:
     return n
 
 
+def _pouco_acesso(cfg, drow: dict, dossier: dict, rule: RuleResult) -> bool:
+    """Triagem por acesso: domínio consultado menos de LLM_MIN_QUERIES vezes por menos de LLM_MIN_CLIENTS
+    computadores fica só com as regras, na fila da IA com a prioridade suspensa (aguarda_recorrencia), até
+    recorrer — a IA local trabalha no que as pessoas realmente acessam. Nunca para risco (feed de ameaça,
+    SUSPEITO/MALICIOSO) nem quando uma pessoa pediu a análise (reanalise_pedida)."""
+    if cfg.llm_min_queries <= 0 or drow.get("reanalise_pedida") or drow.get("kind") != "public":
+        return False
+    if rule.classification in ("SUSPEITO", "MALICIOSO") or dossier.get("ti_hits"):
+        return False
+    lg = dossier.get("logs") or {}
+    return (lg.get("total_queries") or 0) < cfg.llm_min_queries and (lg.get("clients") or 0) < cfg.llm_min_clients
+
+
+def reenfileirar_recorrentes(c) -> int:
+    """Domínios com a prioridade suspensa que voltaram a ser acessados (consultas ou computadores chegaram ao
+    mínimo) voltam à fila normal da IA. Retorna quantos."""
+    cfg = settings()
+    if cfg.llm_min_queries <= 0:
+        return 0
+    return c.execute(
+        "UPDATE domains d SET aguarda_recorrencia = false WHERE aguarda_recorrencia AND NOT locked "
+        "AND (total_queries >= %s OR (SELECT coalesce(sum(clients_count), 0) FROM tenant_domains td "
+        "                             WHERE td.domain_id = d.id) >= %s)",
+        (cfg.llm_min_queries, cfg.llm_min_clients)).rowcount
+
+
 def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
-             SELECT id FROM domains WHERE llm_pending AND NOT locked
+             SELECT id FROM domains WHERE llm_pending AND NOT locked AND NOT aguarda_recorrencia
                AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
              ORDER BY (classification = 'SUSPEITO') DESC, total_queries DESC
@@ -624,6 +659,10 @@ def run_forever(stop=lambda: False) -> None:
                     whitelist.aplicar(c)
                 with db.conn() as c:   # nada fica solto: quem terminou sem lista vai p/ a whitelist ou a Decisão Humana
                     listas.sem_destino(c)
+                with db.conn() as c:   # pouco acesso que recorreu: volta à fila normal da IA
+                    m = reenfileirar_recorrentes(c)
+                if m:
+                    log.info("%d domínio(s) de pouco acesso recorreram: de volta à fila da IA", m)
             if time.monotonic() - last_stale > 3600:
                 with db.conn() as c:   # domínios que não existem (NXDOMAIN) saem da IA e de Decisões
                     listas.marcar_inexistentes(c)
@@ -653,6 +692,7 @@ def run_forever(stop=lambda: False) -> None:
 def status() -> dict:
     with db.conn() as c:
         r = c.execute(
-            "SELECT count(*) FILTER (WHERE needs_analysis) AS fase_a, count(*) FILTER (WHERE llm_pending AND " + DECIDIDO_FORA + ") AS fila_ia, "
+            "SELECT count(*) FILTER (WHERE needs_analysis) AS fase_a, count(*) FILTER (WHERE llm_pending AND NOT aguarda_recorrencia AND " + DECIDIDO_FORA + ") AS fila_ia, "
+            "count(*) FILTER (WHERE aguarda_recorrencia) AS aguarda, "
             "count(*) FILTER (WHERE classified_by='llm') AS por_ia, count(*) AS total FROM domains").fetchone()
     return dict(r) | {"at": datetime.now(timezone.utc).isoformat()}

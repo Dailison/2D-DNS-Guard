@@ -177,11 +177,7 @@ def bloquear_auto(c, limite: int = 500) -> list[dict]:
         por = f"{AUTO_BY} ({r['category']})"
         motivo = listas_ia.guardado(r, r["category"])
         contexto(c, por, motivo or "recomendação da IA: bloquear")
-        if motivo:   # não bloqueia sozinho: Decisões (sem global_reviews: segue candidato, sem repetir evento)
-            if c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
-                         "ON CONFLICT DO NOTHING", (r["name"], f"{por} · {motivo}")).rowcount:
-                eventos.lista("fase5", r["name"], r["category"], f"bloqueio automático barrado · {motivo}", r["id"], "auto",
-                              r["classification"])
+        if motivo:   # trava: não bloqueia sozinho (sem fase 5: o site segue pelas fases da IA, que decidem)
             continue
         if online_ok and not ((r["lista_fonte"] or "").startswith("online") and r["lista_ia"] == r["category"]
                               and (r["lista_conf"] or 0) >= settings().online_confianca_min):
@@ -361,46 +357,49 @@ SEM_DESTINO_BY = "decisão humana (liberado)"
 
 
 def sem_destino(c) -> dict:
-    """Nada fica solto (pedido do usuário 27/09: "Aprovados" deixou de existir). Quem terminou a análise sem nenhuma
-    lista vai p/ uma: liberado por pessoa (global, empresa, ajuste p/ trabalho ou travado) -> whitelist (a categoria
-    que a IA sugeriu, ou Outros liberados/de trabalho), só na lista (não vai ao DNS: nada muda no bloqueio); suspeito
-    ou em feed de ameaça (a whitelist não aceita) e quem não tem decisão humana -> Decisão Humana."""
+    """Nada fica solto (pedido do usuário 27/09) e sem fase 5. Quem terminou a análise sem nenhuma lista: malicioso ou
+    em feed de ameaça -> Ameaças; liberado por pessoa -> whitelist (a categoria que a IA sugeriu, ou Outros
+    liberados/de trabalho), só na lista (não vai ao DNS); com resposta de lista da IA -> `listas_ia.aplicar` decide de
+    novo (a resposta é a última); sem resposta nenhuma -> whitelist pela classificação."""
     from . import eventos, whitelist
     nomes = [x["domain"] for x in sem_lista(c, limit=5000)["items"]]
-    out = {"whitelist": [], "decisao": []}
+    out = {"whitelist": [], "ameaca": [], "reaplicar": []}
     if not nomes:
         return out
     rows = c.execute(
-        "SELECT d.id, d.name, d.classification, d.category, d.lista_wl, d.lista_ia, d.ti_hits, "
+        "SELECT d.id, d.name, d.classification, d.category, d.lista_wl, d.lista_ia, d.lista_at, d.ti_hits, "
         " (d.locked OR EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed') "
         "  OR EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id "
         "             AND (td.review_status = 'allowed' OR td.override_classification = 'TRABALHO'))) AS humano "
         "FROM domains d WHERE d.name = ANY(%s)", (nomes,)).fetchall()
     for r in rows:
-        risco = r["classification"] in ("SUSPEITO", "MALICIOSO") or bool(whitelist._sinais(r["ti_hits"])[0])
-        if r["humano"] and not risco:
+        if r["classification"] == "MALICIOSO" or whitelist._sinais(r["ti_hits"])[0]:
+            contexto(c, f"{AUTO_BY} (ameaca)", "terminou a análise sem lista: malicioso/feed de ameaça")
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('ameaca', %s, %s) ON CONFLICT DO NOTHING",
+                      (r["name"], f"{AUTO_BY} (ameaca)"))
+            out["ameaca"].append(r)
+        elif not r["humano"] and r["lista_ia"] and r["lista_at"]:
+            out["reaplicar"].append(r["id"])
+        else:
             wl = (r["lista_wl"] if r["lista_wl"] in whitelist.CATEGORIAS and r["lista_wl"] != whitelist.SEM_RESPOSTA else
                   whitelist._categoria(r["category"], r["classification"]) if r["classification"] == "TRABALHO" else "outros_liberados")
-            contexto(c, SEM_DESTINO_BY, f"terminou a análise sem lista: whitelist {whitelist.CATEGORIAS[wl]}")
+            por = SEM_DESTINO_BY if r["humano"] else "IA (sem lista)"
+            contexto(c, por, f"terminou a análise sem lista: whitelist {whitelist.CATEGORIAS[wl]}")
             c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES (%s, %s, %s, false) "
-                      "ON CONFLICT DO NOTHING", (wl, r["name"], SEM_DESTINO_BY))
-            out["whitelist"].append((r["name"], f"wl:{wl}", r))
-        else:
-            sug = r["lista_ia"] or (f"wl:{r['lista_wl']}" if r["lista_wl"] else "nenhuma")
-            motivo = ("liberado por pessoa, mas " + ("suspeito" if r["classification"] in ("SUSPEITO", "MALICIOSO")
-                                                     else "em feed de ameaça") if r["humano"] else "terminou a análise sem lista")
-            contexto(c, "IA com dúvida", motivo)
-            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) ON CONFLICT DO NOTHING",
-                      (r["name"], f"IA com dúvida ({sug}) · {motivo}"))
-            out["decisao"].append((r["name"], sug, r, motivo))
+                      "ON CONFLICT DO NOTHING", (wl, r["name"], por))
+            out["whitelist"].append((r, wl, por))
+    if out["reaplicar"]:
+        c.execute("UPDATE domains SET lista_aplicada_at = NULL WHERE id = ANY(%s)", (out["reaplicar"],))
     if len(rows) <= 50:
-        for nome, wl, r in out["whitelist"]:
-            eventos.lista("aprovado", nome, wl, f"{SEM_DESTINO_BY}: sem lista depois da análise", r["id"], "f5:ti", r["classification"])
-        for nome, sug, r, motivo in out["decisao"]:
-            eventos.lista("fase5", nome, sug, motivo, r["id"], "regras", r["classification"])
+        for r, wl, por in out["whitelist"]:
+            eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{por}: sem lista depois da análise", r["id"],
+                          "f5:ti" if r["humano"] else "regras", r["classification"])
+        for r in out["ameaca"]:
+            eventos.lista("lista_add", r["name"], "ameaca", "sem lista depois da análise: malicioso/feed de ameaça", r["id"], "regras",
+                          r["classification"])
     else:
-        eventos.registrar("decisao", None, detail=f"wl|{len(out['whitelist'])} sem lista foram p/ a whitelist e "
-                                                  f"{len(out['decisao'])} p/ a Decisão Humana", origem="regras")
+        eventos.registrar("decisao", None, detail=f"wl|{len(out['whitelist'])} sem lista foram p/ a whitelist, {len(out['ameaca'])} "
+                                                  f"p/ Ameaças e {len(out['reaplicar'])} voltaram p/ a IA decidir", origem="regras")
     return out
 
 

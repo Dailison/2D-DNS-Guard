@@ -1,8 +1,0 @@
-{% extends "admin/analise/_base.html" %}
-{% import "admin/analise/_macros.html" as m with context %}
-{% block an %}
-<div class="card">
-  <h2>Fase 5 · Decisão Humana <span class="mut" style="font-size:.85rem;font-weight:400">· {{ det.total }} aguardando</span></h2>
-  {% with modo = 'decisoes' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
-</div>
-{% endblock %}

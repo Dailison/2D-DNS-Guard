@@ -75,7 +75,6 @@
 </div>
 <nav class="an-tabs">
   <a href="{{ url_for('analise.painel', t=tid) }}" class="{{ 'on' if aba=='painel' }}">Painel</a>
-  <a href="{{ url_for('analise.decisoes', t=tid) }}" class="{{ 'on' if aba=='decisoes' }}">Decisão Humana{% if fila_total %} <span class="sev high">{{ fila_total }}</span>{% endif %}</a>
   <a href="{{ url_for('analise.dominios', t=tid) }}" class="{{ 'on' if aba=='dominios' }}">Domínios</a>
   <a href="{{ url_for('analise.computadores', t=tid) }}" class="{{ 'on' if aba=='computadores' }}">Computadores</a>
   <a href="{{ url_for('analise.alertas', t=tid) }}" class="{{ 'on' if aba=='alertas' }}">Alertas</a>

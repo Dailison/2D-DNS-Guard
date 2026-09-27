@@ -156,7 +156,8 @@ def aplicar(c) -> dict:
     """Um ciclo: tira o que caiu numa trava e põe o que passou a merecer whitelist.
     Publicar no DNS vale p/ o domínio E TODOS os subdomínios: com qualquer sinal em feed (mesmo de baixa confiança, num
     subdomínio) a entrada fica só na lista (publicar = false) — senão liberaria dns.google.com (DoH) ou sites.google.com
-    (golpe). Sai da whitelist só com feed de ameaça (alta/média) ou SUSPEITO/MALICIOSO; protegido do catálogo nunca sai."""
+    (golpe). Sai da whitelist só com feed de ameaça (alta/média) ou MALICIOSO (SUSPEITO só deixa de valer no DNS); protegido
+    do catálogo nunca sai."""
     cfg = settings()
     out = {"entrou": [], "saiu": []}
     em, pais = _bloqueio(c)
@@ -165,13 +166,16 @@ def aplicar(c) -> dict:
                        "LEFT JOIN domains d ON d.name = w.domain").fetchall():
         nome, auto = r["domain"], (r["added_by"] or "").startswith(("IA", CATALOGO_BY))
         amea, sinal = _sinais(r["ti_hits"])
+        # (27/09, sem fase 5) SUSPEITO não tira da whitelist: só deixa de valer no DNS — a entrada da IA já não vai ao
+        # DNS, e a decisão de liberar (IA ou pessoa) fica registrada; MALICIOSO ou feed de ameaça tiram
         risco = f"feed de ameaça ({', '.join(amea)})" if amea else (
-            f"classificação {r['classification']}" if r["classification"] in ("SUSPEITO", "MALICIOSO") else None)
+            "classificação MALICIOSO" if r["classification"] == "MALICIOSO" else None)
+        suspeito = "classificação SUSPEITO" if r["classification"] == "SUSPEITO" else None
         motivo = so_lista = None
         if risco and not _protegido(nome):
             motivo = risco
-        elif r["publicar"] and (risco or (auto and sinal)):
-            so_lista = risco or f"sinal de baixa confiança em subdomínio ({', '.join(sinal)})"
+        elif r["publicar"] and (risco or suspeito or (auto and sinal)):
+            so_lista = risco or suspeito or f"sinal de baixa confiança em subdomínio ({', '.join(sinal)})"
         elif auto and listas._em_lista(nome, em):
             motivo = "está numa lista de bloqueio"
         elif auto and nome in pais and r["publicar"]:

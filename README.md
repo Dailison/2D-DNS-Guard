@@ -4,12 +4,12 @@
 do [2D Hub](https://portal.2dtecnologia.com) (login único + launcher).
 
 Filtra ameaças e sites improdutivos **por empresa**. Todo domínio que aparece nos logs passa
-por um fluxo de 5 fases. As IAs põem cada site na lista certa (de bloqueio ou de liberação),
-e só o que nenhuma delas resolve com certeza chega à TI na fase 5, *Decisão Humana*.
+por um fluxo de 4 fases e as IAs põem **todo** site numa lista (de bloqueio ou de liberação), sem revisão humana
+(desde 27/09: a fase 5, *Decisão Humana*, saiu). A TI corrige os erros direto nas listas, e a IA não desfaz a correção.
 
 | Parte | Onde roda | Pasta |
 |---|---|---|
-| **Console web**: Análise (IA), Decisão Humana, Empresas, Domínios bloqueados, Domínios liberados, IPs liberados, Logs, Gráficos, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
+| **Console web**: Análise (IA), Empresas, Domínios bloqueados, Domínios liberados, IPs liberados, Logs, Gráficos, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
 | **Analisador**: coleta dos logs, regras, Threat Intel, IA local (Ollama/Qwen3), IA online (Gemini), listas, alertas, API | VM `10.100.10.4` (systemd + PostgreSQL) | [`analyzer/`](analyzer/) |
 | **Resolvedor/filtro**: Technitium + app Advanced Blocking | VM `10.100.10.15` | (fora do repo) |
 
@@ -27,18 +27,19 @@ O analisador apenas publica as listas em texto, e o Technitium as baixa.
 
 ## Como funciona
 
-**Fluxo de um domínio novo** (o mesmo vale para os que estão em *Outros* e *Para revisar*):
+**Fluxo de um domínio novo** (o mesmo vale para os que estão em *Outros*):
 
 | Fase | O que faz |
 |---|---|
-| 1. IA local | catálogo, Threat Intel e regras, depois a IA local (Qwen3 8B) classifica e sugere a lista |
+| 1. IA local | catálogo, Threat Intel e regras, depois a IA local (gemma4:26b) classifica e escolhe a lista; com confiança alta decide sozinha |
 | 2. WHOIS + IA local | RDAP/registro.br e o titular (CNPJ) entram no dossiê |
 | 3. Busca web + IA local | SearXNG com o nome do domínio, para o que a IA ainda não reconhece |
-| 4. IA online | Gemini/Gemma recebe **todo** o contexto das fases 1-3 e valida ou corrige a sugestão local |
-| 5. Decisão Humana | só o que a IA online não resolveu com certeza (a TI decide) |
+| 4. IA online | Gemini/Gemma recebe **todo** o contexto das fases 1-3 e decide: a resposta dela é a **última** |
 
-- Resposta da IA online com confiança **≥ 0,8** e coerente vai direto para a lista.
-  `MALICIOSO` com certeza vai para **Ameaças**. "Nenhuma lista" com certeza sai da Decisão Humana.
+- A resposta da IA online vale com ou sem certeza (lista de bloqueio ou whitelist). Sem resposta válida, vale a
+  sugestão da IA local. `MALICIOSO` vai para **Ameaças**.
+- Trava (protegido do catálogo, site de trabalho, DoH sem dois modelos, incoerência): a IA não bloqueia e o site vai
+  para a whitelist, só na lista (nada muda no DNS). Decisão de pessoa ("manter liberado" ou lista posta à mão) vale sempre.
 - **DoH/DNS** exige dois modelos com confiança ≥ 0,95. Isso nasceu de um incidente: CDNs
   foram parar em DoH e bloquearam o seu.ze.delivery.
 - **Travas**: infraestrutura protegida do catálogo e decisões humanas ("manter liberado")
@@ -53,7 +54,7 @@ O analisador apenas publica as listas em texto, e o Technitium as baixa.
   - Conteúdo: Adulto⚡, Apostas⚡, Jogos, Redes sociais, Streaming, Mensageiros, Cripto/Trading.
   - Web: Publicidade, Notícias, Pirataria.
   - Trabalho: Compras, IA/Chatbots, Nuvem/Acesso remoto.
-  - Sistema: Infraestrutura, Outros, Para revisar.
+  - Sistema: Infraestrutura, Outros.
 
   ⚡ só marca risco visualmente. Cada empresa escolhe quais categorias bloquear.
 - **Whitelists** por categoria: essenciais, produtividade, comunicação, finanças, governo,

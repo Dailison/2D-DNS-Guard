@@ -441,8 +441,8 @@ def listas_categoria():
     if not current_app.config.get("ANALYZER_ENABLED"):
         return render_template("admin/nao_configurado.html", oque="Analisador (ANALYZER_URL/ANALYZER_TOKEN)")
     cat = (request.args.get("cat") or "apostas").strip()
-    if cat == "para_revisar":   # Para revisar = fila da fase 5, na tela Decisões
-        return redirect(url_for("analise.decisoes", **{k: v for k, v in request.args.items() if k != "cat"}))
+    if cat == "para_revisar":   # Para revisar era a fila da fase 5 (removida em 27/09: a IA decide tudo na fase 4)
+        return redirect(url_for("admin.listas_categoria"))
     q = (request.args.get("q") or "").strip().lower()
     resumo, det = {"categorias": [], "auto": [], "auto_24h": 0}, _DET_VAZIO
     fd = _det_filtros("recentes")

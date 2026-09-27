@@ -36,6 +36,7 @@ from .listas_ia import LISTAS_IA, NENHUMA, WL, _contexto, e_wl, salvar
 log = logging.getLogger(__name__)
 CLASSES = ["TRABALHO", "NAO_TRABALHO", "SUSPEITO", "MALICIOSO", "DESCONHECIDO"]
 FONTE = "online:gemini"
+FONTE_SEM_RESPOSTA = "online:sem_resposta"   # a IA online não respondeu: vale a sugestão da IA local (sem fase 5)
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 SYSTEM = """Você classifica sites para o filtro de DNS de EMPRESAS brasileiras (computadores de funcionários).
@@ -300,7 +301,7 @@ def _reservar(c) -> dict | None:
         "UPDATE domains SET online_claimed_at = now() WHERE id = (SELECT d.id FROM domains d WHERE " + _FILA +
         " ORDER BY " + _EM_INFRA.format(t="d") + " DESC, " + _EM_DECISOES + " DESC, d.lista_duvida DESC, d.total_queries DESC "
         "LIMIT 1 FOR UPDATE SKIP LOCKED) "
-        "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_conf, lista_motivo, "
+        "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_wl, lista_conf, lista_motivo, "
         "online_resp, " + _EM_INFRA.format(t="domains") + " AS em_infra").fetchone()
 
 
@@ -358,14 +359,15 @@ def _sem_resposta_valida(c, d: dict, invalidas: list[str]) -> str:
     if n < ONLINE_TENTATIVAS:
         log.info("IA online: %s sem resposta válida (%d de %d); tenta de novo em 10 min", d["name"], n, ONLINE_TENTATIVAS)
         return "done"
-    motivo = f"IA online sem resposta válida ({n} tentativas)"
+    motivo = f"IA online sem resposta válida ({n} tentativas): vale a sugestão da IA local"
     c.execute("UPDATE domains SET online_at = now(), online_claimed_at = NULL, online_falhas = 0, lista_duvida = false, "
               "reanalise_pedida = false, online_resp = %s WHERE id = %s", (Jsonb({"erro": motivo, "ultima": invalidas[-1][:300]}), d["id"]))
-    c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) ON CONFLICT DO NOTHING",
-              (d["name"], f"{listas_ia.DUVIDA_BY} ({d.get('lista_ia') or 'nenhuma'}) · {motivo}"))
-    from . import eventos
-    eventos.lista("fase5", d["name"], d.get("lista_ia"), motivo, d["id"], "f4:online", d.get("classification"))
-    log.info("IA online: %s -> Decisão Humana (%s)", d["name"], motivo)
+    # sem fase 5: a sugestão da IA local vira a resposta final (lista de bloqueio, whitelist ou, sem nenhuma, whitelist
+    # pela classificação) — `aplicar` decide como faria com a resposta da IA online
+    sug = d.get("lista_ia") or (f"wl:{d['lista_wl']}" if d.get("lista_wl") else NENHUMA)
+    salvar(c, d["id"], sug, float(d.get("lista_conf") or 0), (d.get("lista_motivo") or motivo)[:500], "", FONTE_SEM_RESPOSTA, 4)
+    listas_ia.aplicar(c, ids=[d["id"]])
+    log.info("IA online: %s sem resposta válida; vale a sugestão da IA local (%s)", d["name"], sug)
     return "done"
 
 
@@ -428,9 +430,6 @@ def fase(categorias: list[str]) -> str:
     return "done"
 
 
-_SISTEMA = ("para_revisar", "outros_bloqueios", "infra_bloqueio")   # listas "sem destino": a revisão continua
-
-
 def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str = FONTE) -> None:
     lista = obj.get("lista") if obj.get("lista") in LISTAS_IA or e_wl(obj.get("lista")) else NENHUMA
     try:
@@ -455,16 +454,7 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
                   "VALUES (%s, %s, %s, %s, %s, 'online', %s, %s)",
                   (d["id"], cls, conf, servico[:80], Jsonb(razoes), meta.get("model"),
                    ("fontes: " + ", ".join(meta.get("fontes") or []))[:500] or None))
-    elif d["classification"] == "DESCONHECIDO" and lista not in LISTAS_IA and not c.execute(
-            "SELECT 1 FROM category_lists WHERE domain = %s AND category <> ALL(%s)", (d["name"], list(_SISTEMA))).fetchone():
-        # (já numa lista de conteúdo/segurança: a IA não identificar não muda nada, não vai p/ Decisões)
-        from . import listas as _listas
-        _listas.contexto(c, "IA sem certeza", "nem a IA online identificou o site")
-        # nem a IA online identificou: fase 5 (Decisões). Com lista sugerida, `aplicar` decide.
-        if c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', %s, %s) "
-                     "ON CONFLICT DO NOTHING", (d["name"], "IA sem certeza (desconhecido)")).rowcount:
-            from . import eventos
-            eventos.lista("fase5", d["name"], None, "nem a IA online identificou o site", d["id"], "f4:online", cls)
+    # (sem fase 5: mesmo sem identificar o site, a resposta da IA online é a última — `aplicar` decide)
     log.info("IA online: %s -> %s / %s (%.2f)%s", d["name"], cls, lista, conf, " [busca]" if meta.get("busca") else "")
     _evento(d, cls, lista, conf, servico, meta)
 

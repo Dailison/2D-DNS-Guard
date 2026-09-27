@@ -111,6 +111,8 @@ def parse_rdap(j: dict) -> dict:
             t = (p.get("type") or "").lower()
             if t in ("cnpj", "cpf"):
                 doc_tipo, doc = t, p.get("identifier")
+            elif t == "eid":   # entidade estrangeira (sem CPF/CNPJ): ID do próprio registro.br (ex.: ram.com.br = Chrysler)
+                doc_tipo, doc = "estrangeiro", p.get("identifier")
         oculto = not nome or any(x in nome.lower() for x in _OCULTO)
         titular = {"nome": None if oculto else nome[:120], "tipo": doc_tipo, "doc": doc, "oculto": oculto,
                    "pais": v.get("pais")}
@@ -199,6 +201,8 @@ def evidencia(w: dict | None) -> tuple[str, dict] | None:
                           + (f", {rf['municipio']}/{rf['uf']}" if rf.get("municipio") else ""))
     elif t.get("tipo") == "cpf":
         partes.append("titular PESSOA FÍSICA (CPF) — site pessoal ou de profissional autônomo")
+    elif t.get("tipo") == "estrangeiro" and t.get("nome"):
+        partes.append(f"titular ENTIDADE ESTRANGEIRA '{t['nome']}' (sem CNPJ; ID {t.get('doc')} no registro.br)")
     elif t.get("nome"):
         partes.append(f"titular declarado '{t['nome']}'" + (f" ({t['pais']})" if t.get("pais") else "")
                       + " — informado pelo próprio dono, não verificado")

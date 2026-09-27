@@ -90,6 +90,28 @@ def test_registro_br_sem_documento_e_limite_nao_grava(monkeypatch):
     assert not gravou
 
 
+def test_titular_estrangeiro_no_registro_br_nao_e_limite(monkeypatch):
+    """Empresa estrangeira no .br não tem CPF/CNPJ: o registro.br dá um ID próprio (eid) — não é limite de consultas
+    (27/09: ram.com.br = Chrysler Group LLC travava os .br a cada tentativa)."""
+    import copy
+    estrangeiro = copy.deepcopy(RDAP_BR)
+    estrangeiro["entities"][0]["publicIds"] = [{"type": "eid", "identifier": "2634203"}]
+    monkeypatch.setattr(whois, "_get", lambda *a, **k: estrangeiro)
+    monkeypatch.setattr(whois, "_br_pausa_ate", 0.0)
+
+    class C:
+        def execute(self, sql, *a):
+            return self
+
+        def fetchone(self):
+            return None
+    w = whois.lookup(C(), "ram.com.br", fetch=True)
+    assert w["titular"]["tipo"] == "estrangeiro" and w["titular"]["doc"] == "2634203"
+    assert not whois.br_pausado()
+    txt, dados = whois.evidencia(w)
+    assert "ENTIDADE ESTRANGEIRA" in txt and not dados["confiavel"]
+
+
 def test_limite_do_registro_br_pausa_os_br(monkeypatch):
     """Limite do registro.br: .br em pausa (nem consulta, p/ não esticar o bloqueio); os outros TLDs seguem."""
     import copy

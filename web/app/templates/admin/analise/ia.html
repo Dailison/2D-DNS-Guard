@@ -193,8 +193,8 @@
     ia.textContent = d.llm && d.llm.ok ? '● no ar' : '● fora'; ia.style.color = d.llm && d.llm.ok ? '#16a34a' : '#b91c1c';
     document.getElementById('st-model').textContent = 'IA (' + ((d.llm && d.llm.model) || '?') + ')';
     document.getElementById('st-fila').textContent = d.queue ? d.queue.ia + (d.queue.lista || 0) : '–';   // a lista faz parte da fase 1
-    document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca + (d.queue.ia ? ' (aguarda)' : '') : '–';
-    document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois + (d.queue.ia ? ' (aguarda)' : '') : '–';
+    document.getElementById('st-busca').textContent = d.queue && d.queue.busca != null ? d.queue.busca : '–';
+    document.getElementById('st-whois').textContent = d.queue && d.queue.whois != null ? d.queue.whois : '–';
     document.getElementById('st-online').textContent = d.queue && d.queue.online != null ? (d.queue.online_on ? d.queue.online : d.queue.online + ' (sem chave)') : '–';
     document.getElementById('st-revisar').textContent = d.queue && d.queue.revisar != null ? d.queue.revisar : '–';
     document.getElementById('st-hora').textContent = d.last_hour ? d.last_hour.done : '–';

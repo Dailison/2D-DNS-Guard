@@ -91,21 +91,51 @@ def certificate(domain: str) -> dict | None:
 
 
 def homepage(domain: str) -> dict | None:
-    """Título/descrição da página inicial (texto do próprio site; não confiável).
-    Tenta o domínio e, se ele não tiver site (comum: raiz sem endereço), o www."""
+    """Título/descrição/trecho do texto da página inicial (texto do próprio site; não confiável).
+    Tenta o domínio e, se ele não tiver site (comum: raiz sem endereço), o www. Segue redirecionamento por
+    meta refresh/JavaScript ("Redirecting..." — 27/09: plataformas de tigrinho mandam p/ o site real por script)."""
     for host in (domain, "www." + domain):
         r = _homepage_host(host)
         if r:
+            for _ in range(2):
+                destino = r.pop("_redirect", None)
+                if not destino:
+                    break
+                u = urllib.parse.urlsplit(destino)
+                r2 = _homepage_host(u.hostname, (u.path or "/") + (f"?{u.query}" if u.query else "")) if u.hostname else None
+                if not r2:
+                    break
+                r2["via"] = domain
+                r2["sinais"] = sorted(set(r.get("sinais") or []) | set(r2.get("sinais") or [])) or None
+                r = r2
+            r.pop("_redirect", None)
             return r
     return None
 
 
-def _homepage_host(domain: str) -> dict | None:
+_REDIR = (re.compile(r'<meta[^>]+http-equiv=["\']?refresh["\']?[^>]*content=["\'][^"\']*url=([^"\'>\s]+)', re.I),
+          re.compile(r'(?:window\.|document\.|top\.)?location(?:\.href)?\s*=\s*["\'](https?://[^"\']+)["\']', re.I),
+          re.compile(r'location\.(?:replace|assign)\(\s*["\'](https?://[^"\']+)["\']', re.I))
+
+
+def _texto_visivel(html_txt: str, limite: int = 500) -> str | None:
+    t = re.sub(r"<(script|style|noscript|svg|template)[^>]*>.*?</\1>", " ", html_txt, flags=re.S | re.I)
+    t = re.sub(r"<!--.*?-->|<[^>]+>", " ", t, flags=re.S)
+    return _clean(re.sub(r"\s+", " ", html.unescape(t)).strip(), limite)
+
+
+# página que responde (HTTP 200) mas imita a tela de erro do navegador: camuflagem de quem não é o público-alvo
+_ERRO_FALSO = re.compile(r"DNS_PROBE_FINISHED_NXDOMAIN|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_(?:REFUSED|TIMED_OUT)|无法访问此网站|"
+                         r"This site can.t be reached|Não é possível acessar esse site", re.I)
+_PRENDE_VOLTAR = re.compile(r"history\.pushState\([^)]*\)[\s\S]{0,400}popstate|preventBack", re.I)
+
+
+def _homepage_host(domain: str, caminho: str = "/") -> dict | None:
     for verify in (True, False):
         try:
             with httpx.Client(timeout=httpx.Timeout(5, connect=4), follow_redirects=True, verify=verify, max_redirects=5,
                               headers={"User-Agent": UA, "Accept": "text/html"}) as cl:
-                with cl.stream("GET", f"https://{domain}/") as r:
+                with cl.stream("GET", f"https://{domain}{caminho}") as r:
                     if "html" not in r.headers.get("content-type", ""):
                         return {"final_host": r.url.host}
                     body = b""
@@ -132,9 +162,19 @@ def _homepage_host(domain: str) -> dict | None:
                 return m.group(1)
         return None
     t = re.search(r"<title[^>]*>(.{1,300}?)</title>", text, re.S | re.I)
-    return {"final_host": final, "tls_verified": verify, "title": _clean(t.group(1) if t else None, 120),
-            "description": _clean(meta("description", "og:description"), 160),
-            "site_name": _clean(meta("og:site_name", "application-name"), 60)}
+    out = {"final_host": final, "tls_verified": verify, "title": _clean(t.group(1) if t else None, 120),
+           "description": _clean(meta("description", "og:description"), 160),
+           "site_name": _clean(meta("og:site_name", "application-name"), 60), "texto": _texto_visivel(text),
+           "sinais": [s for s, rx in (("prende o botão Voltar do navegador (history.pushState em laço)", _PRENDE_VOLTAR),
+                                      ("imita a tela de erro do navegador, mas o site responde (camuflagem)", _ERRO_FALSO))
+                      if rx.search(text)] or None}
+    if len(text) < 20_000 or "redirect" in (out["title"] or "").lower():   # página de passagem: destino p/ seguir
+        for rx in _REDIR:
+            m = rx.search(text)
+            if m and m.group(1).startswith("http"):
+                out["_redirect"] = m.group(1)
+                break
+    return out
 
 
 class BuscaOcupada(Exception):

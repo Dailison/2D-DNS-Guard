@@ -100,11 +100,13 @@ def build_evidence(d: dict) -> list[Evidence]:
                           + " (mesmo dono)")
         add("cert", f"certificado TLS verificado ({cert.get('issuer') or 'CA'}): " + "; ".join(partes), False)
     site = web.get("site") or {}
-    if site.get("title") or site.get("description") or site.get("site_name"):
+    if site.get("title") or site.get("description") or site.get("site_name") or site.get("texto") or site.get("sinais"):
         bits = [f"título '{site['title']}'" if site.get("title") else "",
                 f"nome '{site['site_name']}'" if site.get("site_name") else "",
-                f"descrição '{site['description']}'" if site.get("description") else ""]
+                f"descrição '{site['description']}'" if site.get("description") else "",
+                f"trecho do texto '{site['texto'][:400]}'" if site.get("texto") else ""]
         extra = f"; redireciona para {site['final_host']}" if site.get("final_host") not in (None, name, "www." + name) else ""
+        extra += "".join(f"; SINAL: {s}" for s in site.get("sinais") or [])
         add("site", "página inicial (texto DECLARADO pelo próprio site, não verificado): "
                     + "; ".join(b for b in bits if b) + extra, False)
 

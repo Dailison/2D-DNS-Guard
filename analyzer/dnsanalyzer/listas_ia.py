@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 
 # listas que a IA preenche (as de "Sistema" — Infraestrutura, Outros, Para revisar — são manuais)
 LISTAS_IA = {
-    "ameaca": "phishing, golpe, malware, comando e controle, site malicioso confirmado",
+    "ameaca": "phishing, golpe, malware, comando e controle, site malicioso confirmado, e site com CAMUFLAGEM (a página "
+              "imita erro do navegador ou prende o botão Voltar — SINAL na evidência da página): não é site honesto",
     "vpn_proxy": "VPN de uso pessoal, proxy, anonimizador, Tor, qualquer coisa para contornar o filtro "
                  "(VPN CORPORATIVA — Fortinet, GlobalProtect, Cisco AnyConnect, Zscaler — é nenhuma)",
     "doh_dns": "resolvedor DNS público e DNS sobre HTTPS/TLS (dns.google, cloudflare-dns, quad9, nextdns, adguard-dns, opendns)",

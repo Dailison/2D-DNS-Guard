@@ -90,3 +90,45 @@ def test_pagina_vazia_no_cache_e_reaberta(monkeypatch):
     webintel.lookup(C({"fetched": datetime.now(timezone.utc).isoformat(), "site": None}), "vazio-recente.com", fetch=True, allow_site=True)
     webintel.lookup(C({"fetched": antigo, "site": None}), "so-cache.com", fetch=False, allow_site=True)
     assert abertas == ["jiluio3u500.com"]
+
+
+def test_pagina_segue_redirecionamento_por_script_e_marca_sinais(monkeypatch):
+    """"Redirecting..." com window.location p/ outra página (27/09: plataformas de tigrinho): segue e marca os sinais
+    de camuflagem (erro falso do navegador, prende o botão Voltar)."""
+    from dnsanalyzer import webintel
+    paginas = {
+        "/": '<html><title>Redirecting...</title><script>window.location.href = "https://x7.com/unAvailable.html";</script></html>',
+        "/unAvailable.html": "<html><script>function preventBack(){history.pushState(null,'',location.href)}</script>"
+                             "<body>无法访问此网站 DNS_PROBE_FINISHED_NXDOMAIN</body></html>",
+    }
+
+    class Resp:
+        def __init__(self, caminho):
+            self.caminho, self.headers, self.encoding = caminho, {"content-type": "text/html"}, "utf-8"
+            self.url = SimpleNamespace(host="x7.com")
+
+        def iter_bytes(self):
+            yield paginas[self.caminho].encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class Cliente:
+        def __init__(self, **kw):
+            pass
+
+        def stream(self, metodo, url):
+            return Resp(url.split("x7.com", 1)[1] or "/")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(webintel.httpx, "Client", Cliente)
+    r = webintel.homepage("x7.com")
+    assert r["via"] == "x7.com" and "DNS_PROBE" in r["texto"]
+    assert any("Voltar" in s for s in r["sinais"]) and any("camuflagem" in s for s in r["sinais"])

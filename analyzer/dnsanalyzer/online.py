@@ -58,6 +58,8 @@ Para o domínio, diga:
   infraestrutura GENÉRICA (AWS, Azure, Google Cloud, certificados, atualizações de sistema), CDN GENÉRICA sem serviço
   identificado (CloudFront, Akamai, Fastly, Cloudflare, subdomínio aleatório de CDN) = "wl:cdn" etc.
   Domínio que imita marca famosa com letras trocadas (ffacebook, g00gle) e não é o oficial = "ameaca";
+  Página com SINAL de camuflagem (imita erro do navegador sem estar fora do ar, prende o botão Voltar) = SUSPEITO, "ameaca"
+  (ou "apostas" se a página mostrar cassino/slots);
   Variação/espelho de uma marca (mesmo nome com sufixo diferente, ex.: cs8sp.com da marca de cassino CS8) = a lista da marca;
   Portal/buscador com notícias (nacional ou estrangeiro: Naver, Yahoo, UOL, Baidu, Yandex) = "noticias"; loja estrangeira = "compras".
   "wl:outros_liberados" só para o que foi identificado e não cabe em NENHUMA lista (religião, cultura, ONG, pessoal);
@@ -250,10 +252,12 @@ def contexto_completo(d: dict, limite: int = 8000) -> str:
         L.append("Evidências coletadas (fases 1 a 3):")
         L += [f"- {_KIND.get(e['kind'], e['kind'])}: {e['text'][:900]}" for e in ev]
     site = (web or {}).get("site") or {}
-    if not any(e.get("kind") == "site" for e in ev) and any(site.get(k) for k in ("title", "description", "site_name")):
+    if not any(e.get("kind") == "site" for e in ev) and any(site.get(k) for k in ("title", "description", "site_name", "texto", "sinais")):
         # página aberta depois da última análise local (27/09: reaberta quando tinha vindo vazia)
         L.append("Página inicial do site (texto do próprio site, não verificado): "
-                 + " · ".join(f"{k}: {site[k]}" for k in ("site_name", "title", "description") if site.get(k)))
+                 + " · ".join(f"{k}: {site[k]}" for k in ("site_name", "title", "description", "texto") if site.get(k))
+                 + (f" · (redirecionado de {site['via']} para {site.get('final_host')})" if site.get("via") else "")
+                 + "".join(f" · SINAL: {s}" for s in site.get("sinais") or []))
     busca = d.get("_busca") or []
     if busca and not any(e.get("kind") == "websearch" for e in ev):
         L.append("Busca na web feita agora (texto de terceiros, pista — não prova):")

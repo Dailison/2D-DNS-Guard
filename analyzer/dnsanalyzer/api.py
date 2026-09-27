@@ -90,7 +90,7 @@ def health():
 def stats():
     with db.conn() as c:
         q = dict(c.execute(
-            "SELECT count(*) FILTER (WHERE needs_analysis) AS fila_regras, count(*) FILTER (WHERE llm_pending AND NOT aguarda_recorrencia AND NOT dominio_decidido(id)) AS fila_ia, "
+            "SELECT count(*) FILTER (WHERE needs_analysis) AS fila_regras, count(*) FILTER (WHERE llm_pending AND NOT dominio_decidido(id)) AS fila_ia, "
             "count(*) FILTER (WHERE aguarda_recorrencia) AS aguarda, "
             "count(*) FILTER (WHERE classified_by='llm') AS classificados_ia, count(*) AS dominios FROM domains").fetchone())
         q["ia_24h"] = c.execute("SELECT count(*) AS n FROM classification_history WHERE source='llm' "
@@ -757,8 +757,9 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "   WHERE lista_claimed_at > now() - interval '10 minutes') x ORDER BY t DESC LIMIT 1").fetchone()
         from .listas_ia import incerta_sql
         _incerta = incerta_sql()   # sugestão de lista sem confiança alta: também passa pelas fases 2 e 3
-        queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND NOT aguarda_recorrencia AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS ia, "
-                          "count(*) FILTER (WHERE aguarda_recorrencia) AS aguarda, "
+        # fase 1 inteira: o pouco acesso (aguarda_recorrencia) também roda, no fim da fila
+        queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS ia, "
+                          "count(*) FILTER (WHERE llm_pending AND aguarda_recorrencia AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS aguarda, "
                           "count(*) FILTER (WHERE needs_analysis) AS regras, "
                           "count(*) FILTER (WHERE ((classification='DESCONHECIDO' AND classified_by='llm') OR " + _incerta + ") "
                           " AND web_search_at IS NULL AND NOT llm_pending AND kind='public' "

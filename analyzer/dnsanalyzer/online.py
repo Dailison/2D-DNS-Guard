@@ -317,9 +317,11 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
     t0 = time.monotonic()
     ct = cota(modelo, chave)
     qual = f"{modelo} (chave {chave + 1})" if chave else modelo
+    k = _chaves()[chave]
+    # chaves no formato novo (AQ.…) só autenticam pela URL (no cabeçalho dão 403); as AIza… vão no cabeçalho
+    auth = {"params": {"key": k}} if k.startswith("AQ.") else {"headers": {"x-goog-api-key": k}}
     try:
-        r = httpx.post(URL.format(model=modelo), json=corpo, timeout=150 if modelo.startswith("gemma") else 60,
-                       headers={"x-goog-api-key": _chaves()[chave]})
+        r = httpx.post(URL.format(model=modelo), json=corpo, timeout=150 if modelo.startswith("gemma") else 60, **auth)
     except httpx.HTTPError as e:
         raise OnlineIndisponivel(f"Gemini {qual}: {e.__class__.__name__}") from e
     if r.status_code == 429:

@@ -981,6 +981,29 @@ def test_segunda_chave_gemini_tem_cota_propria(monkeypatch):
     assert online.cota("gemini-3.5-flash-lite", 1).modelo == "gemini-3.5-flash-lite (chave 2)"
 
 
+def test_chave_formato_novo_vai_na_url(monkeypatch):
+    """Chave AQ.… só autentica por ?key= (no cabeçalho dá 403); a AIza… segue no cabeçalho x-goog-api-key."""
+    from dnsanalyzer import config, online
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "gemini_api_key", "AIza-k1")
+    monkeypatch.setattr(cfg, "gemini_api_keys_extra", ["AQ.k2"])
+    monkeypatch.setattr(online, "contexto_completo", lambda d: "")
+    monkeypatch.setattr(online, "cota", lambda m, chave=0: None)
+    chamadas = []
+
+    class Resp:
+        status_code = 200
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": '{"lista": "jogos", "confianca": 0.9}'}]}}]}
+
+    monkeypatch.setattr(online.httpx, "post", lambda url, **kw: chamadas.append(kw) or Resp())
+    for chave in (0, 1):
+        online.perguntar({"name": "x.com"}, [], False, "gemini-3.5-flash-lite", chave)
+    assert chamadas[0].get("headers") == {"x-goog-api-key": "AIza-k1"} and "params" not in chamadas[0]
+    assert chamadas[1].get("params") == {"key": "AQ.k2"} and "headers" not in chamadas[1]
+
+
 def test_liberar_site_suspeito(env, monkeypatch):
     """Liberar um SUSPEITO: a IA local não decide sozinha (trava -> IA online); a resposta da IA online vale (sem fase 5):
     whitelist só na lista (SUSPEITO não sai da whitelist, só não vale no DNS)."""

@@ -520,3 +520,28 @@ def test_revisao_da_infraestrutura_vem_antes_na_fila(env):
                 primeiro = r
                 break
     assert primeiro and primeiro["name"] == "infra-fila.net" and primeiro["em_infra"], primeiro
+
+
+def test_decidido_com_llm_pending_nao_fica_preso_e_nao_vai_p_decisoes(env):
+    from dnsanalyzer import db, online
+    with db.conn() as c:
+        ids = {}
+        for n, cat in (("preso-adulto.cc", "adulto"), ("preso-infra.cc", "infra_bloqueio")):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, total_queries, lista_duvida, llm_pending, analyzed_at) "
+                               "VALUES (%s, 'DESCONHECIDO', 10, true, true, now()) RETURNING id", (n,)).fetchone()["id"]
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, 'migração dos grupos antigos')", (cat, n))
+            c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', 'op@2d')", (ids[n],))
+        pegos = set()
+        for _ in range(500):
+            r = online._reservar(c)
+            if r is None:
+                break
+            pegos.add(r["name"])
+            if {"preso-adulto.cc", "preso-infra.cc"} <= pegos:
+                break
+        assert {"preso-adulto.cc", "preso-infra.cc"} <= pegos, "decidido com llm_pending entra na fila online"
+        for n in ids:   # a IA online também não reconhece
+            online.gravar(c, {"id": ids[n], "name": n, "classification": "DESCONHECIDO"},
+                          {"lista": "nenhuma", "confianca": 0.4, "classificacao": "DESCONHECIDO", "reconhecido": False}, {"model": "g"}, [])
+        rev = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'para_revisar' AND domain LIKE 'preso-%%'")}
+    assert rev == {"preso-infra.cc"}, "já em Adulto: não vai p/ Decisões; Infraestrutura segue em revisão"

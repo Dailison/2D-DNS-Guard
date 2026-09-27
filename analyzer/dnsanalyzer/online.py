@@ -249,7 +249,8 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
 # fila da fase 3: dúvidas da etapa "lista" + desconhecidos que já passaram pela fase 2
 _NAS_LISTAS_REVISAO = "d.name IN (SELECT domain FROM category_lists WHERE category IN ('para_revisar', 'outros_bloqueios'))"
 _EM_DECISOES = "EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'para_revisar' AND l.domain = d.name)"
-_FILA = ("d.kind = 'public' AND NOT d.llm_pending AND (d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') "
+# llm_pending só segura quem a fase 1 ainda vai pegar: domínio decidido a fase 1 nunca pega (ficava preso)
+_FILA = ("d.kind = 'public' AND (NOT d.llm_pending OR dominio_decidido(d.id)) AND (d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') "
          "AND ((d.lista_duvida AND (d.online_at IS NULL OR d.online_at < d.lista_at)) "
          " OR (d.classification = 'DESCONHECIDO' AND (d.online_at IS NULL OR d.online_at < d.analyzed_at) "
          "     AND ((d.web_search_at IS NOT NULL AND NOT dominio_decidido(d.id)) OR " + _NAS_LISTAS_REVISAO + ")))")
@@ -353,6 +354,9 @@ def fase(categorias: list[str]) -> str:
     return "done"
 
 
+_SISTEMA = ("para_revisar", "outros_bloqueios", "infra_bloqueio")   # listas "sem destino": a revisão continua
+
+
 def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str = FONTE) -> None:
     lista = obj.get("lista") if obj.get("lista") in LISTAS_IA else NENHUMA
     try:
@@ -377,7 +381,9 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
                   "VALUES (%s, %s, %s, %s, %s, 'online', %s, %s)",
                   (d["id"], cls, conf, servico[:80], Jsonb(razoes), meta.get("model"),
                    ("fontes: " + ", ".join(meta.get("fontes") or []))[:500] or None))
-    elif d["classification"] == "DESCONHECIDO" and lista == NENHUMA:
+    elif d["classification"] == "DESCONHECIDO" and lista == NENHUMA and not c.execute(
+            "SELECT 1 FROM category_lists WHERE domain = %s AND category <> ALL(%s)", (d["name"], list(_SISTEMA))).fetchone():
+        # (já numa lista de conteúdo/segurança: a IA não identificar não muda nada, não vai p/ Decisões)
         from . import listas as _listas
         _listas.contexto(c, "IA sem certeza", "nem a IA online identificou o site")
         # nem a IA online identificou: fase 5 (Decisões). Com lista sugerida, `aplicar` decide.

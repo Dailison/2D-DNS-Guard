@@ -355,6 +355,14 @@ def _suspeito(r: dict) -> str | None:
         if r.get("classification") in ("SUSPEITO", "MALICIOSO") else None
 
 
+def _dominio_proprio(nome: str) -> bool:
+    """O nome é um domínio registrado por alguém (r5k9x2.com), não um endereço dentro de um provedor/plataforma
+    (d1abc.cloudfront.net, x.azureedge.net: sufixo privado da PSL) nem subdomínio."""
+    from .features import analyze_name
+    info = analyze_name(nome, settings().internal_suffixes)
+    return not info.private_suffix and info.registrable == nome
+
+
 def _coerente(cat: str, cls: str | None, categoria: str | None) -> bool:
     return _incoerencia(cat, cls, categoria) is None
 
@@ -497,9 +505,11 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         if fixas and (not cat or cat not in em):   # pessoa/migração pôs noutra lista: vale a decisão dela
             sai_revisao(r, em)
             continue
-        if not cat and cls == "DESCONHECIDO" and (r["lista_wl"] or "outros_liberados") == "outros_liberados":
+        if not cat and cls == "DESCONHECIDO" and ((r["lista_wl"] or "outros_liberados") == "outros_liberados"
+                                                  or (r["lista_wl"] in ("cdn", "infraestrutura") and _dominio_proprio(r["name"]))):
             # não identificado depois das 4 fases não é liberado (27/09: espelhos de cassino como cs8sp.com iam p/
-            # "Outros liberados"); infraestrutura/CDN reconhecida como tal (wl:infraestrutura, wl:cdn) segue liberada
+            # "Outros liberados", e nomes aleatórios como r5k9x2.com viravam "CDN"); CDN/infraestrutura só segue
+            # liberada quando é endereço DENTRO de um provedor (ex.: d1abc.cloudfront.net, bucket.s3.amazonaws.com)
             cat = NAO_IDENT
         if not cat:   # liberar: sai das listas que a IA pôs e vai p/ a whitelist
             # da Infraestrutura (migração) só com certeza, a resposta do modelo maior (ou dois modelos) e sem suspeita:

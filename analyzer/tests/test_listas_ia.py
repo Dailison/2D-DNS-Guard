@@ -1077,17 +1077,18 @@ def test_desconhecido_na_fase4_vai_p_nao_identificados(env, monkeypatch):
     monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
     with db.conn() as c:
         ids = {}
-        for n in ("x7k2q9.com", "cdn-aleatorio.cloudfront.net"):
+        for n in ("x7k2q9.com", "cdn-aleatorio.cloudfront.net", "r5k9x2.com"):
             ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
                                "VALUES (%s, 'DESCONHECIDO', 'outros', now() - interval '1 minute', 1, now(), now()) RETURNING id", (n,)).fetchone()["id"]
         listas_ia.salvar(c, ids["x7k2q9.com"], "wl:outros_liberados", 0.3, "", "", "online:gemini", 4)
         listas_ia.salvar(c, ids["cdn-aleatorio.cloudfront.net"], "wl:cdn", 0.8, "", "", "online:gemini", 4)
+        listas_ia.salvar(c, ids["r5k9x2.com"], "wl:cdn", 0.6, "", "", "online:gemini", 4)   # nome próprio chamado de "CDN"
         c.execute("UPDATE domains SET online_resp = '{\"classificacao\": \"DESCONHECIDO\"}' WHERE id = ANY(%s)", (list(ids.values()),))
         listas_ia.aplicar(c)
         ni = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'nao_identificado' "
                                              "AND domain = ANY(%s)", (list(ids),))}
         wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains")}
-    assert ni == {"x7k2q9.com"} and "x7k2q9.com" not in wl
+    assert ni == {"x7k2q9.com", "r5k9x2.com"} and "x7k2q9.com" not in wl and "r5k9x2.com" not in wl
     assert wl.get("cdn-aleatorio.cloudfront.net") == "cdn"
 
 

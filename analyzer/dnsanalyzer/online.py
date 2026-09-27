@@ -54,7 +54,8 @@ Para o domínio, diga:
   (ex.: slatic.net = arquivos da Lazada = compras; alicdn.com = Alibaba/AliExpress = compras; mlstatic.com = Mercado Livre =
   compras; fbcdn.net = Facebook = redes_sociais; ytimg.com = YouTube = streaming; akamaihd.net de um jogo = jogos).
   Whitelist só para o que NÃO é de nenhuma lista de bloqueio: ferramentas de trabalho, bancos, governo, fornecedores,
-  infraestrutura GENÉRICA (Cloudflare, Akamai, AWS, Azure, Google Cloud, certificados, atualizações de sistema) etc.
+  infraestrutura GENÉRICA (AWS, Azure, Google Cloud, certificados, atualizações de sistema), CDN GENÉRICA sem serviço
+  identificado (CloudFront, Akamai, Fastly, Cloudflare, subdomínio aleatório de CDN) = "wl:cdn" etc.
   Domínio que imita marca famosa com letras trocadas (ffacebook, g00gle) e não é o oficial = "ameaca";
 - "confianca": 1.0 só se tem certeza; 0.7 provável; 0.4 ou menos se está chutando;
 - "motivo": 1 a 3 frases para a equipe de TI decidir: o que é o site/empresa, qual evidência você usou (seu

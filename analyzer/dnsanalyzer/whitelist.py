@@ -37,6 +37,7 @@ CATEGORIAS = {
     "institucional": "Sites institucionais de empresas",
     "telecom": "Telecom e internet",
     "infraestrutura": "Infraestrutura e sistemas",
+    "cdn": "CDN e entrega de conteúdo",
     "seguranca": "Segurança",
     "desenvolvimento": "TI e desenvolvimento",
     "educacao": "Educação e cursos",
@@ -62,7 +63,10 @@ DESCRICOES = {
     "fornecedores": "fabricantes, distribuidores, indústria, atacado B2B, catálogos de produtos, portais de compras corporativas",
     "institucional": "site institucional de empresa, cliente ou parceiro (apresenta a empresa, sem ser loja nem sistema)",
     "telecom": "operadoras de telefonia e internet, provedores regionais",
-    "infraestrutura": "nuvem para sistemas, APIs, atualizações de sistema e drivers, certificados, telemetria técnica",
+    "infraestrutura": "nuvem para sistemas, APIs, atualizações de sistema e drivers, certificados, telemetria técnica (CDN tem categoria própria)",
+    "cdn": "CDN genérica e entrega de conteúdo: CloudFront, Akamai, Fastly, Azure Front Door, Cloudflare, Bunny, jsDelivr, "
+           "subdomínio aleatório de CDN (d1abc.cloudfront.net) e CDN sem serviço identificado; CDN de um serviço conhecido "
+           "vai para a lista do serviço",
     "seguranca": "antivírus, EDR, firewall, bloqueadores de anúncio, gerenciadores de senha, autenticação, VPN corporativa",
     "desenvolvimento": "ferramentas de TI e desenvolvimento, repositórios, documentação técnica, suporte técnico",
     "educacao": "escolas, faculdades, cursos, plataformas de ensino, enciclopédias, dados educacionais",

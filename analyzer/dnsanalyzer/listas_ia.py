@@ -66,7 +66,7 @@ _EXIGE_NAO_TRABALHO = {"vpn_proxy", "adulto", "apostas", "jogos", "redes_sociais
 SYSTEM = """Você organiza sites em LISTAS de filtro de DNS para empresas brasileiras. Todo site vai para UMA lista:
 uma LISTA DE BLOQUEIO (o que o site é — cada empresa escolhe depois quais bloqueia) ou, se não é de nenhuma delas, uma
 WHITELIST (sites liberados), na categoria que melhor o descreve.
-Domínios técnicos de um serviço (CDN, API, imagens, apps) vão para a lista do serviço (ex.: fbcdn.net = redes_sociais, ytimg.com = streaming, whatsapp.net = mensageiros).
+Domínios técnicos de um serviço (CDN, API, imagens, apps) vão para a lista do serviço (ex.: fbcdn.net = redes_sociais, ytimg.com = streaming, whatsapp.net = mensageiros); CDN genérica sem serviço identificado (CloudFront, Akamai, Fastly, subdomínio aleatório de CDN) = "wl:cdn".
 
 Listas de bloqueio:
 {listas}

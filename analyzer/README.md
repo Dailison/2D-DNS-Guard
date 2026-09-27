@@ -79,8 +79,11 @@ explicitamente nas evidências.
 | 4. IA online | `online.py` | Gemini/Gemma com **todo** o contexto das fases 1-3 (`contexto_completo`) |
 | 5. Decisões | `listas.FASE5_SQL` | o que sobrou sem certeza; a TI decide no console |
 
-A sugestão da IA local não entra direto: ela **espera a IA online validar**
-(`lista_duvida`). Depois disso, `listas_ia.aplicar`:
+Cascata por confiança (≥ `LISTA_CONFIANCA_MIN`, 0,9): sem confiança alta, o site segue para a fase seguinte
+(`incerta_sql`/`proxima_fase`; fase sem dados também avança). A IA local decide sozinha só "nenhuma lista" para
+site fora de listas (Aprovados); **pôr numa lista ou tirar de uma espera a IA online validar** (`lista_duvida`) —
+na prova de 27/09 (50 domínios) ela acertou 4/4 "liberar", mas 6/8 "bloquear". Depois da resposta online,
+`listas_ia.aplicar`:
 - aplica a resposta online com confiança ≥ `ONLINE_CONFIANCA_MIN` (0,8) quando ela é coerente.
   Com `MALICIOSO`, o domínio vai para **Ameaças**;
 - com "nenhuma lista" certa, tira o domínio de Decisões e das listas que a IA tinha posto;

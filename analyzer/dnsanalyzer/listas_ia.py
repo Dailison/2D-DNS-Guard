@@ -207,7 +207,8 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
     eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), meta.get("seconds"),
                       detail=f"{fase_n}|lista {res.lista} {float(res.confianca or 0) * 100:.0f}%"
                       + (f" · {res.servico}" if res.servico else "") + (f" — {res.motivo}" if res.motivo else "")
-                      + (" · confiança alta: a IA local decide" if alta else
+                      + ((" · confiança alta: a IA local decide" if res.lista == NENHUMA else
+                          " · confiança alta: vai p/ a IA online validar (fase 4)") if alta else
                          f" · confiança baixa: segue p/ a fase {prox}" + (" (IA online)" if prox == 4 else "")))
     return "done"
 
@@ -356,15 +357,16 @@ def aplicar(c, limite: int = 3000) -> dict:
             if fixas or (cat and cat in em):
                 c.execute(sem_online, (r["id"],))
                 continue
-            # confiança alta, coerente e sem trava: a IA local decide sozinha (pedido do usuário 2026-09-26). Tirar da
-            # Infraestrutura (libera o site nas empresas) e as travas (DoH, protegido, trabalho) seguem p/ a IA online
-            tira_infra = not cat and INFRA in moveis and INFRA in em
-            if certo and not tira_infra and (not cat or (_coerente(cat, cls, r["category"]) and not guardado(r, cat))):
+            # confiança alta em "nenhuma lista" p/ site fora de listas: a IA local decide (Aprovados). Pôr numa lista ou
+            # tirar de uma continua com a validação da IA online: na prova de 27/09 (50 domínios, fases 1-3 x IA online)
+            # a IA local acertou 4/4 "liberar", mas 6/8 "bloquear" (typosquat do Facebook -> redes_sociais em vez de
+            # ameaça; adguard.com -> adware 100% mesmo com o WHOIS) — o critério do usuário era 100%
+            if certo and not cat and not any(x in em for x in moveis if x != OUTROS):
                 local_decide = True
             elif not certo and proxima_fase(r) < 4:
                 c.execute(sem_online, (r["id"],))
                 continue   # sem confiança alta: fase 2 (WHOIS) / 3 (busca na web) primeiro
-            else:   # sem confiança alta depois da fase 3, ou trava: fase 4 (IA online)
+            else:   # confiança alta (validação) ou sem confiança alta depois da fase 3: fase 4 (IA online)
                 c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
                 out["online"].append((r["name"], cat))
                 continue

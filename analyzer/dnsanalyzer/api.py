@@ -754,12 +754,14 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "   WHERE online_claimed_at > now() - interval '10 minutes' "
             " UNION ALL SELECT name, total_queries, lista_claimed_at, '1' FROM domains "
             "   WHERE lista_claimed_at > now() - interval '10 minutes') x ORDER BY t DESC LIMIT 1").fetchone()
+        from .listas_ia import incerta_sql
+        _incerta = incerta_sql()   # sugestão de lista sem confiança alta: também passa pelas fases 2 e 3
         queue = c.execute("SELECT count(*) FILTER (WHERE llm_pending AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS ia, "
                           "count(*) FILTER (WHERE needs_analysis) AS regras, "
-                          "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by='llm' "
+                          "count(*) FILTER (WHERE ((classification='DESCONHECIDO' AND classified_by='llm') OR " + _incerta + ") "
                           " AND web_search_at IS NULL AND NOT llm_pending AND kind='public' "
                           " AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS busca, "   # (a busca espera o WHOIS)
-                          "count(*) FILTER (WHERE classification='DESCONHECIDO' AND classified_by IN ('llm','web') "
+                          "count(*) FILTER (WHERE ((classification='DESCONHECIDO' AND classified_by IN ('llm','web')) OR " + _incerta + ") "
                           " AND whois_at IS NULL AND NOT llm_pending AND kind='public' "
                           " AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS whois FROM domains").fetchone()
         from . import listas_ia, online
@@ -1628,9 +1630,15 @@ def dominio_historico(name: str):
             if t["override_classification"]:
                 tl.append({"at": t["override_at"], "tipo": "decisao", "titulo": f"{t['name']} ajustou para {t['override_classification']}",
                            "texto": t["override_by"] or ""})
-        for e in c.execute("SELECT created_at, kind, detail FROM ai_events WHERE name = %s AND kind NOT IN ('llm_done', 'rules_final') "
-                           "ORDER BY id", (reg,)):
-            tl.append({"at": e["created_at"], "tipo": "evento", "titulo": e["kind"], "texto": (e["detail"] or "").split("|", 1)[-1]})
+        for e in c.execute("SELECT created_at, kind, classification, detail FROM ai_events WHERE name = %s "
+                           "AND kind NOT IN ('llm_done', 'rules_final') ORDER BY id", (reg,)):
+            det = e["detail"] or ""
+            titulo = _EVENTO_TITULO.get(e["kind"], e["kind"])
+            if e["kind"] == "lista_local":
+                titulo = f"Fase {det.split('|', 1)[0]} · IA local: lista"
+            elif e["kind"] in ("whois_done", "search_done") and e["classification"]:
+                titulo += f" → {e['classification']}"
+            tl.append({"at": e["created_at"], "tipo": "evento", "titulo": titulo, "texto": det.split("|", 1)[-1]})
         listas_atuais = [r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain = ANY(%s)", (cands,))]
         wl = [r["category"] for r in c.execute("SELECT category FROM whitelist_domains WHERE domain = ANY(%s)", (cands,))]
     o = d["online_resp"] or {}
@@ -1651,6 +1659,15 @@ def dominio_historico(name: str):
             "fases": {"visto": d["first_seen"], "fase1": d["analyzed_at"], "fase2_whois": d["whois_at"], "fase3_busca": d["web_search_at"],
                       "fase4_online": d["online_at"], "revisado": d["revisado_at"]},
             "linha_do_tempo": tl}
+
+
+_EVENTO_TITULO = {"whois_start": "Fase 2 · consultando WHOIS", "whois_done": "Fase 2 · WHOIS + IA local",
+                  "whois_error": "Fase 2 · WHOIS indisponível", "search_start": "Fase 3 · buscando na web",
+                  "search_done": "Fase 3 · busca na web + IA local", "search_error": "Fase 3 · busca indisponível",
+                  "llm_start": "Fase 1 · IA local analisando", "llm_error": "Fase 1 · falha da IA local",
+                  "online_done": "Fase 4 · IA online", "lista_add": "entrou numa lista", "lista_rem": "saiu de uma lista",
+                  "fase5": "foi para Decisões (fase 5)", "decisao": "decisão manual", "auto_block": "bloqueio automático",
+                  "rules_alert": "alerta das regras"}
 
 
 @app.get("/domains/{name}/irmaos", dependencies=[Depends(auth)])

@@ -93,7 +93,7 @@
     var li = el('li'), ic = el('span', 'ic'), body = el('span');
     li.appendChild(el('span', 'h', hora(ev.created_at)));
     li.appendChild(ic); li.appendChild(body);
-    var k = ev.kind, ft = faseTag(FASE[k]);
+    var k = ev.kind, ft = faseTag(k === 'lista_local' ? (ev.detail || '1').split('|')[0] : FASE[k]);
     if (ft) body.appendChild(ft);
     if (k === 'llm_start') {
       ic.textContent = '⏳'; body.appendChild(document.createTextNode('Analisando '));
@@ -121,6 +121,11 @@
       if (k !== 'llm_done' && k !== 'search_done' && k !== 'whois_done') nums.push('pelas regras');
       body.appendChild(el('span', 'd', ' ' + nums.join(' · ')));
       if (ev.detail) { body.appendChild(el('br')); body.appendChild(el('span', 'd', ev.detail)); }
+    } else if (k === 'lista_local') {   // o que a IA local respondeu sobre a lista, em cada fase, e o próximo passo
+      var tl = (ev.detail || '').split('|').slice(1).join('|');
+      ic.textContent = /confiança alta/.test(tl) ? '🗂️' : '↪️';
+      body.appendChild(link(ev.name)); body.appendChild(document.createTextNode(' → '));
+      body.appendChild(el('span', 'd', tl));
     } else if (k === 'rules_batch') {
       ic.textContent = '⚙️'; body.appendChild(el('span', 'd', 'Fase A — ' + (ev.detail || '')));
     } else if (k === 'llm_error') {

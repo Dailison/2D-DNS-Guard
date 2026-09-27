@@ -255,14 +255,16 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
         if etapa3:
             c.execute("UPDATE domains SET whois_at=now() WHERE id=%s", (did,))
             if not whois.evidencia(dossier.get("whois")):
-                c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
-                event("whois_done", name, did, drow["classification"], detail="fase 2: WHOIS sem dados úteis")
+                c.execute("UPDATE domains SET claimed_at=NULL, lista_aplicada_at=NULL WHERE id=%s", (did,))
+                event("whois_done", name, did, drow["classification"],
+                      detail="fase 2: WHOIS sem dados úteis (titular oculto/sem registro) — IA local não reavaliou; segue p/ a fase 3")
                 return "done"
         if etapa2:
             c.execute("UPDATE domains SET web_search_at=now() WHERE id=%s", (did,))
             if not dossier.get("search"):
-                c.execute("UPDATE domains SET claimed_at=NULL WHERE id=%s", (did,))
-                event("search_done", name, did, drow["classification"], detail="fase 3: nenhum resultado na web")
+                c.execute("UPDATE domains SET claimed_at=NULL, lista_aplicada_at=NULL WHERE id=%s", (did,))
+                event("search_done", name, did, drow["classification"],
+                      detail="fase 3: nenhum resultado na web — IA local não reavaliou; segue p/ a fase 4 (IA online)")
                 return "done"
         elif cfg.web_search_before_llm and _buscar_antes(dossier):
             # fora do top 1M e sem Wikidata/certificado: a IA sozinha "não reconhece" em ~98%
@@ -323,9 +325,9 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
     fin = combine(rule, res, ev)
     with db.conn() as c:
         save(c, drow, dossier, rule, fin, False, meta["model"], meta)
-    if fin.classification != "DESCONHECIDO":   # fase 1 inclui a lista (antes era uma fila separada, "Listas")
+    if fin.classification != "DESCONHECIDO":   # a lista faz parte da fase (antes era uma fila separada, "Listas")
         try:
-            listas_ia.sugerir(client, did)
+            listas_ia.sugerir(client, did, 2 if etapa3 else 3 if etapa2 else 1)
         except Exception:  # noqa: BLE001 — a fila de listas pega depois
             log.exception("lista da IA para %s", name)
     svc = (res.service or "").strip() if res.recognized else "não reconhecido pela IA"
@@ -336,8 +338,27 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
           detail=" · ".join(x for x in (("fase 2 (WHOIS)" if etapa3 else "fase 3 (busca na web)" if etapa2 else
                                          f"com busca na web ({len(dossier['search'])} resultados)"
                                          if dossier.get("search") else ""),
-                                        "reforço (GPU)" if meta.get("extra") else "", svc, scat, extra) if x))
+                                        "reforço (GPU)" if meta.get("extra") else "", svc, scat,
+                                        _achado(dossier, etapa2, etapa3), _razao(fin), extra) if x))
     return "done"
+
+
+def _achado(dossier: dict, etapa2: bool, etapa3: bool) -> str:
+    """O que a fase 2 (WHOIS) / 3 (busca na web) trouxe para a IA local avaliar (p/ o log)."""
+    if etapa3:
+        ev = whois.evidencia(dossier.get("whois"))
+        return ("WHOIS: " + ev[0][:200]) if ev else ""
+    if etapa2 and dossier.get("search"):
+        res = dossier["search"]
+        tops = "; ".join(f"{r.get('host')}: {r.get('title')}" for r in res[:2] if r.get("title"))
+        return f"busca: {len(res)} resultado(s)" + (f" — {tops[:200]}" if tops else "")
+    return ""
+
+
+def _razao(fin) -> str:
+    """Principal razão da IA local (p/ o log)."""
+    r = next((x.get("text") for x in fin.reasons if x.get("by") != "sistema" and x.get("text")), "")
+    return ("IA local: " + r[:160]) if r else ""
 
 
 def _buscar_antes(d: dict) -> bool:
@@ -363,7 +384,8 @@ def _claim_etapa2(c) -> dict | None:
         return None
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
-             SELECT id FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by = 'llm'
+             SELECT id FROM domains WHERE ((classification = 'DESCONHECIDO' AND classified_by = 'llm') OR """
+        + listas_ia.incerta_sql() + """)
                AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
                AND (whois_at IS NOT NULL OR NOT %(whois)s)
                AND (NOT dominio_decidido(id) OR reanalise_pedida)
@@ -390,7 +412,8 @@ def _claim_etapa3(c) -> dict | None:
         return None
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
-             SELECT id FROM domains WHERE classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')
+             SELECT id FROM domains WHERE ((classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')) OR """
+        + listas_ia.incerta_sql() + """)
                AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
                AND (NOT dominio_decidido(id) OR reanalise_pedida)
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')

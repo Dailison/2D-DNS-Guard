@@ -142,7 +142,26 @@ def _reservar(c) -> dict | None:
         "RETURNING " + _COLUNAS).fetchone()
 
 
-_COLUNAS = "id, name, topic, classification, category, corp_reason, reasons, evidence"
+_COLUNAS = "id, name, topic, classification, category, corp_reason, reasons, evidence, whois_at, web_search_at"
+_FASE_TXT = {1: "fase 1 · IA local", 2: "fase 2 · WHOIS + IA local", 3: "fase 3 · busca na web + IA local"}
+
+
+def incerta_sql(t: str = "") -> str:
+    """Sugestão da IA local (fases 1-3) sem confiança alta: segue p/ a próxima fase (pedido do usuário
+    2026-09-26: "se a confiança não for alta, passa para a próxima fase")."""
+    p = t + "." if t else ""
+    return (f"({p}lista_fonte = '{FONTE_LOCAL}' AND coalesce({p}lista_conf, 0) < "
+            f"{float(settings().lista_confianca_min)} AND {p}lista_at >= {p}analyzed_at AND NOT {p}lista_duvida)")
+
+
+def proxima_fase(d: dict) -> int:
+    """Próxima fase de quem não teve confiança alta: 2 (WHOIS), 3 (busca na web) ou 4 (IA online)."""
+    cfg = settings()
+    if cfg.whois_enabled and not d.get("whois_at"):
+        return 2
+    if cfg.web_search_url and not d.get("web_search_at"):
+        return 3
+    return 4
 
 
 def fase(client: OllamaClient) -> str:
@@ -157,17 +176,17 @@ def fase(client: OllamaClient) -> str:
     return _sugerir(client, d)
 
 
-def sugerir(client: OllamaClient, domain_id: int) -> str:
-    """Fase 1, 2ª pergunta à IA local: em qual lista o site entra (logo depois da classificação)."""
+def sugerir(client: OllamaClient, domain_id: int, fase_n: int = 1) -> str:
+    """2ª pergunta à IA local nas fases 1-3: em qual lista o site entra (logo depois da classificação)."""
     if not settings().lista_ia_enabled:
         return "idle"
     with db.conn() as c:
         d = c.execute("UPDATE domains SET lista_claimed_at = now() WHERE id = %s AND kind = 'public' "
                       "RETURNING " + _COLUNAS, (domain_id,)).fetchone()
-    return _sugerir(client, d) if d else "idle"
+    return _sugerir(client, d, fase_n) if d else "idle"
 
 
-def _sugerir(client: OllamaClient, d: dict) -> str:
+def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
     try:
         res, meta = perguntar(client, d)
     except LLMUnavailable:
@@ -183,6 +202,13 @@ def _sugerir(client: OllamaClient, d: dict) -> str:
     with db.conn() as c:
         salvar(c, d["id"], res.lista, res.confianca, res.motivo, res.servico, FONTE_LOCAL)
     log.debug("lista %s -> %s (%.2f, %.1fs)", d["name"], res.lista, res.confianca, meta["seconds"])
+    alta = (res.confianca or 0) >= settings().lista_confianca_min
+    prox = proxima_fase(d)
+    eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), meta.get("seconds"),
+                      detail=f"{fase_n}|lista {res.lista} {float(res.confianca or 0) * 100:.0f}%"
+                      + (f" · {res.servico}" if res.servico else "") + (f" — {res.motivo}" if res.motivo else "")
+                      + (" · confiança alta: a IA local decide" if alta else
+                         f" · confiança baixa: segue p/ a fase {prox}" + (" (IA online)" if prox == 4 else "")))
     return "done"
 
 
@@ -287,7 +313,7 @@ def aplicar(c, limite: int = 3000) -> dict:
     cfg = settings()
     rows = c.execute(
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
-        " d.popularity_rank, d.corp_action, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
+        " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
         " d.online_resp->'_meta'->'antes' AS antes, coalesce((d.online_resp->'_meta'->>'nivel_reforco')::boolean, false) AS reforco, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
@@ -323,16 +349,27 @@ def aplicar(c, limite: int = 3000) -> dict:
 
         if humano_contra:
             continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
-        if not online and online_ok:   # IA local: espera a validação da IA online
-            if fixas or (cat in em if cat else not any(x in em for x in moveis if x != OUTROS)):
-                continue   # ("nenhuma" também é validada quando tiraria o site de uma lista)
-            c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
-            out["online"].append((r["name"], cat))
-            continue
+        local_decide = False
+        if not online and online_ok:   # IA local (fases 1-3)
+            if fixas or (cat and cat in em):
+                continue
+            # confiança alta, coerente e sem trava: a IA local decide sozinha (pedido do usuário 2026-09-26). Tirar da
+            # Infraestrutura (libera o site nas empresas) e as travas (DoH, protegido, trabalho) seguem p/ a IA online
+            tira_infra = not cat and INFRA in moveis and INFRA in em
+            if certo and not tira_infra and (not cat or (_coerente(cat, cls, r["category"]) and not guardado(r, cat))):
+                local_decide = True
+            elif not certo and proxima_fase(r) < 4:
+                continue   # sem confiança alta: fase 2 (WHOIS) / 3 (busca na web) primeiro
+            else:   # sem confiança alta depois da fase 3, ou trava: fase 4 (IA online)
+                c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
+                out["online"].append((r["name"], cat))
+                continue
+        if local_decide:   # avaliado (Aprovados, sem reanálise) e fim da revisão pedida
+            c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false WHERE id = %s", (r["id"],))
 
         if fixas and (not cat or cat not in em):
             continue   # alguém pôs noutra lista: fica
-        if certo and not cat and online:
+        if certo and not cat and (online or local_decide):
             # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs). Da
             # Infraestrutura só com a resposta do modelo maior (ou dois modelos) e sem suspeita; senão, Decisões
             sai_infra = cls not in ("SUSPEITO", "MALICIOSO") and (r["reforco"] or _dois_nenhuma(r))

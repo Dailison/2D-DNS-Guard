@@ -139,8 +139,9 @@ def test_fase3_gemini(env, monkeypatch):
     monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
     with db.conn() as c:
         for n, cls in (("duv1.com", "NAO_TRABALHO"), ("duv2.com", "NAO_TRABALHO")):
-            i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
-                          "VALUES (%s, %s, 'outros', now(), 50) RETURNING id", (n, cls)).fetchone()["id"]
+            # (já passaram pelas fases 2 e 3 sem confiança alta: vão p/ a fase 4)
+            i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
+                          "VALUES (%s, %s, 'outros', now(), 50, now(), now()) RETURNING id", (n, cls)).fetchone()["id"]
             listas_ia.salvar(c, i, "jogos", 0.6, "talvez", "x", "local")
         c.execute("INSERT INTO domains (name, classification, category, analyzed_at, web_search_at, total_queries, classified_by) "
                   "VALUES ('misterio.com.br', 'DESCONHECIDO', 'desconhecido', now(), now(), 99, 'web'), "
@@ -201,8 +202,8 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
         listas_ia.salvar(c, ids["slatic.net"], "compras", 0.9, "CDN da Lazada", "", "local")
         ap = listas_ia.aplicar(c)
         em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists")}
-    assert ("jogos", "v-certo.com") not in em and ("v-certo.com", "jogos") in ap["online"], "certeza local espera a IA online"
-    assert ("para_revisar", "playrix.com") not in em and ("playrix.com", "jogos") in ap["online"], "incoerência local também"
+    assert ("jogos", "v-certo.com") in em and ("v-certo.com", "jogos") not in ap["online"], "confiança alta: a IA local decide"
+    assert ("para_revisar", "playrix.com") not in em and ("playrix.com", "jogos") in ap["online"], "incoerência local: IA online"
     resp = {"v-certo.com": {"lista": "jogos", "confianca": 1.0, "classificacao": "NAO_TRABALHO"},
             "v-errado.com": {"lista": "jogos", "confianca": 0.95, "classificacao": "NAO_TRABALHO"},
             "playrix.com": {"lista": "jogos", "confianca": 1.0, "classificacao": "NAO_TRABALHO", "reconhecido": True},
@@ -230,13 +231,14 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
     while online.fase(["outros"]) == "done":
         pass
     assert {vistos[0][0], vistos[1][0]} == {"v-sobra.com", "cookiefirst.com"}, "o que está em Decisões vai primeiro"
-    assert ("v-certo.com", "jogos", "gemini-3.5-flash-lite") in vistos, "a IA online recebe a sugestão da IA local"
-    assert ("v-certo.com", "jogos", "gemma-4-31b-it") not in vistos, "concordou com certeza: sem segunda opinião"
+    assert ("playrix.com", "jogos", "gemini-3.5-flash-lite") in vistos, "a IA online recebe a sugestão da IA local"
+    assert ("playrix.com", "jogos", "gemma-4-31b-it") not in vistos, "concordou com certeza: sem segunda opinião"
+    assert not any(n == "v-certo.com" for n, _, _ in vistos), "a IA local decidiu: não vai p/ a IA online"
     assert ("slatic.net", "compras", "gemma-4-31b-it") in vistos, "discordou da IA local: segunda opinião"
     with db.conn() as c:
         ap = listas_ia.aplicar(c)
         em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists")}
-    assert ("jogos", "v-certo.com") in em, "validada -> lista"
+    assert ("jogos", "v-certo.com") in em, "decidida pela IA local -> lista"
     assert ("jogos", "v-errado.com") in em and ("compras", "v-errado.com") not in em, "corrige o que a IA local pôs"
     assert ("jogos", "playrix.com") in em, "coerência pela classificação da IA online"
     assert ("compras", "slatic.net") in em, "vale a resposta do modelo maior"
@@ -595,3 +597,46 @@ def test_decidido_com_llm_pending_nao_fica_preso_e_nao_vai_p_decisoes(env):
                           {"lista": "nenhuma", "confianca": 0.4, "classificacao": "DESCONHECIDO", "reconhecido": False}, {"model": "g"}, [])
         rev = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'para_revisar' AND domain LIKE 'preso-%%'")}
     assert rev == {"preso-infra.cc"}, "já em Adulto: não vai p/ Decisões; Infraestrutura segue em revisão"
+
+
+def test_cascata_por_confianca(env, monkeypatch):
+    """Confiança alta: a IA local decide na fase em que está. Sem ela: fase 2 (WHOIS) -> 3 (busca) -> 4 (IA online)."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import config, db, listas_ia
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    monkeypatch.setattr(cfg, "web_search_url", "http://searx")
+    with db.conn() as c:
+        ids = {}
+        for n in ("cascata-a.com", "cascata-b.com", "cascata-c.com"):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
+                               "VALUES (%s, 'NAO_TRABALHO', 'outros', now() - interval '1 minute', 5) RETURNING id", (n,)).fetchone()["id"]
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'cascata-c.com', 'IA com dúvida (jogos)')")
+        listas_ia.salvar(c, ids["cascata-a.com"], "jogos", 0.6, "talvez", "", "local")
+        listas_ia.salvar(c, ids["cascata-b.com"], "jogos", 0.95, "jogo online", "", "local")
+        listas_ia.salvar(c, ids["cascata-c.com"], "nenhuma", 0.95, "loja", "", "local")
+        ap = listas_ia.aplicar(c)
+        em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain LIKE 'cascata-%%'")}
+        a = c.execute("SELECT lista_duvida, (" + listas_ia.incerta_sql() + ") AS incerta FROM domains WHERE id = %s",
+                      (ids["cascata-a.com"],)).fetchone()
+        b = c.execute("SELECT lista_duvida, revisado_at FROM domains WHERE id = %s", (ids["cascata-b.com"],)).fetchone()
+    assert not a["lista_duvida"] and a["incerta"] and not any(n == "cascata-a.com" for n, _ in ap["online"]), "sem confiança: fase 2 antes"
+    assert ("jogos", "cascata-b.com") in em and not b["lista_duvida"] and b["revisado_at"], "confiança alta: a IA local decide"
+    assert ("para_revisar", "cascata-c.com") not in em, "nenhuma com confiança alta: sai de Decisões sem a IA online"
+    with db.conn() as c:   # fases 2 e 3 sem dados úteis: agora vai p/ a fase 4
+        c.execute("UPDATE domains SET whois_at = now(), web_search_at = now(), lista_aplicada_at = NULL WHERE id = %s",
+                  (ids["cascata-a.com"],))
+        ap = listas_ia.aplicar(c)
+        a = c.execute("SELECT lista_duvida FROM domains WHERE id = %s", (ids["cascata-a.com"],)).fetchone()
+    assert a["lista_duvida"] and ("cascata-a.com", "jogos") in ap["online"], "depois da fase 3 sem confiança: IA online"
+    # o log mostra o que a IA local respondeu e o próximo passo
+    monkeypatch.setattr(listas_ia, "perguntar", lambda client, d: (
+        SimpleNamespace(lista="jogos", confianca=0.6, motivo="parece jogo", servico="Portal X"), {"seconds": 1.0}))
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at) "
+                      "VALUES ('cascata-d.com', 'NAO_TRABALHO', 'outros', now(), 5, now()) RETURNING id").fetchone()["id"]
+    assert listas_ia.sugerir(None, i, 2) == "done"
+    with db.conn() as c:
+        ev = c.execute("SELECT detail FROM ai_events WHERE kind = 'lista_local' AND name = 'cascata-d.com'").fetchone()
+    assert ev and ev["detail"].startswith("2|lista jogos 60% · Portal X — parece jogo") and "segue p/ a fase 3" in ev["detail"], ev

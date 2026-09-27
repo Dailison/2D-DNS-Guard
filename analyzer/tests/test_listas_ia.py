@@ -609,9 +609,9 @@ def test_cascata_por_confianca(env, monkeypatch):
     monkeypatch.setattr(cfg, "web_search_url", "http://searx")
     with db.conn() as c:
         ids = {}
-        for n in ("cascata-a.com", "cascata-b.com", "cascata-c.com"):
-            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
-                               "VALUES (%s, 'NAO_TRABALHO', 'outros', now() - interval '1 minute', 5) RETURNING id", (n,)).fetchone()["id"]
+        for n in ("cascata-a.com", "cascata-b.com", "cascata-c.com"):   # (lista_duvida de uma rodada anterior)
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, lista_duvida) "
+                               "VALUES (%s, 'NAO_TRABALHO', 'outros', now() - interval '1 minute', 5, true) RETURNING id", (n,)).fetchone()["id"]
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'cascata-c.com', 'IA com dúvida (jogos)')")
         listas_ia.salvar(c, ids["cascata-a.com"], "jogos", 0.6, "talvez", "", "local")
         listas_ia.salvar(c, ids["cascata-b.com"], "jogos", 0.95, "jogo online", "", "local")

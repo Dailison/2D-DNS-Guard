@@ -351,7 +351,10 @@ def aplicar(c, limite: int = 3000) -> dict:
             continue   # alguém decidiu "manter liberado": decidido uma vez não volta (nem lista, nem Decisões)
         local_decide = False
         if not online and online_ok:   # IA local (fases 1-3)
+            # resposta nova da IA local: a ida p/ a IA online de uma rodada anterior não vale mais
+            sem_online = "UPDATE domains SET lista_duvida = false WHERE id = %s AND lista_duvida"
             if fixas or (cat and cat in em):
+                c.execute(sem_online, (r["id"],))
                 continue
             # confiança alta, coerente e sem trava: a IA local decide sozinha (pedido do usuário 2026-09-26). Tirar da
             # Infraestrutura (libera o site nas empresas) e as travas (DoH, protegido, trabalho) seguem p/ a IA online
@@ -359,13 +362,15 @@ def aplicar(c, limite: int = 3000) -> dict:
             if certo and not tira_infra and (not cat or (_coerente(cat, cls, r["category"]) and not guardado(r, cat))):
                 local_decide = True
             elif not certo and proxima_fase(r) < 4:
+                c.execute(sem_online, (r["id"],))
                 continue   # sem confiança alta: fase 2 (WHOIS) / 3 (busca na web) primeiro
             else:   # sem confiança alta depois da fase 3, ou trava: fase 4 (IA online)
                 c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (r["id"],))
                 out["online"].append((r["name"], cat))
                 continue
         if local_decide:   # avaliado (Aprovados, sem reanálise) e fim da revisão pedida
-            c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false WHERE id = %s", (r["id"],))
+            c.execute("UPDATE domains SET revisado_at = now(), reanalise_pedida = false, lista_duvida = false WHERE id = %s",
+                      (r["id"],))
 
         if fixas and (not cat or cat not in em):
             continue   # alguém pôs noutra lista: fica

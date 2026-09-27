@@ -178,7 +178,8 @@
   if (window._ddInit) return;
   window._ddInit = true;
   const URL_LOTE = {{ url_for('admin.listas_lote_dominios')|tojson }}, URL_IMP = {{ url_for('admin.dominios_impacto')|tojson }},
-        URL_HIST = {{ url_for('admin.dominio_historico')|tojson }}, ROT = {{ LISTAS_ROT|tojson }};
+        URL_HIST = {{ url_for('admin.dominio_historico')|tojson }}, URL_IRM = {{ url_for('admin.dominio_irmaos')|tojson }},
+        ROT = {{ LISTAS_ROT|tojson }};
   const box = () => document.getElementById("ddBox");
   const info = () => box().dataset;
   const sel = () => [...document.querySelectorAll("#ddBox .ddSel:checked")].map(i => i.value);
@@ -270,7 +271,23 @@
         `<li class="${esc(x.tipo)} ${esc(x.acao || "")}"><div class="h">${quando(x.at)}</div><b>${esc(x.tipo === "lista" ? x.titulo.replace(/(entrou em |saiu de )(.*)/, (m, a, c) => a + lst(c)) : x.titulo)}</b>`
         + `${x.texto ? "<div>" + esc(x.texto) + "</div>" : ""}${x.nota ? '<div class="mut" style="font-size:.78rem">' + esc(x.nota) + "</div>" : ""}</li>`).join("") + "</ul>"
         : '<p class="mut">Sem histórico registrado.</p>';
+      document.getElementById("hpCorpo").insertAdjacentHTML("beforeend",
+        `<div style="margin-top:.8rem;border-top:1px solid var(--bd);padding-top:.6rem"><button type="button" class="mini" id="hpIrmaos" data-dom="${esc(dom)}">🔎 Domínios irmãos</button>`
+        + `<span class="mut" style="font-size:.78rem"> mesmo certificado ou mesmo titular (CNPJ) no WHOIS</span><div id="hpIrmLista"></div></div>`);
     } catch (e) { document.getElementById("hpCorpo").innerHTML = '<p class="mut">Não consegui carregar o histórico.</p>'; }
+  }
+  async function irmaos(dom) {
+    const el = document.getElementById("hpIrmLista"); el.innerHTML = '<p class="mut">procurando…</p>';
+    try {
+      const r = await fetch(URL_IRM + "?d=" + encodeURIComponent(dom), {credentials: "same-origin"});
+      const j = await r.json(); if (!j.ok) throw new Error(j.msg);
+      if (!j.irmaos.length) { el.innerHTML = '<p class="mut">Nenhum irmão visto nos logs fora das mesmas listas.</p>'; return; }
+      el.innerHTML = '<div style="margin:.4rem 0"><label class="chk" style="margin:0;font-weight:400"><input type="checkbox" id="hpIrmTodos"> <span>todos</span></label> '
+        + '<button type="button" class="mini danger" id="hpIrmPor">⛔ Pôr os marcados em lista…</button></div>'
+        + j.irmaos.map(x => `<label class="chk" style="margin:.15rem 0;font-weight:400;display:flex;gap:.4rem;align-items:flex-start">`
+          + `<input type="checkbox" class="hpIrm" value="${esc(x.domain)}"> <span><b>${esc(x.domain)}</b> <span class="mut">(${x.total_queries || 0} consultas)</span>`
+          + `<br><span class="mut" style="font-size:.76rem">${esc(x.motivo)}${x.listas_atuais.length ? " · já em " + esc(x.listas_atuais.map(c => ROT[c] || c).join(", ")) : ""}</span></span></label>`).join("");
+    } catch (e) { el.innerHTML = '<p class="mut">Não consegui procurar os irmãos.</p>'; }
   }
   document.addEventListener("submit", e => {
     const f = e.target.closest("#ddBox form.dd-f"); if (!f) return;
@@ -297,6 +314,9 @@
     const h = e.target.closest("#ddBox a.dd-hist");
     if (h && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); historico(h.dataset.dom, h.href); return; }
     if (e.target.id === "hpFechar") { document.getElementById("histPainel").classList.remove("on"); return; }
+    if (e.target.id === "hpIrmaos") { irmaos(e.target.dataset.dom); return; }
+    if (e.target.id === "hpIrmTodos") { document.querySelectorAll(".hpIrm").forEach(i => { i.checked = e.target.checked; }); return; }
+    if (e.target.id === "hpIrmPor") { pedir("por", [...document.querySelectorAll(".hpIrm:checked")].map(i => i.value)); return; }
     if (e.target.id === "ddOk") {
       const para = [...document.querySelectorAll("#dlgDD .ddL:checked")].map(c => c.value);
       if (!para.length) { toast("Marque pelo menos uma lista.", false); return; }

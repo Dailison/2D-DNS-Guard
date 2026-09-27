@@ -1651,6 +1651,65 @@ def dominio_historico(name: str):
             "linha_do_tempo": tl}
 
 
+@app.get("/domains/{name}/irmaos", dependencies=[Depends(auth)])
+def dominio_irmaos(name: str, limit: int = Query(50, le=200)):
+    """Domínios já vistos nos logs que compartilham o CERTIFICADO (SAN) ou o TITULAR do WHOIS (mesmo CNPJ) com
+    este e que NÃO estão nas mesmas listas — p/ bloquear/liberar a família inteira de uma vez."""
+    reg = name.strip().lower().rstrip(".")
+    with db.conn() as c:
+        if not c.execute("SELECT 1 FROM domains WHERE name = %s", (reg,)).fetchone():
+            raise HTTPException(404, "domínio nunca observado")
+        motivos: dict[str, str] = {}
+        web = c.execute("SELECT value FROM lookup_cache WHERE kind = 'web' AND key = %s", (reg,)).fetchone()
+        for x in ((web or {}).get("value") or {}).get("cert", {}).get("san_domains") or []:
+            motivos.setdefault(x.lower(), "mesmo certificado (está no certificado deste)")
+        for r in c.execute("SELECT key FROM lookup_cache WHERE kind = 'web' AND value->'cert'->'san_domains' ? %s", (reg,)):
+            motivos.setdefault(r["key"], "mesmo certificado (este está no certificado dele)")
+        w = c.execute("SELECT value->'titular' AS t FROM lookup_cache WHERE kind = 'whois' AND key = %s", (reg,)).fetchone()
+        t = (w or {}).get("t") or {}
+        if t.get("tipo") == "cnpj" and t.get("doc"):
+            for r in c.execute("SELECT key FROM lookup_cache WHERE kind = 'whois' AND value->'titular'->>'doc' = %s", (t["doc"],)):
+                motivos[r["key"]] = f"mesmo titular no WHOIS ({t.get('nome') or 'CNPJ'} · {t['doc']})"
+        motivos.pop(reg, None)
+        if not motivos:
+            return []
+        minhas = {r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain = %s", (reg,))}
+        rows = c.execute("SELECT name, total_queries, classification, category FROM domains WHERE name = ANY(%s)",
+                         (list(motivos),)).fetchall()
+        listas_de = {}
+        for r in c.execute("SELECT domain, category FROM category_lists WHERE domain = ANY(%s)", ([r["name"] for r in rows],)):
+            listas_de.setdefault(r["domain"], []).append(r["category"])
+    out = [{"domain": r["name"], "motivo": motivos[r["name"]], "listas_atuais": sorted(listas_de.get(r["name"], [])),
+            "total_queries": r["total_queries"], "classificacao": r["classification"], "categoria": r["category"]}
+           for r in rows if not (minhas and minhas <= set(listas_de.get(r["name"], [])))]
+    return sorted(out, key=lambda x: -(x["total_queries"] or 0))[:limit]
+
+
+@app.get("/ai/precisao", dependencies=[Depends(auth)])
+def ai_precisao(days: int = Query(7, ge=1, le=90)):
+    """Quanto do que a IA pôs sozinha nas listas uma PESSOA desfez depois (auditoria permanente), por fonte,
+    e o que as pessoas fizeram com as sugestões em Decisões."""
+    humano = ("NOT (r.por LIKE 'IA%%' OR r.por LIKE 'bloqueio automático%%' OR r.por LIKE 'whitelist%%' "
+              "OR r.por LIKE 'expiração%%' OR r.por LIKE 'inexistente%%' OR r.por = '?')")
+    with db.conn() as c:
+        fontes = c.execute(
+            "SELECT CASE WHEN a.category LIKE 'wl:%%' THEN 'whitelist' WHEN a.por LIKE 'bloqueio automático%%' THEN 'bloqueio automático' "
+            "            WHEN a.motivo LIKE 'IA online%%' THEN 'IA online' WHEN a.motivo LIKE 'IA local%%' THEN 'IA local' ELSE 'outra' END AS fonte, "
+            " count(*) AS aplicadas, count(*) FILTER (WHERE EXISTS (SELECT 1 FROM list_audit r WHERE r.domain = a.domain "
+            "   AND r.category = a.category AND r.acao = 'remove' AND r.at > a.at AND " + humano + ")) AS corrigidas "
+            "FROM list_audit a WHERE a.acao = 'add' AND a.at > now() - make_interval(days => %s) "
+            " AND (a.por LIKE 'IA automática%%' OR a.por LIKE 'bloqueio automático%%' OR a.por LIKE 'IA whitelist%%' "
+            "      OR a.por LIKE 'catálogo%%') GROUP BY 1 ORDER BY 2 DESC", (days,)).fetchall()
+        dec = c.execute(
+            "SELECT count(*) FILTER (WHERE motivo LIKE 'aprovou a sugestão%%') AS aprovou_sugestao, "
+            " count(*) FILTER (WHERE motivo LIKE 'pôs em %%') AS outra_lista, "
+            " count(*) FILTER (WHERE motivo LIKE 'manter liberado%%') AS manteve_liberado "
+            "FROM list_audit WHERE category = 'para_revisar' AND acao = 'remove' AND at > now() - make_interval(days => %s) "
+            " AND NOT (por LIKE 'IA%%' OR por LIKE 'inexistente%%' OR por = '?')", (days,)).fetchone()
+    return {"dias": days, "fontes": [{**f, "pct_corrigidas": round(100 * f["corrigidas"] / f["aplicadas"], 1) if f["aplicadas"] else 0}
+                                     for f in fontes], "decisoes": dec}
+
+
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])
 def listas_do_dominio(name: str):
     """Em que listas o domínio está (ele mesmo ou um domínio pai)."""

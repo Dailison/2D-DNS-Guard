@@ -373,14 +373,18 @@ def dominio(nome):
             d = api.get(f"/tenants/{ctx['tid']}/domains/{quote(nome, safe='')}")
         except AnalyzerError as e:
             flash(f"Domínio {nome}: {e}", "erro")
-    auditoria = []
+    auditoria, irmaos = [], []
     if d:
         blq = _bloqueio_ctx(d["domain"]["name"], ctx["tenant"], d["domain"].get("evidence"))
         try:
             auditoria = api.get("/auditoria", domain=d["domain"]["name"], limit=50)
         except AnalyzerError:
             pass
-    return render_template("admin/analise/dominio.html", d=d, nome=nome, blq=blq, scats=_site_cats(), auditoria=auditoria,
+        try:
+            irmaos = api.get(f"/domains/{quote(d['domain']['name'], safe='')}/irmaos", limit=30)
+        except AnalyzerError:
+            irmaos = []
+    return render_template("admin/analise/dominio.html", d=d, nome=nome, blq=blq, scats=_site_cats(), auditoria=auditoria, irmaos=irmaos,
                            aba="dominios", **ctx)
 
 
@@ -760,7 +764,11 @@ def empresa_excluir(tid):
 # ------------------------------------------------------------------ IA ao vivo
 @analise_bp.get("/ia")
 def ia_ao_vivo():
-    return render_template("admin/analise/ia.html", aba="ia", **_ctx())
+    try:
+        precisao = api.get("/ai/precisao", days=7)
+    except AnalyzerError:
+        precisao = None
+    return render_template("admin/analise/ia.html", aba="ia", precisao=precisao, **_ctx())
 
 
 @analise_bp.get("/ia/eventos")

@@ -679,6 +679,16 @@ def dominio_historico():
         return _json(False, f"{e}")
 
 
+@admin_bp.get("/dominios/irmaos")
+@login_required
+def dominio_irmaos():
+    d = (request.args.get("d") or "").strip().lower().rstrip(".")
+    try:
+        return _json(True, "", irmaos=api.get(f"/domains/{quote(d, safe='')}/irmaos"))
+    except AnalyzerError as e:
+        return _json(False, f"{e}")
+
+
 # ------------------------------------------------- Prévia de impacto (plano de confiabilidade, fase 3.1)
 @admin_bp.get("/politicas/impacto")
 @login_required

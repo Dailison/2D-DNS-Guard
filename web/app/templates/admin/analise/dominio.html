@@ -140,6 +140,20 @@
     </table>
   </div>
 
+  {% if irmaos %}
+  <div class="card">
+    <h2>Domínios irmãos <span class="mut" style="font-size:.8rem;font-weight:400">· mesmo certificado ou mesmo titular (CNPJ) no WHOIS, vistos nos logs e fora das mesmas listas</span></h2>
+    <table><thead><tr><th>Domínio</th><th>Por quê</th><th>Listas atuais</th><th class="num">Consultas</th></tr></thead><tbody>
+    {% for x in irmaos %}
+      <tr><td><a href="{{ url_for('analise.dominio', nome=x.domain, t=tid) }}">{{ x.domain }}</a></td><td class="mut" style="font-size:.82rem">{{ x.motivo }}</td>
+        <td style="font-size:.82rem">{% for c in x.listas_atuais %}{{ LISTAS_ROT.get(c, c) }}{{ ', ' if not loop.last }}{% else %}—{% endfor %}</td>
+        <td class="num">{{ x.total_queries or 0 }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+    <p class="hint">Para pôr vários de uma vez numa lista, abra a lista em Domínios bloqueados, clique no domínio (painel de histórico) → 🔎 Domínios irmãos.</p>
+  </div>
+  {% endif %}
+
   {% if auditoria %}
   <div class="card">
     <h2>Histórico nas listas <span class="mut" style="font-size:.8rem;font-weight:400">· o domínio e os domínios pais</span></h2>

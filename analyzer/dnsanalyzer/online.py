@@ -260,7 +260,8 @@ def _reservar(c) -> dict | None:
         "UPDATE domains SET online_claimed_at = now() WHERE id = (SELECT d.id FROM domains d WHERE " + _FILA +
         " ORDER BY " + _EM_DECISOES + " DESC, d.lista_duvida DESC, d.total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED) "
         "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_conf, lista_motivo, "
-        "online_resp").fetchone()
+        "online_resp, EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'infra_bloqueio' AND l.domain = domains.name "
+        " AND l.added_by LIKE 'migração%%') AS em_infra").fetchone()
 
 
 def _certo(obj: dict) -> bool:
@@ -327,7 +328,8 @@ def fase(categorias: list[str]) -> str:
         if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")) \
                 and not (revalidar and not meta.get("nivel_reforco")) \
                 and not (obj.get("lista") in listas_ia._DOIS_MODELOS and not meta.get("nivel_reforco")) \
-                and not (_candidato_whitelist(obj) and not meta.get("nivel_reforco")):
+                and not (_candidato_whitelist(obj) and not meta.get("nivel_reforco")) \
+                and not (d.get("em_infra") and obj.get("lista") in (None, NENHUMA) and not meta.get("nivel_reforco")):
             break
         if obj is not None and meta.get("nivel_reforco") and nivel is not busca:
             break

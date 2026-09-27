@@ -310,3 +310,40 @@ def test_dominios_inexistentes_saem_do_fluxo(api):
         em = c.execute("SELECT 1 FROM category_lists WHERE domain='naoexiste-teste.com'").fetchone()
     assert r["inexistentes"] == ["naoexiste-teste.com"] and not em
     assert k == {"naoexiste-teste.com": ("inexistente", False), "existe-teste.com": ("public", True), "dga-teste.com": ("public", True)}
+
+
+# ---------------------------------------------------------------- fase 5
+def test_irmaos_por_certificado_e_cnpj(api):
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import db
+    with db.conn() as c:
+        for n in ("bet-a.com", "bet-b.com", "bet-c.com.br", "bet-d.com.br", "nada.com"):
+            c.execute("INSERT INTO domains (name, classification, total_queries) VALUES (%s, 'NAO_TRABALHO', 5) ON CONFLICT DO NOTHING", (n,))
+        c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('web', 'bet-a.com', true, %s), ('web', 'bet-x.com', true, %s)",
+                  (Jsonb({"cert": {"san_domains": ["bet-b.com", "naovisto.com"]}}), Jsonb({"cert": {"san_domains": ["bet-a.com"]}})))
+        c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('whois', 'bet-a.com', true, %s), ('whois', 'bet-c.com.br', true, %s), "
+                  "('whois', 'bet-d.com.br', true, %s)",
+                  (Jsonb({"titular": {"tipo": "cnpj", "doc": "11.111.111/0001-11", "nome": "Bet LTDA"}}),
+                   Jsonb({"titular": {"tipo": "cnpj", "doc": "11.111.111/0001-11", "nome": "Bet LTDA"}}),
+                   Jsonb({"titular": {"tipo": "cpf", "doc": "***.1-**"}})))
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('apostas', 'bet-a.com', 'op'), ('apostas', 'bet-b.com', 'op')")
+    irm = {x["domain"]: x for x in api.get("/domains/bet-a.com/irmaos", headers=H).json()}
+    assert "bet-c.com.br" in irm and "mesmo titular" in irm["bet-c.com.br"]["motivo"]
+    assert "bet-b.com" not in irm, "já está na mesma lista"
+    assert "naovisto.com" not in irm and "bet-x.com" not in irm and "bet-d.com.br" not in irm, "só vistos nos logs; CPF não conta"
+
+
+def test_precisao_da_ia(api):
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        listas.contexto(c, "IA automática (jogos)", "IA online 95%")
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'prec1.com', 'IA automática (jogos)'), "
+                  "('jogos', 'prec2.com', 'IA automática (jogos)')")
+    with db.conn() as c:
+        listas.contexto(c, "ana@2d", "tirou de jogos (manter liberado)")
+        c.execute("DELETE FROM category_lists WHERE domain = 'prec1.com'")
+    j = api.get("/ai/precisao", headers=H, params={"days": 7}).json()
+    on = next(f for f in j["fontes"] if f["fonte"] == "IA online")
+    assert on["aplicadas"] >= 2 and on["corrigidas"] >= 1 and on["pct_corrigidas"] > 0
+    assert set(j["decisoes"]) == {"aprovou_sugestao", "outra_lista", "manteve_liberado"}

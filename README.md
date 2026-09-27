@@ -3,25 +3,88 @@
 **Protective DNS com análise por IA** da 2D Tecnologia. Faz parte do ecossistema de apps
 do [2D Hub](https://portal.2dtecnologia.com) (login único + launcher).
 
-Filtra ameaças e sites improdutivos por empresa (política por grupo no Technitium). A IA
-local analisa todo domínio acessado, e a empresa decide o que bloquear. **Nada é bloqueado
-automaticamente:** a IA sugere e uma pessoa decide na fila *Decisões*.
+Filtra ameaças e sites improdutivos **por empresa**. Todo domínio que aparece nos logs passa
+por um fluxo de 5 fases. As IAs põem cada site na lista certa (de bloqueio ou de liberação),
+e só o que nenhuma delas resolve com certeza chega à TI em *Decisões*.
 
 | Parte | Onde roda | Pasta |
 |---|---|---|
-| **Console web**: Análise, Decisões, Grupos, Domínios, Liberados, Logs DNS, Empresas, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
-| **Analisador**: coleta dos logs, regras, Threat Intel, IA (Ollama/Qwen3), alertas, API | VM `10.100.10.4` (systemd + PostgreSQL) | [`analyzer/`](analyzer/) |
+| **Console web**: Análise (IA), Decisões, Empresas, Domínios bloqueados, Domínios liberados, IPs liberados, Logs, Gráficos, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
+| **Analisador**: coleta dos logs, regras, Threat Intel, IA local (Ollama/Qwen3), IA online (Gemini), listas, alertas, API | VM `10.100.10.4` (systemd + PostgreSQL) | [`analyzer/`](analyzer/) |
 | **Resolvedor/filtro**: Technitium + app Advanced Blocking | VM `10.100.10.15` | (fora do repo) |
 
 ```
 clientes ──DNS──► Technitium (10.100.10.15) ──logs──► analisador (10.100.10.4) ──API :8088──┐
-                        ▲                                                                   ▼
-                        └──────── bloqueios / liberados / logs ◄──────────── console web (k3s)
+                   ▲   ▲ baixa /listas/*.txt e /whitelist/*.txt (1 h)  │                    ▼
+                   │   └───────────────────────────────────────────────┘                    │
+                   └──────── políticas / exceções / logs ◄──────────────────── console web (k3s)
 ```
 
-O console não tem banco próprio. Análise, empresas (CIDR), **operadores** e as descrições
-dos **liberados** ficam no PostgreSQL do analisador (via API). Grupos, domínios bloqueados, liberados e logs
-são lidos e gravados direto no Technitium.
+O console não tem banco próprio. Empresas (CIDR), políticas, listas, whitelists, operadores e
+auditoria ficam no PostgreSQL do analisador, acessados pela API. **Só o console escreve no
+Technitium**: a configuração do Advanced Blocking e os `allowed` de exceção imediata.
+O analisador apenas publica as listas em texto, e o Technitium as baixa.
+
+## Como funciona
+
+**Fluxo de um domínio novo** (o mesmo vale para os que estão em *Outros* e *Para revisar*):
+
+| Fase | O que faz |
+|---|---|
+| 1. IA local | catálogo, Threat Intel e regras, depois a IA local (Qwen3 8B) classifica e sugere a lista |
+| 2. WHOIS + IA local | RDAP/registro.br e o titular (CNPJ) entram no dossiê |
+| 3. Busca web + IA local | SearXNG com o nome do domínio, para o que a IA ainda não reconhece |
+| 4. IA online | Gemini/Gemma recebe **todo** o contexto das fases 1-3 e valida ou corrige a sugestão local |
+| 5. Decisões | só o que a IA online não resolveu com certeza (a TI decide) |
+
+- Resposta da IA online com confiança **≥ 0,8** e coerente vai direto para a lista.
+  `MALICIOSO` com certeza vai para **Ameaças**. "Nenhuma lista" com certeza sai de Decisões.
+- **DoH/DNS** exige dois modelos com confiança ≥ 0,95. Isso nasceu de um incidente: CDNs
+  foram parar em DoH e bloquearam o seu.ze.delivery.
+- **Travas**: infraestrutura protegida do catálogo e decisões humanas ("manter liberado")
+  nunca são desfeitas pela IA.
+- **Domínios inexistentes** (≥ 95% das consultas com NXDOMAIN em 7 dias) saem do fluxo e
+  voltam sozinhos se passarem a resolver.
+
+**Três grandes listas**
+
+- **Blocklists** por categoria, em seções:
+  - Segurança: Ameaças⚡, VPN/Proxy⚡, DoH/DNS⚡, Adware⚡.
+  - Conteúdo: Adulto⚡, Apostas⚡, Jogos, Redes sociais, Streaming, Mensageiros, Cripto/Trading.
+  - Web: Publicidade, Notícias, Pirataria.
+  - Trabalho: Compras, IA/Chatbots, Nuvem/Acesso remoto.
+  - Sistema: Infraestrutura, Outros, Para revisar.
+
+  ⚡ só marca risco visualmente. Cada empresa escolhe quais categorias bloquear.
+- **Whitelists** por categoria: essenciais, produtividade, comunicação, finanças, governo,
+  infraestrutura, segurança, desenvolvimento, educação, saúde, utilidades, outros de trabalho.
+  A IA inclui sozinha o que tem certeza (catálogo protegido, ou dois modelos concordando com
+  ≥ 0,9). Hospedagem compartilhada e o "pai" de algo bloqueado ficam de fora. Todas as
+  políticas recebem as whitelists: no Technitium, liberado vence bloqueado.
+- **Aprovados**: sites avaliados (pela IA ou por uma pessoa) que não bloqueiam nada e não vão
+  ao Technitium. Não são reanalisados, a menos que alguém peça. Os feeds de ameaça continuam
+  valendo para eles.
+
+**Políticas por empresa.** Cada política vira um grupo interno do Advanced Blocking
+(`Empresa: <nome>[ · unidade]`) com as URLs das categorias bloqueadas, das liberações de
+serviço e de todas as whitelists. O console sincroniza por *read-modify-write*: faz backup da
+configuração antes (`technitium_config_backups`) e valida depois.
+
+**Rotinas de confiabilidade** ([docs/PLANO-CONFIABILIDADE.md](docs/PLANO-CONFIABILIDADE.md)):
+- **Exceção imediata**: liberar um domínio (para todos ou só para uma empresa) grava um
+  `allowed` no Technitium na hora, sem esperar a atualização de 1 h das listas.
+- **Prévia de impacto**: antes de bloquear ou mudar uma política, mostra quantas empresas e
+  computadores acessaram o domínio.
+- **Auditoria** (`list_audit`): quem pôs ou tirou cada domínio de cada lista e por quê. É o
+  histórico clicável de cada domínio.
+- **Pulso das listas**: registra quando o Technitium baixou cada lista e alerta se ela atrasa
+  ou é recusada.
+- **Validade das ameaças**: o que foi posto em Ameaças automaticamente sai da lista 7 dias
+  depois de sumir dos feeds, e o domínio é reanalisado. O que uma pessoa pôs não expira.
+- **Alertas** só para bloqueios **novos** e não intencionais.
+- **Domínios irmãos**: mesmo certificado (SAN) ou mesmo titular (CNPJ), para pôr a família
+  inteira na lista de uma vez.
+- **Precisão da IA** (7 dias): quanto do que cada fonte aplicou foi corrigido por uma pessoa.
 
 ## Acesso
 
@@ -32,16 +95,21 @@ são lidos e gravados direto no Technitium.
 
 ## Deploy
 
-**Console (automático):** push no `main` do GitHub → Woodpecker builda
-`registry.2dtecnologia.com/dailison/2d-dns-guard:<sha>` → `kubectl set image` no ns
-`dns-guard`. Pushes que só mexem em `analyzer/` não disparam o build.
-Manifests em [`k3s/deploy.yaml`](k3s/deploy.yaml), aplicados por admin (o SA do CI só troca a imagem).
-Secret `dns-guard-secrets`: `SECRET_KEY`, `TECHNITIUM_TOKEN`, `ANALYZER_TOKEN`.
+**Ordem:** primeiro o analisador na VM (código + `migrate` + restart), **depois** o push no
+`main`. O console novo chama endpoints do analisador. Se o push vier antes, o console fica sem
+filtro ou mostra "Aguardando IA".
 
 **Analisador (manual):** copiar `analyzer/` para a VM e rodar `sudo bash deploy/install.sh`.
 Para só atualizar o código: rsync para `/opt/2d-dnsanalyzer/app`, `dnsanalyzer migrate`
 e `systemctl restart dnsanalyzer-api dnsanalyzer-collector dnsanalyzer-classifier`.
 Detalhes em [`analyzer/README.md`](analyzer/README.md).
+
+**Console (automático):** push no `main` do GitHub → Woodpecker builda
+`registry.2dtecnologia.com/dailison/2d-dns-guard:<sha>` → `kubectl set image` no ns
+`dns-guard`. Pushes que só mexem em `analyzer/` não disparam o build.
+Os manifests ficam em [`k3s/deploy.yaml`](k3s/deploy.yaml) e são aplicados por admin (o SA
+do CI só troca a imagem). Secret `dns-guard-secrets`: `SECRET_KEY`, `TECHNITIUM_TOKEN`,
+`ANALYZER_TOKEN`.
 
 ## Desenvolvimento local
 
@@ -51,6 +119,10 @@ ANALYZER_URL=http://10.100.10.4:8088 ANALYZER_TOKEN=... TECHNITIUM_URL=http://10
 TECHNITIUM_TOKEN=... SESSION_COOKIE_SECURE=false .venv/bin/flask --app wsgi run -p 8080
 ```
 
-Testes do analisador: `cd analyzer && pytest`.
+Testes:
+- Console: `cd web && pip install -r requirements-dev.txt && pytest`. Cobre a sincronização
+  das políticas com um Technitium falso.
+- Analisador: `cd analyzer && pip install -r requirements-dev.txt pgserver && pytest`. Os
+  testes de banco sobem um PostgreSQL temporário com `pgserver` e são pulados sem ele.
 
 Histórico: extraído do `2D-HotspotPortal` em 2026-09-25 (último commit comum `34b7644`).

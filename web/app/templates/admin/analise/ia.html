@@ -37,6 +37,16 @@
   <div class="metric"><div class="n" id="st-eta" style="font-size:1.1rem;padding-top:.3rem">–</div><div class="l">Previsão p/ zerar a fila</div></div>
 </div>
 
+{% if precisao and precisao.fontes %}
+<div class="card" style="padding:.7rem 1rem;margin-bottom:1rem">
+  <b>Precisão da IA · últimos {{ precisao.dias }} dias</b> <span class="mut" style="font-size:.8rem">— entradas automáticas nas listas que uma pessoa desfez depois</span>
+  <div style="display:flex;flex-wrap:wrap;gap:.5rem 1.2rem;margin-top:.4rem;font-size:.88rem">
+    {% for f in precisao.fontes %}<span><b>{{ f.fonte }}</b>: {{ f.aplicadas }} aplicada(s), {{ f.corrigidas }} corrigida(s) <span class="{{ 'mut' if f.pct_corrigidas < 5 else '' }}" style="{{ 'color:#b91c1c;font-weight:700' if f.pct_corrigidas >= 10 }}">({{ f.pct_corrigidas }}%)</span></span>{% endfor %}
+  </div>
+  {% set dc = precisao.decisoes or {} %}
+  <div class="mut" style="font-size:.8rem;margin-top:.3rem">Decisões (fase 5): {{ dc.aprovou_sugestao or 0 }} sugestão(ões) da IA aprovada(s), {{ dc.outra_lista or 0 }} postas noutra lista, {{ dc.manteve_liberado or 0 }} mantidas liberadas.</div>
+</div>
+{% endif %}
 <div class="now idle" id="now"><div class="spin"></div><div id="now-txt" class="mut">Aguardando…</div></div>
 
 <div class="card">

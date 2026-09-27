@@ -474,3 +474,30 @@ def test_candidato_a_whitelist_pede_segunda_opiniao(env, monkeypatch):
     with db.conn() as c:
         a = c.execute("SELECT online_resp->'_meta'->'antes' AS a FROM domains WHERE name='erp-wl.com.br'").fetchone()["a"]
     assert a["classificacao"] == "TRABALHO" and a["lista"] == "nenhuma"
+
+
+def test_revisao_da_infraestrutura(env):
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import db, listas_ia
+    dois = {"_meta": {"antes": {"lista": "nenhuma", "confianca": 0.95}}}
+    with db.conn() as c:
+        casos = (("888win-infra.win", "apostas", 0.95, {}, "migração dos grupos antigos"),
+                 ("telemetria-infra.net", "nenhuma", 0.95, {}, "migração dos grupos antigos"),       # 1 modelo: fica
+                 ("trafficmanager-infra.net", "nenhuma", 0.95, dois, "migração dos grupos antigos"),  # 2 modelos: sai
+                 ("pessoa-infra.net", "nenhuma", 1.0, dois, "op@2d"))                                # posto por pessoa
+        for n, lista, conf, resp, por in casos:
+            i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at) VALUES (%s, 'TRABALHO', 'infraestrutura', now()) "
+                          "RETURNING id", (n,)).fetchone()["id"]
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('infra_bloqueio', %s, %s)", (n, por))
+            listas_ia.salvar(c, i, lista, conf, "", "", "online:gemini")
+            extra = {"classificacao": "NAO_TRABALHO", "categoria": "apostas"} if lista == "apostas" else {"classificacao": "TRABALHO"}
+            c.execute("UPDATE domains SET online_resp = %s WHERE id = %s", (Jsonb({**extra, **resp}), i))
+        listas_ia.aplicar(c)
+        em = {}
+        for r in c.execute("SELECT domain, category FROM category_lists WHERE domain LIKE '%%-infra.%%'"):
+            em.setdefault(r["domain"], set()).add(r["category"])
+    assert em.get("888win-infra.win") == {"apostas"}, em
+    assert em.get("telemetria-infra.net") == {"infra_bloqueio"}, "um modelo só: fica bloqueado"
+    assert "trafficmanager-infra.net" not in em, "dois modelos: sai"
+    assert em.get("pessoa-infra.net") == {"infra_bloqueio"}, "posto por pessoa: intocado"

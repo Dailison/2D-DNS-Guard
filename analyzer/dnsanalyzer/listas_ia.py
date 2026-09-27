@@ -183,6 +183,9 @@ def status(c) -> dict:
 # ------------------------------------------------------------------ aplicar nas listas
 AUTO_BY = "IA automática"          # entrou sozinha na lista (certeza)
 OUTROS = "outros_bloqueios"        # como Para revisar: com certeza, o site sai daqui p/ a lista certa
+# Infraestrutura: só as entradas da MIGRAÇÃO (antigo grupo "CDN", nunca revisado) — com certeza vão p/ a lista
+# certa; "nenhuma" só tira com DOIS modelos de acordo (liberaria o site p/ todas as empresas que aplicam a lista)
+INFRA = "infra_bloqueio"
 DUVIDA_BY = "IA com dúvida"        # foi para Para revisar com a sugestão
 PARA_REVISAR = "para_revisar"
 
@@ -229,6 +232,16 @@ def guardado(r: dict, cat: str | None = None) -> str | None:
     if rank and rank <= 10000 and cls == "TRABALHO":
         return f"trava: site de trabalho popular (Tranco {rank})"
     return None
+
+
+def _dois_nenhuma(r: dict) -> bool:
+    """Dois modelos online disseram "nenhuma lista" com ≥ 0,9."""
+    a = r.get("antes") or {}
+    try:
+        return (a.get("lista") in (None, NENHUMA) and float(a.get("confianca") or 0) >= 0.9
+                and float(r.get("lista_conf") or 0) >= 0.9)
+    except (TypeError, ValueError):
+        return False
 
 
 def _fonte(r: dict) -> str:
@@ -282,7 +295,7 @@ def aplicar(c, limite: int = 3000) -> dict:
         cat = r["lista_ia"]
         em = dict(x.split("|", 1) for x in (r["em"] or []))                    # {lista: quem pôs}
         da_ia = {k for k, v in em.items() if v.startswith((AUTO_BY, "bloqueio automático"))}   # postas pela IA
-        moveis = {PARA_REVISAR, OUTROS} | da_ia
+        moveis = {PARA_REVISAR, OUTROS} | da_ia | ({INFRA} if em.get(INFRA, "").startswith("migração") else set())
         fixas = set(em) - moveis                                                 # pessoa/migração/Sistema
         online = (r["lista_fonte"] or "").startswith("online")
         certo = (r["lista_conf"] or 0) >= (cfg.online_confianca_min if online else cfg.lista_confianca_min)
@@ -302,7 +315,7 @@ def aplicar(c, limite: int = 3000) -> dict:
             continue   # alguém pôs noutra lista: fica
         if certo and not cat and online:
             # a IA online resolveu: não é de lista nenhuma (sai de Decisões e das listas que a IA pôs)
-            tirar = [x for x in moveis if x in em and x != OUTROS]
+            tirar = [x for x in moveis if x in em and x != OUTROS and (x != INFRA or _dois_nenhuma(r))]
             if tirar:
                 listas.contexto(c, _fonte(r), "IA online: não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))

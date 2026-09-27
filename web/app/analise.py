@@ -524,7 +524,7 @@ def dominio_fp(nome):
 def dominio_reanalisar(nome):
     tid = request.form.get("tid", type=int)
     try:
-        api.post(f"/domains/{quote(nome, safe='')}/reanalyze")
+        api.post(f"/domains/{quote(nome, safe='')}/reanalyze?by={quote(admin_atual().email, safe='@')}")
         flash(f"{nome}: enviado para nova análise (regras agora; IA na fila).", "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")

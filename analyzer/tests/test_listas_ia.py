@@ -532,8 +532,17 @@ def test_reanalisar_leva_decidido_pela_fase_1(env):
         i = c.execute("INSERT INTO domains (name, classification, classified_by, total_queries, analyzed_at) VALUES "
                       "('decidido-rean.net', 'TRABALHO', 'llm', 10, now()) RETURNING id").fetchone()["id"]
         c.execute("INSERT INTO global_reviews (domain_id, status, reviewed_by) VALUES (%s, 'blocked', 'op@2d')", (i,))
-    r = env.post("/domains-reanalyze", json={"domains": ["decidido-rean.net"]}, headers=H)
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'decidido-rean.net', 'IA com dúvida (jogos)')")
+        c.execute("UPDATE domains SET lista_duvida = true WHERE id = %s", (i,))
+    r = env.post("/domains-reanalyze", json={"domains": ["decidido-rean.net"], "by": "tec@2d"}, headers=H)
     assert r.status_code == 200 and r.json()["enviados"] == 1, r.text
+    with db.conn() as c:   # sai da fase em que estava (Decisão Humana e fila da IA online) e volta à fase 1
+        assert not c.execute("SELECT 1 FROM category_lists WHERE category = 'para_revisar' AND domain = 'decidido-rean.net'").fetchone()
+        assert not c.execute("SELECT lista_duvida FROM domains WHERE id = %s", (i,)).fetchone()["lista_duvida"]
+        ev = c.execute("SELECT origem, detail FROM ai_events WHERE kind = 'decisao' AND name = 'decidido-rean.net'").fetchone()
+        au = c.execute("SELECT por, motivo FROM list_audit WHERE domain = 'decidido-rean.net' AND acao = 'remove'").fetchone()
+    assert ev and ev["origem"] == "f5:ti" and "tec@2d: pediu nova análise" in ev["detail"], ev
+    assert au and au["por"] == "tec@2d" and "nova análise" in au["motivo"], au
     with db.conn() as c:
         c.execute("UPDATE domains SET needs_analysis = false, llm_pending = true WHERE id = %s", (i,))   # (fase A)
         assert c.execute("SELECT reanalise_pedida FROM domains WHERE id = %s", (i,)).fetchone()["reanalise_pedida"]

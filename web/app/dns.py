@@ -524,8 +524,8 @@ def listas_lote_dominios():
     quem = admin_atual().email
     try:
         if acao == "reanalisar":
-            r = api.post("/domains-reanalyze", {"domains": doms})
-            return _json(True, f"{r.get('enviados', 0)} domínio(s) enviados para nova análise (regras agora; IA, busca na web e WHOIS na fila)."
+            r = api.post("/domains-reanalyze", {"domains": doms, "by": quem})
+            return _json(True, f"{r.get('enviados', 0)} domínio(s) enviados para nova análise (voltam à fase 1)."
                          + (f" {r['ignorados']} ficaram de fora (classificação travada à mão ou nunca acessados)." if r.get("ignorados") else ""))
         if acao == "tirar_wl":
             api.post("/whitelist-remover", {"domains": doms, "by": quem})

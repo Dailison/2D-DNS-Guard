@@ -615,13 +615,10 @@ def false_positive(name: str, body: FalsePositiveIn):
 
 
 @app.post("/domains/{name}/reanalyze", dependencies=[Depends(auth)])
-def reanalyze(name: str):
+def reanalyze(name: str, by: str = ""):
     reg = _domain_name(name)
     with db.conn() as c:
-        r = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, "
-                      "llm_attempts=0, revisado_at=NULL, reanalise_pedida=true WHERE name=%s AND NOT locked RETURNING id",
-                      (reg,)).fetchone()
-        if not r:
+        if not _reanalisar(c, [reg], by):
             raise HTTPException(404, "domínio não encontrado (ou travado)")
         return {"ok": True, "domain": reg}
 
@@ -1474,16 +1471,34 @@ def online_decisao(body: OnlineIn):
 
 class NomesIn(BaseModel):
     domains: list[str]
+    by: str = ""
+
+
+def _reanalisar(c, nomes: list[str], by: str = "") -> list[str]:
+    """Nova análise pedida por uma pessoa: volta à fase 1 (mesmo decidido: reanalise_pedida) e sai da fase em que
+    estava — Decisão Humana (para_revisar) e fila da IA online. Se de novo nenhuma fase tiver certeza, volta à
+    Decisão Humana sozinho. Travados à mão ficam de fora."""
+    from . import eventos
+    enviados = [r["name"] for r in c.execute(
+        "UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, llm_attempts=0, revisado_at=NULL, "
+        "reanalise_pedida=true, lista_duvida=false, online_claimed_at=NULL WHERE name = ANY(%s) AND NOT locked RETURNING name",
+        (nomes,))]
+    if enviados:
+        listas.contexto(c, by or "manual", "nova análise pedida: volta à fase 1")
+        sairam = [r["domain"] for r in c.execute("DELETE FROM category_lists WHERE category = 'para_revisar' AND domain = ANY(%s) "
+                                                 "RETURNING domain", (enviados,))]
+        for n in enviados[:50]:
+            eventos.lista("decisao", n, "para_revisar" if n in sairam else None,
+                          f"{by or 'manual'}: pediu nova análise (volta à fase 1)", origem="f5:ti")
+    return enviados
 
 
 @app.post("/domains-reanalyze", dependencies=[Depends(auth)])
 def reanalyze_lote(body: NomesIn):
-    """Nova análise em lote (regras agora; IA + busca na fila). Travados à mão ficam de fora. Decidido também passa
-    pela fase 1 de novo (reanalise_pedida): é uma pessoa pedindo."""
+    """Nova análise em lote (regras agora; IA, WHOIS e busca na fila) — ver _reanalisar."""
     nomes = sorted({_domain_name(x) for x in body.domains if x and x.strip()})
     with db.conn() as c:
-        n = c.execute("UPDATE domains SET needs_analysis=true, evidence_hash='', classified_by=NULL, llm_attempts=0, "
-                      "revisado_at=NULL, reanalise_pedida=true WHERE name = ANY(%s) AND NOT locked", (nomes,)).rowcount
+        n = len(_reanalisar(c, nomes, body.by))
     return {"ok": True, "enviados": n, "ignorados": len(nomes) - n}
 
 

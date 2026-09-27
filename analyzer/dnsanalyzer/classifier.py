@@ -426,7 +426,11 @@ def _razao(fin) -> str:
 
 def _buscar_antes(d: dict) -> bool:
     """Etapa 1: buscar na web antes da IA? Só p/ o que a IA não teria como reconhecer."""
-    if not settings().web_search_url or d.get("kind") != "public" or d.get("popularity_rank"):
+    if not settings().web_search_url or d.get("kind") != "public":
+        return False
+    if settings().web_search_before_llm_todos:   # WEB_SEARCH_BEFORE_LLM=todos: todo domínio novo
+        return True
+    if d.get("popularity_rank"):
         return False
     web = d.get("web") or {}
     cert = web.get("cert") or {}

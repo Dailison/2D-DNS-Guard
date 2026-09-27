@@ -102,6 +102,7 @@ class Settings:
     web_search_results: int
     web_search_min_interval: int
     web_search_before_llm: bool
+    web_search_before_llm_todos: bool   # "todos": todo domínio da fase 1, não só os que a IA não reconheceria
     whois_enabled: bool
     whois_workers: int
     auto_block_categories: list[str]
@@ -209,7 +210,10 @@ def load_settings() -> Settings:
         web_search_min_interval=_int("WEB_SEARCH_MIN_INTERVAL", 20),
         # busca ANTES da IA na etapa 1 (desligada a pedido do usuário em 2026-09-26: a IA analisa
         # primeiro; o que ela não reconhecer vai p/ Decisões e a etapa 2 busca quando a fila zerar)
-        web_search_before_llm=_bool(os.environ.get("WEB_SEARCH_BEFORE_LLM"), False),
+        # (27/09: WEB_SEARCH_BEFORE_LLM=todos a pedido do usuário — busca em todo domínio novo, IA local na VM)
+        web_search_before_llm=(os.environ.get("WEB_SEARCH_BEFORE_LLM") or "").strip().lower() == "todos"
+                              or _bool(os.environ.get("WEB_SEARCH_BEFORE_LLM"), False),
+        web_search_before_llm_todos=(os.environ.get("WEB_SEARCH_BEFORE_LLM") or "").strip().lower() == "todos",
         whois_enabled=_bool(os.environ.get("WHOIS_ENABLED"), True),   # etapa 3 (RDAP + CNPJ/BrasilAPI)
         # em paralelo com a etapa 2; cada serviço tem intervalo mínimo próprio (registro.br 2 s,
         # rdap.org 1,5 s, BrasilAPI 1 s), então 2 workers já ocupam os três

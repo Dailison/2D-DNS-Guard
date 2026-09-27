@@ -387,14 +387,11 @@ def _buscar_antes(d: dict) -> bool:
 
 # decidido não volta à IA sozinho; "Reanalisar" (reanalise_pedida) o leva pelas fases de novo
 DECIDIDO_FORA = "(NOT dominio_decidido(id) OR reanalise_pedida)"
-ETAPA1_PENDENTE = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND " + DECIDIDO_FORA)
 
 
 def _claim_etapa2(c) -> dict | None:
-    """Fase 3: próximo DESCONHECIDO p/ busca na web — só com a fila da fase 1 vazia e DEPOIS do WHOIS
-    (fase 2; a busca aproveita o WHOIS do cache)."""
-    if c.execute(ETAPA1_PENDENTE + " LIMIT 1").fetchone():
-        return None
+    """Fase 3: próximo DESCONHECIDO p/ busca na web — DEPOIS do WHOIS (fase 2; a busca aproveita o WHOIS do
+    cache). Em paralelo com a fase 1 (pedido do usuário 27/09: fases 1-4 não esperam a fila da fase 1)."""
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE ((classification = 'DESCONHECIDO' AND classified_by = 'llm') OR """
@@ -419,10 +416,8 @@ def phase_c(client: OllamaClient, cats: list[dict]) -> str:
 
 
 def _claim_etapa3(c) -> dict | None:
-    """Fase 2: próximo DESCONHECIDO p/ WHOIS (antes da busca na web), só com a fila da IA (fase 1)
-    vazia. .br primeiro (titular com CNPJ no registro.br identifica a empresa)."""
-    if c.execute(ETAPA1_PENDENTE + " LIMIT 1").fetchone():
-        return None
+    """Fase 2: próximo DESCONHECIDO p/ WHOIS (antes da busca na web), em paralelo com a fase 1.
+    .br primeiro (titular com CNPJ no registro.br identifica a empresa)."""
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE ((classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')) OR """
@@ -453,11 +448,24 @@ class _Reforco:
 
 
 def _whois_worker(stop, cats: list[dict], reforco: "_Reforco", wid: int) -> None:
-    """Etapa 3 em paralelo com a etapa 2: WHOIS/RDAP (+ CNPJ) + IA, no reforço com GPU se no ar."""
+    """Fase 2 em paralelo com as outras: WHOIS/RDAP (+ CNPJ) + IA, no reforço com GPU se no ar."""
+    _fase_worker(stop, lambda: phase_d(reforco.cliente(), cats), f"worker {wid} do WHOIS")
+
+
+def _busca_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
+    """Fase 3 em paralelo com as outras: busca na web + IA (a busca tem 1 vaga a cada WEB_SEARCH_MIN_INTERVAL
+    p/ todos). Sem fila: lista dos classificados pelo catálogo/regras (senão só andaria com a fase 1 vazia)."""
+    def passo():
+        st = phase_c(reforco.cliente(), cats)
+        return listas_ia.fase(reforco.cliente()) if st == "idle" else st
+    _fase_worker(stop, passo, "worker da busca na web")
+
+
+def _fase_worker(stop, passo, nome: str) -> None:
     backoff = 0
     while not stop():
         try:
-            st = phase_d(reforco.cliente(), cats)
+            st = passo()
             if st == "idle":
                 time.sleep(30)
             elif st == "unavailable":
@@ -466,7 +474,7 @@ def _whois_worker(stop, cats: list[dict], reforco: "_Reforco", wid: int) -> None
             else:
                 backoff = 0
         except Exception:  # noqa: BLE001
-            log.exception("erro no worker %d do WHOIS", wid)
+            log.exception("erro no %s", nome)
             time.sleep(30)
 
 
@@ -553,7 +561,7 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
-    db.set_max_size(6 + cfg.online_workers + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
+    db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + cfg.llm_extra_workers * len(cfg.ollama_extra_urls) + cfg.whois_workers)
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:
@@ -581,7 +589,10 @@ def run_forever(stop=lambda: False) -> None:
         for i in range(cfg.whois_workers):
             threading.Thread(target=_whois_worker, args=(stop, cats, reforco, i), daemon=True,
                              name=f"whois-{i}").start()
-        log.info("etapa 3 (WHOIS) em paralelo: %d worker(s)", cfg.whois_workers)
+        log.info("fase 2 (WHOIS) em paralelo: %d worker(s)", cfg.whois_workers)
+    if cfg.llm_enabled and cfg.web_search_url:
+        threading.Thread(target=_busca_worker, args=(stop, cats, reforco), daemon=True, name="busca").start()
+        log.info("fase 3 (busca na web) em paralelo")
     for i in range(cfg.online_workers):
         threading.Thread(target=_online_worker, args=(stop,), daemon=True, name=f"online-{i}").start()
     log.info("fase 4 (IA online): %s", " | ".join(",".join(f"{m} {r}/min {d}/dia" for m, r, d in n) for n in online.niveis())
@@ -613,10 +624,8 @@ def run_forever(stop=lambda: False) -> None:
                 continue
             # IA da VM (só CPU) como reserva: com o reforço (GPU) no ar, o laço principal também usa a GPU
             status = phase_b(cliente_etapa2() if cfg.llm_vm_reserva else client, cats)
-            if status == "idle":            # etapa 1 vazia: etapa 2 (busca na web); a 3 tem workers próprios
-                status = phase_c(cliente_etapa2(), cats)
-            if status == "idle":            # etapas 1 e 2 vazias: etapa "lista"
-                status = listas_ia.fase(cliente_etapa2())
+            if status == "idle":            # fase 1 vazia: lista dos classificados pelo catálogo/regras
+                status = listas_ia.fase(cliente_etapa2())   # (fases 2, 3 e 4 têm workers próprios)
             if status == "idle":
                 time.sleep(20)
             elif status == "unavailable":

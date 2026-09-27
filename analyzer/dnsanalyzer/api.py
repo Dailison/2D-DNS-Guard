@@ -729,23 +729,25 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
     """Feed "IA ao vivo": eventos novos (id > after_id), o que está em análise agora e o ritmo."""
     with db.conn() as c:
         from . import eventos
+        # regras/feeds (saiu da whitelist por feed ou trava, sem resposta no DNS, lista recusada) não são decisão da IA:
+        # ficam só no histórico do domínio e na página da lista (pedido do usuário 27/09)
+        so_ia = "origem IS DISTINCT FROM 'regras'"
         if after_id:
             events = c.execute(
                 "SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
-                "WHERE id > %s ORDER BY id DESC LIMIT %s", (after_id, max(limit, 300))).fetchall()
+                "WHERE id > %s AND " + so_ia + " ORDER BY id DESC LIMIT %s", (after_id, max(limit, 300))).fetchall()
         else:   # carga inicial: as últimas de CADA coluna (classificação e decisão)
             events = c.execute(
                 "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
-                " WHERE kind <> ALL(%(d)s) ORDER BY id DESC LIMIT %(n)s) UNION ALL "
+                " WHERE kind <> ALL(%(d)s) AND " + so_ia + " ORDER BY id DESC LIMIT %(n)s) UNION ALL "
                 "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
-                " WHERE kind = ANY(%(d)s) ORDER BY id DESC LIMIT %(n)s) ORDER BY id DESC",
+                " WHERE kind = ANY(%(d)s) AND " + so_ia + " ORDER BY id DESC LIMIT %(n)s) ORDER BY id DESC",
                 {"d": list(eventos.DECISAO), "n": limit}).fetchall()
         # o que está em análise agora e em que fase (1-3 = claimed_at; lista = fase 1; 4 = IA online)
         cur = c.execute(
             "SELECT name, total_queries, fase, extract(epoch from now() - t)::int AS elapsed FROM ("
             " SELECT name, total_queries, claimed_at AS t, CASE WHEN llm_pending THEN '1' "
-            "   WHEN classification = 'DESCONHECIDO' AND whois_at IS NULL THEN '2' "
-            "   WHEN classification = 'DESCONHECIDO' AND web_search_at IS NULL THEN '3' ELSE '1' END AS fase "
+            "   WHEN whois_at IS NULL THEN '2' WHEN web_search_at IS NULL THEN '3' ELSE '1' END AS fase "
             " FROM domains WHERE claimed_at > now() - interval '30 minutes' "
             " UNION ALL SELECT name, total_queries, online_claimed_at, '4' FROM domains "
             "   WHERE online_claimed_at > now() - interval '10 minutes' "

@@ -98,7 +98,7 @@ def test_fila_classifica_e_aplica(env, monkeypatch):
     assert "chatgpt.com" not in g, "ninguém aplica IA/Chatbots: não vira decisão"
     assert st["fila"] == 0 and st["com_lista"] == 11
     with db.conn() as c:
-        assert listas_ia.aplicar(c) == {"direto": [], "revisar": [], "resolvidos": [], "online": []}, "não reaplica"
+        assert listas_ia.aplicar(c) == {"direto": [], "revisar": [], "resolvidos": [], "online": [], "local": {}}, "não reaplica"
 
 
 def test_detalhes_mostram_sugestao_e_aprovar(env):
@@ -190,15 +190,16 @@ def test_gemini_valida_sugestoes(env, monkeypatch):
         ids = {}
         for n, cls in (("v-certo.com", "NAO_TRABALHO"), ("v-errado.com", "NAO_TRABALHO"), ("playrix.com", "TRABALHO"),
                        ("v-sobra.com", "TRABALHO"), ("v-talvez.com", "NAO_TRABALHO")):
-            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
-                               "VALUES (%s, %s, 'outros', now(), 5) RETURNING id", (n, cls)).fetchone()["id"]
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, "
+                               "web_search_at) VALUES (%s, %s, 'outros', now(), 5, now(), now()) RETURNING id", (n, cls)).fetchone()["id"]
         # v-errado: a IA local já tinha posto sozinha em Compras (antes da validação)
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('compras', 'v-errado.com', 'IA automática (compras)'), "
                   "('para_revisar', 'v-sobra.com', 'migração dos grupos antigos'), ('streaming', 'v-talvez.com', 'IA automática (streaming)')")
         listas_ia.salvar(c, ids["v-certo.com"], "jogos", 1.0, "", "", "local")
         listas_ia.salvar(c, ids["playrix.com"], "jogos", 1.0, "", "", "local")
-        ids["slatic.net"] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
-                                      "VALUES ('slatic.net', 'TRABALHO', 'infraestrutura', now(), 9) RETURNING id").fetchone()["id"]
+        ids["slatic.net"] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, "
+                                      "web_search_at) VALUES ('slatic.net', 'TRABALHO', 'infraestrutura', now(), 9, now(), now()) "
+                                      "RETURNING id").fetchone()["id"]
         listas_ia.salvar(c, ids["slatic.net"], "compras", 0.9, "CDN da Lazada", "", "local")
         ap = listas_ia.aplicar(c)
         em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists")}
@@ -516,8 +517,8 @@ def test_nenhuma_da_ia_local_na_infraestrutura_vai_p_validacao(env, monkeypatch)
     from dnsanalyzer import config, db, listas_ia
     monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
     with db.conn() as c:
-        i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at) VALUES "
-                      "('local-nenhuma-infra.net', 'TRABALHO', 'comunicacao', now()) RETURNING id").fetchone()["id"]
+        i = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, whois_at, web_search_at) VALUES "
+                      "('local-nenhuma-infra.net', 'TRABALHO', 'comunicacao', now(), now(), now()) RETURNING id").fetchone()["id"]
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('infra_bloqueio', 'local-nenhuma-infra.net', "
                   "'migração dos grupos antigos')")
         listas_ia.salvar(c, i, "nenhuma", 0.95, "", "", listas_ia.FONTE_LOCAL)
@@ -632,6 +633,7 @@ def test_cascata_por_confianca(env, monkeypatch):
             ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, lista_duvida) "
                                "VALUES (%s, 'NAO_TRABALHO', 'outros', now() - interval '1 minute', 5, true) RETURNING id", (n,)).fetchone()["id"]
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'cascata-c.com', 'IA com dúvida (jogos)')")
+        c.execute("UPDATE domains SET whois_at = now(), web_search_at = now() WHERE name IN ('cascata-b.com', 'cascata-c.com', 'cascata-e.com')")
         listas_ia.salvar(c, ids["cascata-a.com"], "jogos", 0.6, "talvez", "", "local")
         listas_ia.salvar(c, ids["cascata-b.com"], "jogos", 0.95, "jogo online", "", "local")
         listas_ia.salvar(c, ids["cascata-c.com"], "nenhuma", 0.95, "loja", "", "local")
@@ -687,8 +689,8 @@ def test_todo_site_vai_p_uma_fila_whitelist(env, monkeypatch):
         ids = {}
         for n, cls, cat in (("banco-wlf.com.br", "TRABALHO", "financas"), ("escola-wlf.com.br", "TRABALHO", "educacao"),
                             ("decidir-wlf.com.br", "TRABALHO", "outros")):
-            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
-                               "VALUES (%s, %s, %s, now(), 5) RETURNING id", (n, cls, cat)).fetchone()["id"]
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, "
+                               "web_search_at) VALUES (%s, %s, %s, now(), 5, now(), now()) RETURNING id", (n, cls, cat)).fetchone()["id"]
         listas_ia.salvar(c, ids["banco-wlf.com.br"], "wl:financas", 0.95, "banco digital", "Banco X", "local", 2)
         # (liberação da IA local de antes da validação: entrada provisória, que a resposta da IA online substitui)
         c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES ('comunicacao', 'banco-wlf.com.br', "
@@ -749,8 +751,8 @@ def test_modelo_aprovado_decide_sozinho(env, monkeypatch):
         ids = {}
         for n, cls, cat in (("jogo-gm.com", "NAO_TRABALHO", "jogos"), ("escola-gm.com.br", "TRABALHO", "educacao"),
                             ("jogo-8b.com", "NAO_TRABALHO", "jogos"), ("doh-gm.net", "NAO_TRABALHO", "infraestrutura")):
-            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
-                               "VALUES (%s, %s, %s, now(), 5) RETURNING id", (n, cls, cat)).fetchone()["id"]
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, "
+                               "web_search_at) VALUES (%s, %s, %s, now(), 5, now(), now()) RETURNING id", (n, cls, cat)).fetchone()["id"]
         listas_ia.salvar(c, ids["jogo-gm.com"], "jogos", 0.95, "jogo online", "Jogo", "local", 1, "gemma4:26b")
         listas_ia.salvar(c, ids["escola-gm.com.br"], "wl:educacao", 0.95, "escola", "Escola", "local", 2, "gemma4:26b")
         listas_ia.salvar(c, ids["jogo-8b.com"], "jogos", 0.95, "jogo online", "Jogo", "local", 1, "qwen3:8b")
@@ -764,3 +766,41 @@ def test_modelo_aprovado_decide_sozinho(env, monkeypatch):
     assert wl and wl["category"] == "educacao" and wl["added_by"] == "IA local (fase 2)" and not duv["escola-gm.com.br"], wl
     assert ("jogos", "jogo-8b.com") not in em and duv["jogo-8b.com"], "qwen3:8b não decide sozinho: IA online"
     assert ("doh_dns", "doh-gm.net") not in em and duv["doh-gm.net"], "DoH: trava de dois modelos online vale p/ qualquer modelo"
+
+
+def test_confianca_alta_com_trava_passa_pelas_fases_2_e_3(env, monkeypatch):
+    """Nenhum domínio vai da fase 1 direto p/ a 4 (pedido do usuário 27/09): gemma4 com 100% mas com trava (ameaça num
+    SUSPEITO) segue p/ o WHOIS e a busca na web; só depois da fase 3 vai p/ a IA online. O log diz o destino real."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import config, db, listas_ia
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    monkeypatch.setattr(cfg, "web_search_url", "http://searx")
+    with db.conn() as c:
+        i = c.execute("INSERT INTO domains (name, tld, kind, classification, category, analyzed_at, total_queries, lista_duvida) "
+                      "VALUES ('trava-f1.vip', 'vip', 'public', 'SUSPEITO', 'outros', now() - interval '1 minute', 5, true) "
+                      "RETURNING id").fetchone()["id"]
+    resp = SimpleNamespace(lista="ameaca", confianca=1.0, motivo="typosquat", servico="")
+    monkeypatch.setattr(listas_ia, "perguntar", lambda client, d: (resp, {"seconds": 1.0}))
+    cliente = SimpleNamespace(model="gemma4:26b")
+    with db.conn() as c:
+        d = c.execute("SELECT id, name, classification, whois_at, web_search_at FROM domains WHERE id = %s", (i,)).fetchone()
+    listas_ia._sugerir(cliente, d, 1)
+    with db.conn() as c:
+        r = c.execute("SELECT lista_duvida, lista_segue, (" + listas_ia.incerta_sql() + ") AS incerta FROM domains WHERE id = %s",
+                      (i,)).fetchone()
+        ev = c.execute("SELECT detail FROM ai_events WHERE kind = 'lista_local' AND name = 'trava-f1.vip'").fetchone()
+        em = c.execute("SELECT 1 FROM category_lists WHERE domain = 'trava-f1.vip'").fetchone()
+    assert not r["lista_duvida"] and r["lista_segue"] and r["incerta"] and not em, r
+    assert "confiança alta, trava: ameaça sem classificação maliciosa (SUSPEITO): segue p/ a fase 2" in ev["detail"], ev
+    assert "a IA local decide" not in ev["detail"]
+    with db.conn() as c:   # fases 2 e 3 feitas, trava continua: IA online
+        c.execute("UPDATE domains SET whois_at = now(), web_search_at = now(), lista_aplicada_at = NULL WHERE id = %s", (i,))
+    with db.conn() as c:
+        ap = listas_ia.aplicar(c)
+        r = c.execute("SELECT lista_duvida FROM domains WHERE id = %s", (i,)).fetchone()
+    assert r["lista_duvida"] and ("trava-f1.vip", "ameaca") in ap["online"] and ap["local"][i][0] == "online", ap
+    with db.conn() as c:   # nova resposta (ex.: fase 3 viu que é malicioso) zera o "segue"
+        listas_ia.salvar(c, i, "ameaca", 1.0, "", "", "local", 3, "gemma4:26b")
+        assert not c.execute("SELECT lista_segue FROM domains WHERE id = %s", (i,)).fetchone()["lista_segue"]

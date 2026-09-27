@@ -172,18 +172,19 @@ def test_charts_filtros(api):
                                       "resposta": "x"}, headers=H).status_code == 400
 
 
-def test_etapa3_fila_so_depois_das_etapas_1_e_2(api):
+def test_fases_2_e_3_nao_esperam_a_fila_da_fase_1(api):
     from dnsanalyzer import classifier, db
     with db.conn() as c:
         c.execute("INSERT INTO domains (name, tld, classification, classified_by, web_search_at, total_queries) "
                   "VALUES ('desconhecido-etapa3.com', 'com', 'DESCONHECIDO', 'llm', now(), 50)")
-        c.execute("INSERT INTO domains (name, tld, classification, classified_by, llm_pending) "
-                  "VALUES ('na-fila-da-ia.com', 'com', 'DESCONHECIDO', 'rules', true)")
-    with db.conn() as c:
-        assert classifier._claim_etapa3(c) is None          # etapa 1 ainda tem fila
-        c.execute("UPDATE domains SET llm_pending=false WHERE name='na-fila-da-ia.com'")
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, whois_at, total_queries) "
+                  "VALUES ('desconhecido-busca.com', 'com', 'DESCONHECIDO', 'llm', now(), 40)")
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, llm_pending, total_queries) "
+                  "VALUES ('na-fila-da-ia.com', 'com', 'DESCONHECIDO', 'rules', true, 900)")
+    with db.conn() as c:   # a fase 1 ainda tem fila: as fases 2 e 3 andam mesmo assim, cada uma com o seu
         d = classifier._claim_etapa3(c)
         assert d and d["name"] == "desconhecido-etapa3.com"
+        assert classifier._claim_etapa2(c)["name"] == "desconhecido-busca.com"
         c.execute("UPDATE domains SET whois_at=now(), claimed_at=NULL WHERE id=%s", (d["id"],))
         assert classifier._claim_etapa3(c) is None          # já consultado: não volta
 

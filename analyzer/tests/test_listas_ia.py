@@ -923,10 +923,42 @@ def test_429_do_minuto_nao_para_o_modelo_o_dia_todo():
             {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": quota}]},
             {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry}]}}
         return SimpleNamespace(json=lambda: corpo, text=str(corpo))
-    assert online._limite_429(resp("GenerateRequestsPerMinutePerProjectPerModel-FreeTier")) == (False, 25.0)
-    assert online._limite_429(resp("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "3600s"))[0] is True
+    assert online._limite_429(resp("GenerateRequestsPerMinutePerProjectPerModel-FreeTier")) == (False, 25.0, None)
+    dia = online._limite_429(resp("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "3600s"))
+    assert dia[0] is True and dia[2] is None
     sem = SimpleNamespace(json=lambda: (_ for _ in ()).throw(ValueError()), text="Resource exhausted per day")
-    assert online._limite_429(sem) == (False, 65.0), "sem detalhe: minuto (o contador próprio cuida do dia)"
+    assert online._limite_429(sem) == (False, 65.0, None), "sem detalhe: minuto (o contador próprio cuida do dia)"
+    # quotaValue do dia = limite aprendido
+    corpo = {"error": {"code": 429, "details": [{"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [
+        {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier", "quotaValue": "20"}]}]}}
+    assert online._limite_429(SimpleNamespace(json=lambda: corpo, text="")) == (True, 65.0, 20)
+
+
+def test_cota_do_gemini_sobrevive_ao_reinicio(env, monkeypatch):
+    """27/09: 32 reinícios num dia zeravam o contador em memória e os Flash (20/dia) passaram do limite. A conta,
+    a pausa do dia e o limite informado pelo Google ficam em online_cota, por chave e modelo."""
+    from dnsanalyzer import online
+    monkeypatch.setattr(online, "_COTAS", {})
+    monkeypatch.setattr(online, "_PERSIST_ATE", 0.0)
+    ct = online.cota("gemini-3.8-flash")
+    ct.rpm = 10 ** 6   # (sem esperar o minuto no teste)
+    assert ct.esperar() and ct.esperar() and ct.n == 2
+    monkeypatch.setattr(online, "_COTAS", {})   # "reinício" do processo
+    ct2 = online.cota("gemini-3.8-flash")
+    ct2.rpm = 10 ** 6
+    assert ct2.esperar() and ct2.n == 3, "continuou a conta do banco"
+    ct2.aprender_limite(20)
+    ct2.pausar_dia()
+    monkeypatch.setattr(online, "_COTAS", {})
+    ct3 = online.cota("gemini-3.8-flash")
+    assert not ct3.esperar() and ct3.rpd == 19 and ct3.n == 3, "pausa do dia e limite voltaram do banco"
+    ct4 = online.cota("gemini-3.8-flash", 1)   # chave 2: conta própria
+    ct4.rpm = 10 ** 6
+    assert ct4.esperar() and ct4.n == 1
+    with online.db.conn() as c:
+        rows = {(r["chave"], r["n"], r["limite"], r["esgotou_at"] is not None) for r in
+                c.execute("SELECT chave, n, limite, esgotou_at FROM online_cota WHERE modelo = 'gemini-3.8-flash'")}
+    assert rows == {(1, 3, 20, True), (2, 1, None, False)}, rows
 
 
 def test_segunda_chave_gemini_tem_cota_propria(monkeypatch):

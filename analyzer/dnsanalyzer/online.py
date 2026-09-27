@@ -77,23 +77,62 @@ class OnlineIndisponivel(Exception):
     """Sem chave, fora do ar ou cota esgotada: tentar mais tarde (não conta tentativa)."""
 
 
-class _Cota:
-    """Cota de UM modelo (RPM/RPD do plano gratuito); 429 pausa até o próximo minuto/dia (meia-noite do Pacífico)."""
+# ------------------------------------------------------------------ cota persistida (tabela online_cota)
+# 27/09: o contador vivia só na memória e o classificador reiniciou 32 vezes num dia (deploys): cada reinício
+# zerava a conta e os Flash (20/dia) passaram de 20. Agora cada pedido é gravado por (chave, modelo, dia do
+# Pacífico); no início do processo (e ao virar o dia) a conta volta do banco, junto com a pausa do dia e o
+# limite que o Google informou no 429. Sem banco, segue só na memória (nunca derruba a fase).
+_PERSIST_ATE = 0.0   # depois de uma falha do banco, só tenta gravar de novo daqui a 60 s
 
-    def __init__(self, modelo: str, rpm: int, rpd: int):
+
+def _sql(fn):
+    global _PERSIST_ATE
+    if time.time() < _PERSIST_ATE:
+        return None
+    try:
+        with db.pool().connection(timeout=3) as c:
+            return fn(c)
+    except Exception as e:  # noqa: BLE001
+        _PERSIST_ATE = time.time() + 60
+        log.debug("cota do Gemini sem persistência: %s", e)
+        return None
+
+
+class _Cota:
+    """Cota de UM modelo numa chave (RPM/RPD do plano gratuito); 429 pausa até o próximo minuto/dia (meia-noite
+    do Pacífico). A conta do dia, a pausa e o limite aprendido ficam em `online_cota` (sobrevivem a reinícios)."""
+
+    def __init__(self, modelo: str, rpm: int, rpd: int, base: str | None = None, chave: int = 1):
         self.modelo, self.rpm, self.rpd = modelo, max(rpm, 1), max(rpd, 1)
+        self.base, self.chave = base or modelo, chave     # nome do modelo p/ a API e nº da chave (1 = principal)
         self.lock, self.ultimo, self.dia, self.n, self.pausa_ate = threading.Lock(), 0.0, None, 0, 0.0
 
     @staticmethod
     def _hoje():
         return datetime.now(ZoneInfo("America/Los_Angeles")).date()
 
+    def _virar_dia(self) -> None:
+        """Dia novo (ou 1º uso no processo): zera e recarrega do banco o que já se gastou hoje nesta chave."""
+        hoje = self._hoje()
+        if self.dia == hoje:
+            return
+        self.dia, self.n = hoje, 0
+        r = _sql(lambda c: c.execute("SELECT n, limite, esgotou_at FROM online_cota WHERE chave = %s AND modelo = %s "
+                                     "AND dia = %s", (self.chave, self.base, hoje)).fetchone())
+        if r:
+            self.n = r["n"]
+            if r["limite"]:
+                self.rpd = max(1, r["limite"] - 1)
+            if r["esgotou_at"]:
+                self.pausar_dia(gravar=False)
+
     def esperar(self) -> bool:
         with self.lock:
             if time.time() < self.pausa_ate:
                 return False
-            if self.dia != self._hoje():
-                self.dia, self.n = self._hoje(), 0
+            self._virar_dia()
+            if time.time() < self.pausa_ate:   # (a pausa do dia pode ter voltado do banco)
+                return False
             if self.n >= self.rpd:
                 self.pausar_dia()
                 return False
@@ -101,16 +140,32 @@ class _Cota:
             if falta > 0:
                 time.sleep(falta)
             self.ultimo, self.n = time.monotonic(), self.n + 1
+            _sql(lambda c: c.execute("INSERT INTO online_cota (chave, modelo, dia, n) VALUES (%s, %s, %s, 1) "
+                                     "ON CONFLICT (chave, modelo, dia) DO UPDATE SET n = online_cota.n + 1, atualizado_at = now()",
+                                     (self.chave, self.base, self.dia)))
             return True
 
-    def pausar_dia(self):
+    def pausar_dia(self, gravar: bool = True):
         agora = datetime.now(ZoneInfo("America/Los_Angeles"))
         amanha = (agora + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
         self.pausa_ate = time.time() + (amanha - agora).total_seconds()
-        log.info("IA online: cota do dia do %s esgotada; volta às %s (Pacífico)", self.modelo, amanha.strftime("%H:%M"))
+        if gravar:
+            log.info("IA online: cota do dia do %s esgotada; volta às %s (Pacífico)", self.modelo, amanha.strftime("%H:%M"))
+            _sql(lambda c: c.execute("INSERT INTO online_cota (chave, modelo, dia, n, esgotou_at) VALUES (%s, %s, %s, 0, now()) "
+                                     "ON CONFLICT (chave, modelo, dia) DO UPDATE SET esgotou_at = now(), atualizado_at = now()",
+                                     (self.chave, self.base, agora.date())))
 
     def pausar(self, segundos: float):
         self.pausa_ate = max(self.pausa_ate, time.time() + segundos)
+
+    def aprender_limite(self, valor: int | None):
+        """Limite do dia informado pelo Google no 429 (quotaValue): passa a valer, com margem de 1."""
+        if not valor or valor <= 0:
+            return
+        self.rpd = max(1, int(valor) - 1)
+        _sql(lambda c: c.execute("INSERT INTO online_cota (chave, modelo, dia, n, limite) VALUES (%s, %s, %s, 0, %s) "
+                                 "ON CONFLICT (chave, modelo, dia) DO UPDATE SET limite = EXCLUDED.limite, atualizado_at = now()",
+                                 (self.chave, self.base, self._hoje(), int(valor))))
 
 
 _COTAS: dict[str, _Cota] = {}
@@ -132,7 +187,7 @@ def cota(modelo: str, chave: int = 0) -> _Cota:
     nome = modelo if not chave else f"{modelo} (chave {chave + 1})"
     if nome not in _COTAS:
         rpm, rpd = next(((r, d) for nivel in niveis() for m, r, d in nivel if m == modelo), (5, 20))
-        _COTAS[nome] = _Cota(nome, rpm, rpd)
+        _COTAS[nome] = _Cota(nome, rpm, rpd, base=modelo, chave=chave + 1)
     return _COTAS[nome]
 
 
@@ -211,23 +266,28 @@ def _json_da_resposta(texto: str) -> dict:
     return json.loads(m.group(0))
 
 
-def _limite_429(r) -> tuple[bool, float]:
-    """(estourou a cota do DIA?, segundos p/ tentar de novo). Pelo quotaId violado (…PerDay… x …PerMinute…) e pelo
-    retryDelay do Google. Antes bastava "day" aparecer no texto: um 429 do minuto parou o 3.5 Flash-Lite o dia todo
-    com 264 de 500 pedidos usados (27/09)."""
+def _limite_429(r) -> tuple[bool, float, int | None]:
+    """(estourou a cota do DIA?, segundos p/ tentar de novo, limite do dia informado). Pelo quotaId violado
+    (…PerDay… x …PerMinute…), pelo retryDelay e pelo quotaValue do Google. Antes bastava "day" aparecer no texto:
+    um 429 do minuto parou o 3.5 Flash-Lite o dia todo com 264 de 500 pedidos usados (27/09)."""
     try:
         det = (r.json().get("error") or {}).get("details") or []
     except ValueError:
         det = []
-    ids = [v.get("quotaId") or "" for x in det for v in (x.get("violations") or [])]
+    viol = [v for x in det for v in (x.get("violations") or [])]
+    ids = [v.get("quotaId") or "" for v in viol]
     espera = 65.0
     for x in det:
         m = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(x.get("retryDelay") or ""))
         if m:
             espera = min(max(float(m.group(1)) + 2, 10.0), 600.0)
+    limite = None
+    for v in viol:
+        if "perday" in (v.get("quotaId") or "").lower() and str(v.get("quotaValue") or "").isdigit():
+            limite = int(v["quotaValue"])
     if ids:
-        return any("perday" in i.lower() for i in ids) and not any("perminute" in i.lower() for i in ids), espera
-    return False, espera   # sem detalhe: trata como limite do minuto (o contador próprio pausa o dia no RPD)
+        return any("perday" in i.lower() for i in ids) and not any("perminute" in i.lower() for i in ids), espera, limite
+    return False, espera, None   # sem detalhe: trata como limite do minuto (o contador próprio pausa o dia no RPD)
 
 
 def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None = None, chave: int = 0) -> tuple[dict, dict]:
@@ -263,8 +323,12 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
     except httpx.HTTPError as e:
         raise OnlineIndisponivel(f"Gemini {qual}: {e.__class__.__name__}") from e
     if r.status_code == 429:
-        dia, espera = _limite_429(r)
-        ct.pausar_dia() if dia else ct.pausar(espera)
+        dia, espera, limite = _limite_429(r)
+        if dia:
+            ct.aprender_limite(limite)
+            ct.pausar_dia()
+        else:
+            ct.pausar(espera)
         raise OnlineIndisponivel(f"Gemini {qual}: cota {'do dia' if dia else 'do minuto'} esgotada (429)")
     if r.status_code >= 500:   # sobrecarga do modelo
         ct.pausar(90)
@@ -468,10 +532,19 @@ def status(c) -> dict:
     for m in dict.fromkeys(x for nivel in niveis() for x, _, _ in nivel):
         if m:
             cts = [cota(m, i) for i in range(len(_chaves()))]
+            for ct in cts:   # (conta do dia vinda do banco, mesmo sem uso neste processo)
+                with ct.lock:
+                    ct._virar_dia()
             fim = min(ct.pausa_ate for ct in cts)   # pausado só se todas as chaves estão pausadas
-            modelos[m] = {"hoje": sum(ct.n for ct in cts if ct.dia == ct._hoje()), "limite_dia": sum(ct.rpd for ct in cts),
-                          "pausado_ate": datetime.fromtimestamp(fim, timezone.utc).isoformat() if fim > time.time() else None}
+            modelos[m] = {"hoje": sum(ct.n for ct in cts), "limite_dia": sum(ct.rpd for ct in cts),
+                          "pausado_ate": datetime.fromtimestamp(fim, timezone.utc).isoformat() if fim > time.time() else None,
+                          "chaves": [{"chave": ct.chave, "hoje": ct.n, "limite_dia": ct.rpd,
+                                      "pausado_ate": datetime.fromtimestamp(ct.pausa_ate, timezone.utc).isoformat()
+                                      if ct.pausa_ate > time.time() else None} for ct in cts]}
+    agora_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+    zera = (agora_pt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     with db.conn() as c2:
         buscas = _buscas_no_mes(c2)
     return {**r, "habilitado": habilitado(), "modelos": modelos, "buscas_google_mes": buscas,
-            "limite_buscas_mes": cfg.gemini_grounding_month}
+            "limite_buscas_mes": cfg.gemini_grounding_month, "chaves": len(_chaves()),
+            "cota_zera_em": zera.astimezone(timezone.utc).isoformat()}

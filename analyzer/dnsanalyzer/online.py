@@ -49,8 +49,8 @@ Para o domínio, diga:
 - "categoria": uma das categorias de site abaixo;
 - "lista": para onde o site vai — TODO site vai para uma fila: uma LISTA DE BLOQUEIO (o que ele é) ou, se não é de
   nenhuma delas, uma WHITELIST ("wl:..."), na categoria que melhor o descreve. A lista de bloqueio diz
-  O QUE ELE É, não se é de trabalho (uma loja é "compras" mesmo que
-  empresas comprem nela; um CMP de cookies é "publicidade" mesmo sendo compliance). DOMÍNIOS TÉCNICOS (CDN, arquivos
+  O QUE ELE É, não se é de trabalho (uma LOJA ONLINE de varejo é "compras" mesmo que empresas comprem nela — mas
+  fabricante/indústria/distribuidor com loja própria, catálogo ou loja física é "wl:fornecedores"; um CMP de cookies é "publicidade" mesmo sendo compliance). DOMÍNIOS TÉCNICOS (CDN, arquivos
   estáticos, imagens, API, app) DE UM SERVIÇO vão para a lista DO SERVIÇO: primeiro descubra de quem é o domínio
   (ex.: slatic.net = arquivos da Lazada = compras; alicdn.com = Alibaba/AliExpress = compras; mlstatic.com = Mercado Livre =
   compras; fbcdn.net = Facebook = redes_sociais; ytimg.com = YouTube = streaming; akamaihd.net de um jogo = jogos).

@@ -64,7 +64,8 @@ DESCRICOES = {
     "rh_beneficios": "folha, ponto, benefícios (VR, Alelo, Pluxee, Caju), recrutamento, planos de saúde corporativos",
     "vendas_crm": "CRM, automação de marketing, atendimento e helpdesk (RD Station, HubSpot, Salesforce, Zendesk), loja da própria empresa",
     "logistica": "transportadoras, rastreio, Correios, fretes, entregas, gestão de frota, rastreamento de veículos",
-    "fornecedores": "fabricantes, distribuidores, indústria, atacado B2B, catálogos de produtos, portais de compras corporativas",
+    "fornecedores": "fabricantes, indústria e distribuidores (MESMO com loja virtual própria), atacado B2B, catálogos de "
+                    "produtos, lojas físicas, portais de compras corporativas",
     "institucional": "site institucional de empresa, cliente ou parceiro (apresenta a empresa, sem ser loja nem sistema)",
     "telecom": "operadoras de telefonia e internet, provedores regionais",
     "infraestrutura": "nuvem para sistemas, APIs, atualizações de sistema e drivers, certificados, telemetria técnica (CDN tem categoria própria)",

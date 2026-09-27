@@ -42,7 +42,9 @@ LISTAS_IA = {
     "cripto_trading": "criptomoedas e trading especulativo: corretoras de cripto (Binance, OKX), carteiras, opções binárias, "
                       "forex/day trade, sinais de trading, pirâmides (bancos e corretoras tradicionais são nenhuma)",
     "publicidade": "redes de anúncio, rastreamento, analytics, pixels, atribuição de apps",
-    "compras": "lojas online, marketplaces, varejo, atacado, supermercado, delivery, cupons (conta como trabalho: compras da empresa)",
+    "compras": "LOJAS ONLINE de varejo: e-commerce, marketplaces, supermercado online, delivery, cupons (conta como trabalho: "
+               "compras da empresa). NÃO é compras: fabricante, indústria ou distribuidor, mesmo com loja virtual própria, "
+               "catálogo de produtos e loja física (esses vão para wl:fornecedores)",
     "noticias": "portais de notícias, revistas e fofoca de celebridades (site de hobby, desenhos para colorir, receitas, "
                 "artesanato, conteúdo infantil ou educativo NÃO é notícia: sem lista de bloqueio, vai para a whitelist)",
     "pirataria": "torrents, downloads piratas, cracks, IPTV pirata, filmes e séries piratas, sites que baixam vídeo/música "

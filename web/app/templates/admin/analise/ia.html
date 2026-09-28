@@ -289,8 +289,10 @@ document.addEventListener('alpine:init', function () {
       if ((m = /^lista (\S+) (\d+)%/.exec(t))) { r.lista = m[1]; r.conf = +m[2]; }
       var p = t.split(' · '); if (p.length > 1) r.servico = r.servico || p[1].split(' — ')[0];
       if (/— /.test(t)) r.motivo = t.split(' — ').slice(1).join(' — ').split(' · ')[0];
-      r.estado = /IA local decide|lista atual mantida/.test(t) ? 'ok' : /decisão humana/.test(t) ? 'hm' : /fase 4|IA online|segue p\/ a fase/.test(t) ? 'on' : '';
-      r.proximo = (t.match(/· (confiança[^·]*|lista atual mantida|decisão humana[^·]*)$/) || [])[1] || '';
+      r.estado = /vai p\/ a fase 4|segue p\/ a fase/.test(t) ? 'on' : /IA local decide|lista atual mantida/.test(t) ? 'ok'
+        : /decisão humana/.test(t) ? 'hm' : /fase 4|IA online/.test(t) ? 'on' : '';
+      r.proximo = (t.match(/· (confiança[^·]*|lista atual mantida|decisão humana[^·]*)(?: · desconhecido: vai p\/ a fase 4 \(IA online\))?$/) || [])[1] || '';
+      if (/vai p\/ a fase 4 \(IA online\)$/.test(t) && !/confiança[^·]*vai p\/ a fase 4/.test(t)) r.proximo = (r.proximo ? r.proximo + ' · ' : '') + 'desconhecido: vai p/ a IA online';
     } else if (ev.kind === 'online_done') {
       if ((m = /fase 4 · ([^·]+) · lista (\S+) \((\d+)%\)/.exec(d))) { r.modelo = m[1].trim(); r.lista = m[2]; r.conf = +m[3]; }
       var q = d.split(' · ');
@@ -381,6 +383,7 @@ document.addEventListener('alpine:init', function () {
         if (this.rows[et].length > MAX) { var x = this.rows[et].pop(); delete idx[et][x.name]; }
         return r;
       },
+      foiOnline(name) { var r1 = idx.e1[name]; if (r1 && !r1.run && r1.estado !== 'on') r1.estado = 'on'; },
       topo(et, r) { var a = this.rows[et], i = a.indexOf(r); if (i > 0) { a.splice(i, 1); a.unshift(r); } },
       cartao(et, name) { return this.lane[et].find(function (c) { return c.name === name; }); },
       novoCartao(et, name, t0, q) {
@@ -399,6 +402,7 @@ document.addEventListener('alpine:init', function () {
           return;
         }
         var et = etapa(ev); if (!et) return;
+        if (et === 'e2') this.foiOnline(ev.name);
         var r = this.linha(et, ev.name), rodava = r.run, c = this.cartao(et, ev.name);
         ler(r, ev);
         if (r.run) { r._visto = Date.now(); if (!first) this.novoCartao(et, r.name, Date.parse(ev.created_at)); return; }
@@ -460,6 +464,7 @@ document.addEventListener('alpine:init', function () {
         var lista = d.em_analise || (d.current ? [d.current] : []), ativos = {e1: {}, e2: {}}, self = this;
         lista.forEach(function (x) {
           var et = x.fase === '4' ? 'e2' : 'e1'; ativos[et][x.name] = 1;
+          if (et === 'e2') self.foiOnline(x.name);
           var r = idx[et][x.name], ini = Date.now() - x.elapsed * 1000;
           if (r && !r.run && r.at && Date.parse(r.at) > ini - 2000) return;   // já terminou (a reserva ainda não saiu)
           var c = self.novoCartao(et, x.name, ini, x.total_queries);

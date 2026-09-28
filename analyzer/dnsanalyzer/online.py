@@ -379,6 +379,16 @@ _EM_INFRA = ("EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'infra_b
              "AND l.added_by LIKE 'migração%%')")   # revisão da Infraestrutura (039): bloqueia nas empresas, vem antes de Decisões
 
 
+_RESERVA = "(d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') AND "
+
+
+def na_fila(c, domain_id: int) -> bool:
+    """O domínio está na fila da fase 4 (reservado ou não) — p/ o evento da IA local dizer que ele vai p/ a IA
+    online mesmo quando a lista foi mantida (DESCONHECIDO que já passou pela busca entra na fila de qualquer jeito)."""
+    return habilitado() and c.execute("SELECT 1 FROM domains d WHERE d.id = %s AND " + _FILA.replace(_RESERVA, ""),
+                                      (domain_id,)).fetchone() is not None
+
+
 def _reservar(c) -> dict | None:
     return c.execute(
         "UPDATE domains SET online_claimed_at = now() WHERE id = (SELECT d.id FROM domains d WHERE " + _FILA +

@@ -237,12 +237,15 @@ def gravar_local(d: dict, lista: str, conf: float, motivo: str, servico: str, fa
     with db.conn() as c:
         salvar(c, d["id"], lista, conf, motivo, servico, FONTE_LOCAL, fase_n, modelo)
         fim = aplicar(c, ids=[d["id"]])["local"].get(d["id"])   # na hora (o ciclo de 5 min é a rede de segurança)
+        from . import online
+        vai_online = (fim or ("",))[0] not in ("online", "segue") and online.na_fila(c, d["id"])
     log.debug("lista %s -> %s (%.2f)", d["name"], lista, conf or 0)
     alta = (conf or 0) >= settings().lista_confianca_min
     eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), segundos,
                       detail=f"{fase_n}|lista {lista} {float(conf or 0) * 100:.0f}%"
                       + (f" · {servico}" if servico else "") + (f" — {motivo}" if motivo else "")
-                      + _proximo(fim, alta))
+                      + _proximo(fim, alta)
+                      + (" · desconhecido: vai p/ a fase 4 (IA online)" if vai_online else ""))
 
 
 def lista_valida(lista: str | None) -> bool:

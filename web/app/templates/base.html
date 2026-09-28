@@ -2,6 +2,21 @@
 <html lang="pt-br">
 <head>
   {% if portal_kit_url %}<script src="{{ portal_kit_url|replace('launcher.js', 'theme.js') }}"></script>{% endif %}
+  <script>
+  /* sem o theme.js do 2D Hub: mesma API (TwodTema), guardada só neste navegador */
+  window.TwodTema || (function () {
+    var h = document.documentElement, K = 'twod_tema', mq = window.matchMedia && matchMedia('(prefers-color-scheme: dark)');
+    function pref() { var v; try { v = localStorage.getItem(K); } catch (e) {} return {claro: 1, escuro: 1, auto: 1}[v] ? v : 'auto'; }
+    function aplicar() {
+      var p = pref(), t = p === 'escuro' || (p === 'auto' && mq && mq.matches) ? 'dark' : 'light';
+      h.setAttribute('data-theme', t); h.style.colorScheme = t;
+      try { dispatchEvent(new CustomEvent('twod:tema', {detail: {preferencia: p, tema: t}})); } catch (e) {}
+    }
+    window.TwodTema = {preferencia: pref, tema: function () { return h.getAttribute('data-theme'); },
+      definir: function (v) { try { localStorage.setItem(K, v); } catch (e) {} aplicar(); }};
+    aplicar();
+  })();
+  </script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Admin{% endblock %} · 2D DNS Guard</title>
@@ -98,6 +113,16 @@
     .cfg-g b{font-size:.95rem;color:var(--navy)}
     .cfg-g span{font-size:.8rem;color:var(--mut);line-height:1.4}
     html[data-theme="dark"] .cfg-g b{color:#e2e8f0}
+    .cfg-ap{display:flex;align-items:center;gap:.4rem 1rem;flex-wrap:wrap;margin:0 1.1rem 1.1rem;padding:.8rem .9rem;border:1px solid var(--bd);border-radius:12px}
+    .cfg-ap b{font-size:.95rem;color:var(--navy)}.cfg-ap small{color:var(--mut);font-size:.78rem;flex:1 1 180px}
+    html[data-theme="dark"] .cfg-ap b{color:#e2e8f0}
+    .cfg-seg{display:inline-flex;padding:3px;border-radius:999px;background:#eef1f6;border:1px solid var(--bd)}
+    .cfg-seg button,html[data-theme="dark"] dialog.cfg .cfg-seg button:not(.primary):not(.danger){border:0;background:none;color:var(--mut);
+               font-size:.82rem;font-weight:600;padding:.3rem .8rem;border-radius:999px;cursor:pointer}
+    .cfg-seg button.on,html[data-theme="dark"] dialog.cfg .cfg-seg button.on:not(.primary):not(.danger){background:#fff;color:var(--navy);
+               box-shadow:0 1px 3px rgba(15,23,42,.15)}
+    html[data-theme="dark"] .cfg-seg{background:#0f172a}
+    html[data-theme="dark"] dialog.cfg .cfg-seg button.on:not(.primary):not(.danger){background:#334155;color:#fff}
     html[data-theme="dark"] dialog.cfg .cfg-h button:not(.primary):not(.danger){background:none}
     html[data-theme="dark"] header .cfg-btn.cfg-btn:not(.primary):not(.danger){background:rgba(255,255,255,.08);color:#c3d2ea}
     html[data-theme="dark"] header .cfg-btn.cfg-btn:not(.primary):not(.danger):hover,
@@ -153,6 +178,14 @@
         <b>Operadores</b><span>Quem acessa o console e com qual permissão.</span></a>
       {% endif %}
     </div>
+    <div class="cfg-ap">
+      <b>Aparência</b><small>vale para o 2D Hub e os outros sistemas da 2D</small>
+      <div class="cfg-seg" id="cfgTema" role="radiogroup" aria-label="Tema">
+        <button type="button" data-v="claro">☀ Claro</button>
+        <button type="button" data-v="escuro">☾ Escuro</button>
+        <button type="button" data-v="auto" title="segue o tema do sistema operacional">Automático</button>
+      </div>
+    </div>
   </dialog>
   <script>
   (function () {
@@ -160,6 +193,15 @@
     document.getElementById("cfgBtn").onclick = function () { d.showModal(); };
     document.getElementById("cfgX").onclick = function () { d.close(); };
     d.addEventListener("click", function (e) { if (e.target === d) d.close(); });   // clique fora fecha
+    var seg = document.getElementById("cfgTema");
+    function marca() {
+      var p = window.TwodTema ? TwodTema.preferencia() : "auto";
+      seg.querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.v === p); b.setAttribute("aria-checked", b.dataset.v === p); });
+    }
+    seg.addEventListener("click", function (e) {
+      var b = e.target.closest("button"); if (b && window.TwodTema) { TwodTema.definir(b.dataset.v); marca(); }
+    });
+    window.addEventListener("twod:tema", marca); marca();
   })();
   </script>
   {% endif %}

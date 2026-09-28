@@ -1,0 +1,53 @@
+{# Página do domínio: em qual whitelist ele está e (super) mover para outra ou tirar. Usa blq.nome, wl_atual
+   (entradas: category, domain, publicar, pai), wls. #}
+{% set proprias = wl_atual|rejectattr('pai')|list %}
+{% set cats = proprias|map(attribute='category')|list %}
+<div id="whitelist" style="margin:.6rem 0 .4rem;padding-top:.5rem;border-top:1px dashed var(--bd)">
+  <label style="margin:0">Whitelist de <code>{{ blq.nome }}</code></label>
+  {% for w in wl_atual %}
+    <p style="margin:.3rem 0">✅ Na whitelist <a href="{{ url_for('admin.listas_liberacao', wl=w.category) }}"><b>{{ WL_ROT.get(w.category, w.category) }}</b></a>
+      {% if w.pai %}<span class="mut">pelo domínio-pai <code>{{ w.domain }}</code></span>{% endif %}
+      {% if not w.publicar %}<span class="mut" style="font-size:.8rem">(só organiza: não vai para o DNS)</span>{% endif %}</p>
+  {% else %}
+    <p style="margin:.3rem 0" class="mut">Não está em nenhuma whitelist.</p>
+  {% endfor %}
+  {% if adm and adm.is_super %}
+  <form id="fWl" onsubmit="return false" style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:.3rem 0">
+    <select id="sWl" style="max-width:100%">
+      {% if not cats %}<option value="" selected disabled>Escolha a whitelist…</option>{% endif %}
+      {% for k, r in wls %}<option value="{{ k }}"{% if k in cats %} selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    <button type="button" id="bWl" style="padding:.3rem .7rem;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer"
+            title="Sai de todas as listas de bloqueio e vale para todas as empresas: na hora onde estava bloqueado; a lista em até 2 min.">✅ Mover para a whitelist</button>
+    {% if cats %}<button type="button" id="bWlTirar" class="mini neu" title="Volta a valer o que as listas de bloqueio disserem.">tirar da whitelist</button>{% endif %}
+  </form>
+  <script>
+  (function () {
+    const dom = {{ blq.nome|tojson }}, url = {{ url_for('admin.listas_lote_dominios')|tojson }}, atual = {{ cats|tojson }};
+    async function enviar(corpo, b) {
+      b.disabled = true;
+      try {
+        const r = await fetch(url, {method: "POST", credentials: "same-origin",
+          headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(corpo)});
+        const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+      } catch (e) { alert("Falha ao salvar (sessão expirou?)"); }
+      b.disabled = false;
+    }
+    document.getElementById("bWl").addEventListener("click", (ev) => {
+      const s = document.getElementById("sWl"), wl = s.value;
+      if (!wl) { alert("Escolha a whitelist."); return; }
+      if (atual.length === 1 && atual[0] === wl) { alert("Já está nesta whitelist."); return; }
+      const nome = s.options[s.selectedIndex].text;
+      if (!confirm("Mover " + dom + " para a whitelist " + nome + "?\n\nSai de todas as listas de bloqueio e de outra whitelist, "
+                   + "e fica liberado para todas as empresas (na hora onde estava bloqueado; a lista em até 2 min).")) return;
+      enviar({acao: "wl", dominios: [dom], para: [wl]}, ev.target);
+    });
+    const t = document.getElementById("bWlTirar");
+    if (t) t.addEventListener("click", (ev) => {
+      if (!confirm("Tirar " + dom + " da whitelist? Volta a valer o que as listas de bloqueio disserem.")) return;
+      enviar({acao: "tirar_wl", dominios: [dom]}, ev.target);
+    });
+  })();
+  </script>
+  {% endif %}
+</div>

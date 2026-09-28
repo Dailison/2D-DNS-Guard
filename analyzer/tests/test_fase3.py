@@ -458,3 +458,19 @@ def test_pouco_acesso_espera_recorrencia(api):
         c.execute("UPDATE tenant_domains SET clients_count = 2 WHERE domain_id = %s", (ids["raro-teste.com"],))
         assert classifier.reenfileirar_recorrentes(c) >= 1
         assert not c.execute("SELECT aguarda_recorrencia FROM domains WHERE id = %s", (ids["raro-teste.com"],)).fetchone()["aguarda_recorrencia"]
+
+
+# ---------------------------------------------------------------- página do domínio: whitelist
+def test_whitelist_do_dominio_ignora_pai_nao_publicado(api):
+    """'com.br' numa whitelist sem publicar (28/09: posto pela IA online) não aparece como whitelist de quizonline.com.br;
+    pai publicado (gov.br) aparece marcado como pai; a entrada do próprio domínio aparece mesmo sem publicar."""
+    from dnsanalyzer import db
+    with db.conn() as c:
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES "
+                  "('infraestrutura', 'com.br', 'IA online', false), ('essenciais', 'gov.br', 'catálogo', true), "
+                  "('sem_resposta', 'quizteste.com.br', 'regras (DNS)', false) ON CONFLICT DO NOTHING")
+    assert api.get("/whitelist-dominio/quizonline.com.br", headers=H).json() == []
+    r = api.get("/whitelist-dominio/prefeitura.sp.gov.br", headers=H).json()
+    assert [(x["category"], x["domain"], x["pai"]) for x in r] == [("essenciais", "gov.br", True)], r
+    r = api.get("/whitelist-dominio/QuizTeste.com.br.", headers=H).json()
+    assert [(x["category"], x["pai"], x["publicar"]) for x in r] == [("sem_resposta", False, False)], r

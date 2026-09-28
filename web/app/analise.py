@@ -362,8 +362,17 @@ def dominio(nome):
             irmaos = api.get(f"/domains/{quote(d['domain']['name'], safe='')}/irmaos", limit=30)
         except AnalyzerError:
             irmaos = []
+    wl_atual = _whitelist_do_dominio(d["domain"]["name"]) if d else []
     return render_template("admin/analise/dominio.html", d=d, nome=nome, blq=blq, scats=_site_cats(), auditoria=auditoria, irmaos=irmaos,
-                           aba="dominios", **ctx)
+                           wl_atual=wl_atual, wls=dnslib.CATEGORIAS_WHITELIST_DNS, aba="dominios", **ctx)
+
+
+def _whitelist_do_dominio(nome_reg: str) -> list[dict]:
+    """Entradas de whitelist do domínio (a dele e as de pais publicadas no DNS), p/ o bloco "Whitelist" da página."""
+    try:
+        return api.get(f"/whitelist-dominio/{quote(nome_reg, safe='')}") or []
+    except AnalyzerError:
+        return []
 
 
 def _voltar(nome: str, tid):

@@ -132,6 +132,7 @@
       });
       </script>
       {% endif %}
+      {% include "admin/analise/_whitelist_dominio.html" %}
       {% if tenant and not todos %}
       <form method="post" action="{{ url_for('analise.dominio_liberar_empresa', nome=dm.name) }}" style="margin:.5rem 0"
             onsubmit="return confirm('Liberar {{ blq.nome }} só para {{ tenant.name }}? Vale na hora; as demais empresas seguem com as listas delas.')">

@@ -1697,6 +1697,19 @@ def whitelist_add(categoria: str, body: WhitelistIn):
     return {"ok": True, "dominios": len(doms)}
 
 
+@app.get("/whitelist-dominio/{name}", dependencies=[Depends(auth)])
+def whitelist_do_dominio(name: str):
+    """Em que whitelist o domínio está: a entrada dele (publicada ou não) e as de domínios-pai que valem no DNS
+    (publicar). Pai não publicado não conta (ex.: 'com.br' posto numa whitelist sem ir ao DNS não libera ninguém)."""
+    n = name.strip().lower().rstrip(".")
+    p = n.split(".")
+    cands = [".".join(p[i:]) for i in range(len(p))]
+    with db.conn() as c:
+        rows = c.execute("SELECT category, domain, publicar, added_by, added_at FROM whitelist_domains WHERE domain = ANY(%s) "
+                         "ORDER BY length(domain) DESC, category", (cands,)).fetchall()
+    return [{**r, "pai": r["domain"] != n} for r in rows if r["domain"] == n or r["publicar"]]
+
+
 @app.post("/whitelist-remover", dependencies=[Depends(auth)])
 def whitelist_remover(body: WhitelistIn):
     with db.conn() as c:

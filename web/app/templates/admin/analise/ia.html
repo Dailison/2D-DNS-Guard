@@ -41,26 +41,20 @@
   .iav .ghost:hover{background:rgba(255,255,255,.1)}
   .iav .ghost.off{color:#fcd34d;border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.1)}
 
-  /* etapa: cabeçalho (título, filtros, busca) */
+  /* etapa: cabeçalho (título à esquerda, "analisando agora" à direita) */
   .etapa{overflow:hidden}
-  .eh{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--ln);flex:0 0 auto}
+  .eh{display:flex;align-items:center;gap:8px 14px;padding:8px 12px;border-bottom:1px solid var(--ln);flex:0 0 auto;min-height:56px}
   .eh .ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.95rem;
            background:rgba(74,168,232,.15);border:1px solid rgba(74,168,232,.3);flex:0 0 auto}
   .etapa.e2 .eh .ico{background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.35)}
   .iav .eh h2{margin:0 6px 0 0;font-size:.95rem;color:var(--tx);display:flex;align-items:center;gap:7px;white-space:nowrap}
   .cnt{font-size:.68rem;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.07);color:#c3cde0}
-  .eh .sp{flex:1}
-  .iav .eh select,.iav .eh input.busca{font:inherit;font-size:.78rem;color:var(--tx);background:rgba(0,0,0,.28);border:1px solid var(--ln);
-                                       border-radius:8px;padding:4px 8px;width:auto}
-  .iav .eh select.on{border-color:var(--ac);color:#fff}
-  .iav .eh input.busca{width:180px}
-  .iav .eh select:focus,.iav .eh input.busca:focus{outline:0;border-color:var(--ac);box-shadow:0 0 0 3px rgba(74,168,232,.18)}
-  .iav .eh option{background:#0f1729;color:var(--tx)}
 
   /* analisando agora: chips de uma linha */
-  .lane{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--ln);background:rgba(74,168,232,.035);
-        overflow-x:auto;flex:0 0 auto;min-height:52px;scrollbar-width:thin}
-  .etapa.e2 .lane{background:rgba(167,139,250,.04)}
+  /* à direita do título: rola p/ o lado quando há muitos; o mais novo fica à direita */
+  .lane{display:flex;align-items:center;gap:8px;flex:1 1 0;min-width:0;overflow-x:auto;padding:2px 0;
+        scrollbar-width:thin}
+  .lane>:first-child{margin-left:auto}
   .lane-h{display:flex;align-items:center;gap:6px;font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9fb0c8;
           white-space:nowrap;flex:0 0 auto}
   .lane-h .lv{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 8px var(--ac);animation:blink 1.4s infinite}
@@ -141,7 +135,7 @@
   @media (max-width:1100px){.tb .h{display:none}.kp{padding-left:10px}}
   @media (max-width:640px){
     .kp{border-left:0;padding-left:0}
-    .iav .eh input.busca{width:100%}
+    .eh{flex-wrap:wrap}.lane{flex-basis:100%}.lane>:first-child{margin-left:0}
     .tb .rk,.tb .tp{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
   }
   @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin{animation:none}}
@@ -166,44 +160,29 @@
     <header class="eh">
       <span class="ico">{{ ico }}</span>
       <h2 title="{{ dsc }}">{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2>
-      <span class="sp"></span>
-      <select x-model="f.{{ et }}.cls" :class="{on: f.{{ et }}.cls}" aria-label="Classificação">
-        {% for v, l in [("", "Classificação: todas"), ("TRABALHO", "Trabalho"), ("NAO_TRABALHO", "Não trabalho"), ("RISCO", "Suspeito / Malicioso"), ("DESCONHECIDO", "Desconhecido")] %}
-        <option value="{{ v }}">{{ l }}</option>{% endfor %}
-      </select>
-      <select x-model="f.{{ et }}.dst" :class="{on: f.{{ et }}.dst}" aria-label="Destino">
-        {% for v, l in [("", "Destino: qualquer"), ("bl", "Bloqueio"), ("wl", "Whitelist")] + ([("on", "→ IA online")] if et == "e1" else []) %}
-        <option value="{{ v }}">{{ l }}</option>{% endfor %}
-      </select>
-      <select x-model="f.{{ et }}.ent" :class="{on: f.{{ et }}.ent}" aria-label="Entrada">
-        {% for v, l in [("", "Entrada: todas"), ("novo", "Novos" if et == "e1" else "1ª vez"), ("reavaliacao", "Reavaliações" if et == "e1" else "Revalidações"), ("pedida", "Reanálises pedidas")] %}
-        <option value="{{ v }}">{{ l }}</option>{% endfor %}
-      </select>
-      <input type="search" class="busca" placeholder="Filtrar domínio…" autocomplete="off" x-model.debounce.150ms="f.{{ et }}.q">
+      <div class="lane">
+        <span class="lane-h"><span class="lv"></span>Analisando <span class="cnt" x-text="lane.{{ et }}.filter(c => !c.res).length"></span></span>
+        <template x-for="c in lane.{{ et }}" :key="c.key">
+          <div class="lc" :class="{done: c.res}" :data-k="c.key" :style="c.res ? '--cc:' + c.res.cor : ''"
+               :title="[entSub('{{ et }}', c), c.q != null ? c.q + ' consultas' : ''].filter(Boolean).join(' · ')">
+            <span class="spin" x-show="!c.res"></span>
+            <a class="n" :href="urlDom(c.name)" x-text="c.name"></a>
+            <span class="eb" x-show="c.entrada" :class="c.entrada" x-text="ENT['{{ et }}'][c.entrada]"></span>
+            <span class="t" x-show="!c.res" x-text="dur((agora - c.t0) / 1000)"></span>
+            <template x-if="c.res">
+              <span class="res">
+                <span class="pill" :class="c.res.clsK" x-text="c.res.clsL"></span>
+                {% if et == "e1" %}<span class="num" :class="c.res.rk" x-text="'risco ' + c.res.risco"></span>{% endif %}
+                <span class="num" :class="c.res.ck" x-text="c.res.conf"></span>
+                <span class="dst" :class="c.res.dk" x-text="c.res.dst"></span>
+                <span class="t" x-show="c.res.tempo" x-text="c.res.tempo"></span>
+              </span>
+            </template>
+          </div>
+        </template>
+        <span class="vazio-l" x-show="!lane.{{ et }}.length">nada em análise agora</span>
+      </div>
     </header>
-
-    <div class="lane">
-      <span class="lane-h"><span class="lv"></span>Analisando <span class="cnt" x-text="lane.{{ et }}.filter(c => !c.res).length"></span></span>
-      <template x-for="c in lane.{{ et }}" :key="c.key">
-        <div class="lc" :class="{done: c.res}" :data-k="c.key" :style="c.res ? '--cc:' + c.res.cor : ''"
-             :title="[entSub('{{ et }}', c), c.q != null ? c.q + ' consultas' : ''].filter(Boolean).join(' · ')">
-          <span class="spin" x-show="!c.res"></span>
-          <a class="n" :href="urlDom(c.name)" x-text="c.name"></a>
-          <span class="eb" x-show="c.entrada" :class="c.entrada" x-text="ENT['{{ et }}'][c.entrada]"></span>
-          <span class="t" x-show="!c.res" x-text="dur((agora - c.t0) / 1000)"></span>
-          <template x-if="c.res">
-            <span class="res">
-              <span class="pill" :class="c.res.clsK" x-text="c.res.clsL"></span>
-              {% if et == "e1" %}<span class="num" :class="c.res.rk" x-text="'risco ' + c.res.risco"></span>{% endif %}
-              <span class="num" :class="c.res.ck" x-text="c.res.conf"></span>
-              <span class="dst" :class="c.res.dk" x-text="c.res.dst"></span>
-              <span class="t" x-show="c.res.tempo" x-text="c.res.tempo"></span>
-            </span>
-          </template>
-        </div>
-      </template>
-      <span class="vazio-l" x-show="!lane.{{ et }}.length">nada em análise agora</span>
-    </div>
 
     <div class="wrap"><table class="tb {{ et }}">
       <thead><tr><th class="h">Hora</th><th>Domínio</th><th>Classificação</th><th class="rk">Risco</th><th>Confiança</th><th class="tp">Tempo</th><th class="ds">Destino</th></tr></thead>
@@ -321,7 +300,6 @@ document.addEventListener('alpine:init', function () {
       kpis: [{v: '–', l: 'na fila local', s: ''}, {v: '–', l: 'na fila online', s: ''},
              {v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
       rows: {e1: [], e2: []}, lane: {e1: [], e2: []},
-      f: {e1: {cls: '', dst: '', ent: '', q: ''}, e2: {cls: '', dst: '', ent: '', q: ''}},
       ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida'},
             e2: {novo: '1ª vez', reavaliacao: 'Revalidação', pedida: 'Reanálise pedida'}},
       paused: false, upd: '', agora: Date.now(), carregado: false, sel: null,
@@ -353,15 +331,8 @@ document.addEventListener('alpine:init', function () {
         if (c.desde == null) return '';
         return c.entrada === 'novo' ? 'visto há ' + this.ha(c.desde) : (et === 'e2' ? 'última resposta há ' : 'última análise há ') + this.ha(c.desde);
       },
-      grupo(c) { return c === 'SUSPEITO' || c === 'MALICIOSO' ? 'RISCO' : (c || ''); },
       feitos(et) { return this.rows[et].filter(function (r) { return !r.run; }).length; },
-      visiveis(et) {
-        var f = this.f[et], q = f.q.trim().toLowerCase(), self = this;
-        return this.rows[et].filter(function (r) {
-          return !r.run && (!f.cls || self.grupo(r.cls) === f.cls) && (!f.dst || self.dst(r)[1] === f.dst) && (!f.ent || r.entrada === f.ent)
-            && (!q || r.name.indexOf(q) >= 0);
-        });
-      },
+      visiveis(et) { return this.rows[et].filter(function (r) { return !r.run; }); },
       blocos(r) {
         var b = [];
         if (r.veredito) b.push(['IA online', r.veredito]);

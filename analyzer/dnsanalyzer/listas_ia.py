@@ -63,6 +63,7 @@ LISTAS_IA = {
 NAO_IDENT = "nao_identificado"
 NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
+FONTE_CATALOGO = "catalogo"   # lista fixa do catálogo (`lista:` em data/catalog.yaml): sem IA
 # destino de quem é liberado: uma whitelist por categoria ("wl:financas"); todo site vai p/ alguma fila
 WL = {f"wl:{k}": v for k, v in whitelist.DESCRICOES.items()}
 
@@ -202,7 +203,25 @@ def fase(client: OllamaClient) -> str:
         d = _reservar(c)
     if not d:
         return "idle"
-    return _sugerir(client, d)
+    return "done" if lista_do_catalogo(d) else _sugerir(client, d)
+
+
+def lista_do_catalogo(d: dict, fase_n: int = 1) -> bool:
+    """Catálogo com lista fixa (amazonaws.com, cloudfront.net -> wl:infraestrutura): grava e aplica sem perguntar à IA.
+    Segue o fluxo normal: ameaça (SUSPEITO/MALICIOSO) e quem já está numa lista de bloqueio (bucket/distribuição que a
+    IA ou uma pessoa identificou como apostas, adulto, ameaça… — não desbloqueia)."""
+    e = catalog.match(d["name"])
+    if not e or not e.get("lista") or d.get("classification") in ("SUSPEITO", "MALICIOSO"):
+        return False
+    with db.conn() as c:
+        if c.execute("SELECT 1 FROM category_lists WHERE domain = %s AND category NOT IN (%s, %s)",   # (Não identificados
+                     (d["name"], PARA_REVISAR, NAO_IDENT)).fetchone():                                  #  não é identificação)
+            return False
+        salvar(c, d["id"], e["lista"], 1.0, f"catálogo: {e.get('topic')}", e.get("topic") or "", FONTE_CATALOGO, fase_n)
+        aplicar(c, ids=[d["id"]])
+    eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), None,
+                      detail=f"{fase_n}|lista {e['lista']} 100% · {e.get('topic')} — catálogo (sem IA)")
+    return True
 
 
 def sugerir(client: OllamaClient, domain_id: int, fase_n: int = 1) -> str:
@@ -212,6 +231,8 @@ def sugerir(client: OllamaClient, domain_id: int, fase_n: int = 1) -> str:
     with db.conn() as c:
         d = c.execute("UPDATE domains SET lista_claimed_at = now() WHERE id = %s AND kind = 'public' "
                       "RETURNING " + _COLUNAS, (domain_id,)).fetchone()
+    if d and lista_do_catalogo(d, fase_n):
+        return "done"
     return _sugerir(client, d, fase_n) if d else "idle"
 
 
@@ -524,7 +545,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             if certo:
                 trava = ("tirar da Infraestrutura" if tira_infra else
                          (_incoerencia(cat, cls, r["category"]) or guardado(r, cat)) if cat else _suspeito(r))
-                if not decide_sozinho(r["lista_modelo"]):
+                if not decide_sozinho(r["lista_modelo"]) and r["lista_fonte"] != FONTE_CATALOGO:
                     trava = trava or f"modelo {r['lista_modelo'] or 'antigo'} não decide sozinho"
                 if cat == NAO_IDENT:
                     trava = trava or "não identificado: só depois das fases 2 a 4"

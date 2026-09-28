@@ -77,6 +77,11 @@ entries:
   - {suffix: usertrust.com,        classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
   - {suffix: amazontrust.com,      classification: TRABALHO, topic: "Certificados (PKI)", work: 75, protected: true}
   - {suffix: ntp.org,              classification: TRABALHO, topic: "Hora (NTP)", work: 70, protected: true}
+  # AWS e CloudFront (pedido do usuário 28/09): sem IA, direto na whitelist Infraestrutura (`lista`). NÃO protegidos:
+  # bucket/distribuição de terceiros em feed de ameaça (alta) continua virando MALICIOSO e não é liberado
+  - {suffix: amazonaws.com,        classification: TRABALHO, topic: "Amazon Web Services (AWS)", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
+  - {suffix: amazonaws.com.cn,     classification: TRABALHO, topic: "Amazon Web Services (AWS China)", work: 60, category: infraestrutura, lista: "wl:infraestrutura"}
+  - {suffix: cloudfront.net,       classification: TRABALHO, topic: "Amazon CloudFront (CDN)", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
 
   # ---------------- Governo e bancos (Brasil)
   - {suffix: gov.br,               classification: TRABALHO, topic: "Governo", work: 90, protected: true}

@@ -1263,3 +1263,38 @@ def test_liberados_autorizacao_e_historico(env):
     assert [(x["acao"], x["por"], x["autorizado_por"]) for x in log] == [
         ("revogar", "chefe@2d", "Maria (gerente)"), ("editar", "outro@2d", "Maria (gerente)"), ("liberar", "ti@2d", "Maria (gerente)")]
     assert log[1]["detalhe"] == {"usuario": "Caixa 2"}
+
+
+def test_aws_e_cloudfront_vao_p_infraestrutura_sem_ia(env, monkeypatch):
+    """28/09: amazonaws.com e cloudfront.net -> whitelist Infraestrutura pelo catálogo, sem perguntar à IA (client=None
+    quebraria se chamasse); ameaça (MALICIOSO) e quem já está numa lista de bloqueio seguem como estão."""
+    from dnsanalyzer import catalog, config, db, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    assert catalog.match("meu-bucket.s3.us-east-1.amazonaws.com")["lista"] == "wl:infraestrutura"
+    assert catalog.match("d1abcxyz.cloudfront.net")["category"] == "infraestrutura" and not catalog.match("d1abcxyz.cloudfront.net")["protected"]
+    with db.conn() as c:
+        ids = {}
+        for n, cls in (("meu-bucket.s3.us-east-1.amazonaws.com", "TRABALHO"), ("d1abcxyz.cloudfront.net", "TRABALHO"),
+                       ("golpe.s3.amazonaws.com", "MALICIOSO")):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, classified_by, analyzed_at, total_queries) "
+                               "VALUES (%s, %s, 'infraestrutura', 'catalog', now(), 2) RETURNING id", (n, cls)).fetchone()["id"]
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('nao_identificado', 'd1abcxyz.cloudfront.net', "
+                  "'IA automática (nao_identificado)')")
+        ids["apostas.cloudfront.net"] = c.execute("INSERT INTO domains (name, classification, category, classified_by, analyzed_at) "
+                                                  "VALUES ('apostas.cloudfront.net', 'TRABALHO', 'infraestrutura', 'catalog', now()) RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('apostas', 'apostas.cloudfront.net', "
+                  "'IA automática (apostas)')")
+    assert listas_ia.sugerir(None, ids["meu-bucket.s3.us-east-1.amazonaws.com"]) == "done"
+    assert listas_ia.sugerir(None, ids["d1abcxyz.cloudfront.net"]) == "done"
+    assert not listas_ia.lista_do_catalogo({"id": ids["apostas.cloudfront.net"], "name": "apostas.cloudfront.net",
+                                            "classification": "TRABALHO"}), "já está numa lista de bloqueio: não desbloqueia"
+    ids.pop("apostas.cloudfront.net")
+    assert not listas_ia.lista_do_catalogo({"id": ids["golpe.s3.amazonaws.com"], "name": "golpe.s3.amazonaws.com",
+                                            "classification": "MALICIOSO"}), "ameaça segue o fluxo normal"
+    with db.conn() as c:
+        wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains WHERE domain = ANY(%s)", (list(ids),))}
+        bl = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE domain = ANY(%s)", (list(ids),))}
+        f = c.execute("SELECT lista_fonte, lista_wl, lista_conf FROM domains WHERE id = %s", (ids["d1abcxyz.cloudfront.net"],)).fetchone()
+    assert wl == {"meu-bucket.s3.us-east-1.amazonaws.com": "infraestrutura", "d1abcxyz.cloudfront.net": "infraestrutura"}, wl
+    assert not bl, "saiu de Não identificados (não é identificação)"
+    assert (f["lista_fonte"], f["lista_wl"], f["lista_conf"]) == ("catalogo", "infraestrutura", 1.0)

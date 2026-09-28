@@ -35,18 +35,13 @@
   .ia-top{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.7rem;margin-bottom:1rem}
   .ia-top .metric .s{font-size:.74rem;color:var(--mut);margin-top:.15rem;min-height:1em}
 
-  /* feed: abas por etapa + filtros + tabela */
+  /* etapas (IA local em cima, IA online embaixo): título + filtros + tabela */
   .feed{padding:0;overflow:hidden}
-  .feed-h{display:flex;align-items:center;gap:.6rem 1rem;flex-wrap:wrap;padding:.6rem .9rem 0;border-bottom:1px solid var(--bd)}
-  .tabs{display:flex;gap:.2rem}
-  .tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;padding:.55rem .8rem .5rem;cursor:pointer;
-               font-weight:700;font-size:.95rem;color:var(--mut);display:flex;align-items:center;gap:.45rem}
-  .tabs button.on{color:var(--navy);border-bottom-color:var(--b)}
-  html[data-theme="dark"] .tabs button.on{color:#e2e8f0}
-  .tabs .n{font-size:.72rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;background:var(--soft);color:var(--soft-t)}
-  .tabs .nv{font-size:.68rem;font-weight:700;padding:.05rem .4rem;border-radius:999px;background:var(--b);color:#fff}
-  .tabs .nv:empty{display:none}
-  #busca{width:230px;margin:0 0 .45rem auto;padding:.35rem .6rem;font-size:.85rem}
+  .feed-h{display:flex;align-items:center;gap:.6rem 1rem;flex-wrap:wrap;padding:.7rem .9rem;border-bottom:1px solid var(--bd)}
+  .feed-h h2{margin:0;font-size:1.05rem;display:flex;align-items:center;gap:.5rem}
+  .feed-h .n{font-size:.72rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;background:var(--soft);color:var(--soft-t)}
+  .feed-h .dsc{font-size:.78rem;color:var(--mut)}
+  .feed .feed-h input.busca.busca{width:220px;margin-left:auto;padding:.35rem .6rem;font-size:.85rem}
   .flt{display:flex;align-items:center;gap:.5rem 1.4rem;flex-wrap:wrap;padding:.6rem .9rem;border-bottom:1px solid var(--bd)}
   .flt .fg{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
   .flt .fl{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
@@ -55,9 +50,8 @@
               font-size:.78rem;cursor:pointer}
   .seg button:hover{border-color:var(--b)}
   .seg button.on{background:var(--on);color:var(--on-t);border-color:var(--on)}
-  .seg button[hidden]{display:none}
 
-  .wrap{max-height:62vh;overflow:auto}
+  .wrap{max-height:48vh;overflow:auto}
   .tb{width:100%;border-collapse:collapse;font-size:.9rem}
   .tb th{position:sticky;top:0;z-index:1;background:var(--card);text-align:left;font-size:.7rem;text-transform:uppercase;
          letter-spacing:.04em;color:var(--mut);font-weight:600;padding:.5rem .6rem;border-bottom:1px solid var(--bd);white-space:nowrap}
@@ -92,7 +86,6 @@
   html[data-theme="dark"] .pct.c-md{background:rgba(14,165,233,.16);color:#7dd3fc}
   html[data-theme="dark"] .dst.on{background:rgba(139,92,246,.2);color:#c4b5fd}
   /* o tema escuro pinta todo <button>; aqui vale o visual da página */
-  html[data-theme="dark"] .iav .tabs button:not(.primary):not(.danger),
   html[data-theme="dark"] .mdl .x:not(.primary):not(.danger){background:none}
   html[data-theme="dark"] .iav .seg button:not(.primary):not(.danger),
   html[data-theme="dark"] .iav .pz:not(.primary):not(.danger){background:var(--chip);color:var(--chip-t)}
@@ -125,7 +118,7 @@
     .ia-top{grid-template-columns:1fr 1fr;gap:.5rem}
     .ia-top .metric{padding:.7rem}
     .ia-top .metric .n{font-size:1.35rem}
-    #busca{width:100%;margin:0 0 .5rem}
+    .feed .feed-h input.busca.busca{width:100%;margin-left:0}
     .tb .rk{display:none}
     .tb .dm,.tb .sv{max-width:12rem}
   }
@@ -147,15 +140,14 @@
   <div class="metric"><div class="n" id="st-media">–</div><div class="l">Tempo médio por domínio</div><div class="s" id="st-eta"></div></div>
 </div>
 
-<div class="card feed">
+{% for et, tit, dsc in [("e1", "🧠 Etapa 1 · IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
+                        ("e2", "🌐 Etapa 2 · IA online", "o que a IA local não decidiu com confiança")] %}
+<div class="card feed" id="{{ et }}">
   <div class="feed-h">
-    <div class="tabs" role="tablist">
-      <button type="button" data-et="e1" class="on" role="tab">🧠 IA local <span class="n" id="e1-n">0</span><span class="nv" id="e1-nv"></span></button>
-      <button type="button" data-et="e2" role="tab">🌐 IA online <span class="n" id="e2-n">0</span><span class="nv" id="e2-nv"></span></button>
-    </div>
-    <input type="search" id="busca" placeholder="Filtrar domínio…" autocomplete="off">
+    <h2>{{ tit }} <span class="n" id="{{ et }}-n">0</span></h2><span class="dsc">{{ dsc }}</span>
+    <input type="search" class="busca" data-alvo="{{ et }}" placeholder="Filtrar domínio…" autocomplete="off">
   </div>
-  <div class="flt">
+  <div class="flt" data-alvo="{{ et }}">
     <div class="fg"><span class="fl">Classificação</span>
     <div class="seg" data-f="cls">
       <button type="button" data-v="" class="on">Todas</button>
@@ -169,16 +161,15 @@
       <button type="button" data-v="" class="on">Qualquer</button>
       <button type="button" data-v="bl">Bloqueio</button>
       <button type="button" data-v="wl">Whitelist</button>
-      <button type="button" data-v="on" data-so="e1">→ IA online</button>
+      {% if et == "e1" %}<button type="button" data-v="on">→ IA online</button>{% endif %}
     </div></div>
   </div>
-  {% for et in ["e1", "e2"] %}
-  <div class="wrap" id="{{ et }}-w"{{ ' hidden' if et == 'e2' }}><table class="tb {{ et }}">
+  <div class="wrap"><table class="tb {{ et }}">
     <thead><tr><th class="h">Hora</th><th>Domínio</th><th>Classificação</th><th class="rk">Risco</th><th>Confiança</th><th class="ds">Destino</th></tr></thead>
     <tbody id="{{ et }}-b"><tr class="vazio"><td colspan="6">Carregando…</td></tr></tbody>
   </table></div>
-  {% endfor %}
 </div>
+{% endfor %}
 </div>
 
 <div class="mdl" id="mdl"><div class="cx">
@@ -198,8 +189,8 @@
   var LBL = {TRABALHO: 'Trabalho', NAO_TRABALHO: 'Não trabalho', SUSPEITO: 'Suspeito', MALICIOSO: 'Malicioso', DESCONHECIDO: 'Desconhecido'};
   var LOCAL = {llm_done: 1, whois_done: 1, search_done: 1, rules_final: 1, lista_local: 1, llm_start: 1, whois_start: 1, search_start: 1};
   var DEC = {lista_add: 1, aprovado: 1};
-  var lastId = 0, paused = false, cur = null, curBase = 0, first = true, aba = 'e1', busca = '';
-  var linhas = {e1: {}, e2: {}}, filtro = {e1: {cls: '', dst: ''}, e2: {cls: '', dst: ''}}, novos = {e1: 0, e2: 0};
+  var lastId = 0, paused = false, cur = null, curBase = 0, first = true;
+  var linhas = {e1: {}, e2: {}}, filtro = {e1: {cls: '', dst: '', q: ''}, e2: {cls: '', dst: '', q: ''}};
 
   function $(id){ return document.getElementById(id); }
   function el(tag, cls, txt){ var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
@@ -240,7 +231,11 @@
     if (ev.classification) r.cls = ev.classification;
     if (ev.risk != null) r.risco = ev.risk;
     if (ev.work != null) r.trab = ev.work;
-    if (ev.kind === 'llm_start' || ev.kind === 'whois_start' || ev.kind === 'search_start') { r.run = true; return; }
+    if (ev.kind === 'llm_start' || ev.kind === 'whois_start' || ev.kind === 'search_start') {
+      if (ev.kind === 'llm_start' && !r.run)   // nova análise do mesmo domínio: o resultado anterior não vale mais
+        ['lista', 'conf', 'risco', 'trab', 'estado', 'aplicado', 'veredito', 'proximo', 'motivo', 'seg', 'modelo'].forEach(function(k){ delete r[k]; });
+      r.run = true; return;
+    }
     r.run = false;
     if (ev.seconds != null) r.seg = (r.seg || 0) + ev.seconds;
     if (ev.kind === 'lista_local') {
@@ -292,7 +287,7 @@
   function aplicaFiltro(et, tr){
     var f = filtro[et];
     tr.style.display = (!f.cls || tr.dataset.cls === f.cls) && (!f.dst || tr.dataset.dst === f.dst)
-      && (!busca || tr.dataset.q.indexOf(busca) >= 0) ? '' : 'none';
+      && (!f.q || tr.dataset.q.indexOf(f.q) >= 0) ? '' : 'none';
   }
   function refiltra(et){ document.querySelectorAll('#' + et + '-b tr').forEach(function(tr){ if (tr.dataset.q !== undefined) aplicaFiltro(et, tr); }); }
 
@@ -320,31 +315,19 @@
   $('mdl').onclick = function(e){ if (e.target === this) fechar(); };
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape') fechar(); });
 
-  // abas das etapas; os filtros valem para a aba aberta (cada uma guarda os seus)
-  function marcaFiltros(){
-    document.querySelectorAll('.flt .seg').forEach(function(seg){
-      var v = filtro[aba][seg.dataset.f];
-      seg.querySelectorAll('button').forEach(function(b){
-        b.classList.toggle('on', b.dataset.v === v);
-        b.hidden = !!b.dataset.so && b.dataset.so !== aba;
-      });
-    });
-  }
-  document.querySelectorAll('.tabs button').forEach(function(b){
-    b.onclick = function(){
-      aba = b.dataset.et; novos[aba] = 0; $(aba + '-nv').textContent = '';
-      document.querySelectorAll('.tabs button').forEach(function(x){ x.classList.toggle('on', x === b); });
-      ['e1', 'e2'].forEach(function(et){ $(et + '-w').hidden = et !== aba; });
-      marcaFiltros();
-    };
-  });
-  document.querySelectorAll('.flt .seg').forEach(function(seg){
-    seg.addEventListener('click', function(e){
-      var b = e.target.closest('button'); if (!b) return;
-      filtro[aba][seg.dataset.f] = b.dataset.v; marcaFiltros(); refiltra(aba);
+  // filtros e busca de cada etapa
+  document.querySelectorAll('.flt').forEach(function(box){
+    box.addEventListener('click', function(e){
+      var b = e.target.closest('.seg button'); if (!b) return;
+      var et = box.dataset.alvo, seg = b.parentNode;
+      filtro[et][seg.dataset.f] = b.dataset.v;
+      seg.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x === b); });
+      refiltra(et);
     });
   });
-  $('busca').addEventListener('input', function(){ busca = this.value.trim().toLowerCase(); refiltra('e1'); refiltra('e2'); });
+  document.querySelectorAll('.busca').forEach(function(inp){
+    inp.addEventListener('input', function(){ filtro[inp.dataset.alvo].q = inp.value.trim().toLowerCase(); refiltra(inp.dataset.alvo); });
+  });
 
   function inserir(et, r){
     var tb = $(et + '-b');
@@ -366,7 +349,6 @@
     var nova = !linhas[et2][ev.name], r = linha(et2, ev.name);
     ler(r, ev); desenhar(r, true);
     if (nova || r.tr !== $(et2 + '-b').firstChild) inserir(et2, r);
-    if (nova && !first && et2 !== aba) $(et2 + '-nv').textContent = '+' + (++novos[et2]);
   }
 
   function status(d){
@@ -425,7 +407,7 @@
     paused = !paused; this.textContent = paused ? '▶ Continuar' : '⏸ Pausar'; this.classList.toggle('off', paused);
     tick(); if (!paused) poll();
   };
-  marcaFiltros(); poll(); setInterval(poll, 3000); setInterval(tick, 1000);
+  poll(); setInterval(poll, 3000); setInterval(tick, 1000);
 })();
 </script>
 {% endblock %}

@@ -19,6 +19,11 @@
     header a{color:#c3d2ea;text-decoration:none;font-size:.92rem;padding:.2rem 0;border-bottom:2px solid transparent}
     header a:hover,header a.on{color:#fff;border-bottom-color:#4aa8e8}
     header .sp{margin-left:auto}
+    /* bloqueio = vermelho, liberação = verde (IPs num verde-água): bolinha antes do nome e sublinhado na cor */
+    header a.nv::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.4rem;vertical-align:1px;
+                        background:var(--nv);box-shadow:0 0 0 3px color-mix(in srgb,var(--nv) 25%,transparent)}
+    header a.nv-bl{--nv:#f87171}header a.nv-lb{--nv:#4ade80}header a.nv-ip{--nv:#2dd4bf}
+    header a.nv:hover,header a.nv.on{border-bottom-color:var(--nv)}
     .tenant-sel{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.28);
                 border-radius:8px;padding:.35rem .55rem;font-size:.88rem;max-width:210px;cursor:pointer}
     .tenant-sel:focus{outline:0;border-color:#4aa8e8;box-shadow:0 0 0 3px rgba(74,168,232,.25)}
@@ -113,9 +118,9 @@
       {% if config.ANALYZER_ENABLED %}
       <a href="{{ url_for('analise.painel') }}" class="{{ 'on' if request.blueprint == 'analise' and request.endpoint not in ('analise.empresas', 'analise.fontes') }}">Análise (IA)</a>{% endif %}
       {% if config.TECHNITIUM_ENABLED %}
-      <a href="{{ url_for('admin.listas_categoria') }}" class="{{ 'on' if request.endpoint == 'admin.listas_categoria' }}">Domínios bloqueados</a>
-      <a href="{{ url_for('admin.listas_liberacao') }}" class="{{ 'on' if request.endpoint in ('admin.listas_liberacao', 'admin.servico') }}">Domínios liberados</a>
-      <a href="{{ url_for('admin.liberados') }}" class="{{ 'on' if request.endpoint == 'admin.liberados' }}">IPs liberados</a>
+      <a href="{{ url_for('admin.listas_categoria') }}" class="nv nv-bl {{ 'on' if request.endpoint == 'admin.listas_categoria' }}">Bloqueados</a>
+      <a href="{{ url_for('admin.listas_liberacao') }}" class="nv nv-lb {{ 'on' if request.endpoint in ('admin.listas_liberacao', 'admin.servico') }}">Liberados</a>
+      <a href="{{ url_for('admin.liberados') }}" class="nv nv-ip {{ 'on' if request.endpoint == 'admin.liberados' }}">IPs liberados</a>
       <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs</a>{% endif %}
       {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('admin.graficos') }}" class="{{ 'on' if request.endpoint == 'admin.graficos' }}">Gráficos</a>{% endif %}
       {% endif %}

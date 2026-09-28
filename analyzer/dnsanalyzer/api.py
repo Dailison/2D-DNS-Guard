@@ -1053,10 +1053,12 @@ def logs_classificar(body: ClassificarIn):
 
 @app.get("/charts", dependencies=[Depends(auth)])
 def charts(start: datetime, end: datetime, tid: int = 0, cls: list[str] = Query(default=[]),
-           categoria: Optional[str] = None, resposta: Optional[str] = None, top: int = Query(15, le=50)):
+           categoria: Optional[str] = None, resposta: Optional[str] = None, top: int = Query(15, le=50),
+           unidade: Optional[str] = None):
     """Tela Gráficos: consultas liberadas × bloqueadas no tempo e por classificação da IA,
     categoria do site, empresa e site (top), com os mesmos filtros. resposta = liberado |
-    bloqueado (só aquela parte das consultas). Série por hora até 2 dias; acima, por dia."""
+    bloqueado (só aquela parte das consultas). Série por hora até 2 dias; acima, por dia.
+    unidade (com tid) = só os computadores da filial: IP na rede mais específica da empresa marcada com ela."""
     if end <= start:
         raise HTTPException(400, "período inválido")
     gran = "hour" if end - start <= timedelta(days=2) else "day"
@@ -1064,6 +1066,11 @@ def charts(start: datetime, end: datetime, tid: int = 0, cls: list[str] = Query(
     wq = ["q.bucket >= date_trunc('hour', %(s)s::timestamptz)", "q.bucket < %(e)s"]
     if tid:
         wq.append("q.tenant_id = %(t)s"); p["t"] = tid
+        if unidade:
+            wq.append("q.client_id IN (SELECT cl.id FROM clients cl WHERE cl.tenant_id = %(t)s AND ("
+                      " SELECT tn.unit FROM tenant_networks tn WHERE tn.tenant_id = cl.tenant_id AND cl.ip <<= tn.cidr "
+                      " ORDER BY masklen(tn.cidr) DESC LIMIT 1) = %(u)s)")
+            p["u"] = unidade
     wf = []
     cls = [x.strip().upper() for x in cls if x and x.strip()]
     if cls:

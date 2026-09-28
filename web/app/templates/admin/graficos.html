@@ -29,6 +29,7 @@
   .viz .hb .sg{height:100%}
   .viz .hb .sg:last-child{border-radius:0 4px 4px 0}
   .viz .hb .vl{font-size:.8rem;color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .viz .hb .pc{font-size:.75rem;color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums;opacity:.85}
   .viz .hb .row:hover .trk,.viz .hb .row:focus .trk{filter:brightness(1.12)}
   .viz details{margin-top:.6rem;font-size:.85rem}.viz summary{cursor:pointer;color:var(--mut)}
   .viz details table td,.viz details table th{padding:.3rem .5rem}
@@ -49,15 +50,19 @@
     <div style="flex:0 0 auto"><label>Período</label>
       <div class="per">
         {% for k, rot in [('hoje','Hoje'),('ontem','Ontem'),('7d','7 dias'),('30d','30 dias')] %}
-        <a href="{{ url_for('admin.graficos', periodo=k, empresa=empresa, categoria=categoria, cls=cls_f, resposta=resposta) }}" class="{{ 'on' if periodo == k }}">{{ rot }}</a>
+        <a href="{{ url_for('admin.graficos', periodo=k, empresa=empresa, unidade=unidade, categoria=categoria, cls=cls_f, resposta=resposta) }}" class="{{ 'on' if periodo == k }}">{{ rot }}</a>
         {% endfor %}
       </div></div>
     <div><label>Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
     <div><label>Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
     <div><label>Empresa</label>
-      <select name="empresa"><option value="">— Todas —</option>
+      <select name="empresa" onchange="this.form.unidade && (this.form.unidade.value = ''); this.form.submit()"><option value="">— Todas —</option>
         {% for e in lista_empresas %}<option value="{{ e.id }}" {{ 'selected' if empresa == e.id|string }}>{{ e.name }}</option>{% endfor %}
       </select></div>
+    {% if unidades %}<div><label>Filial</label>
+      <select name="unidade"><option value="">— Todas —</option>
+        {% for u in unidades %}<option value="{{ u }}" {{ 'selected' if unidade == u }}>{{ u }}</option>{% endfor %}
+      </select></div>{% endif %}
     <div><label>Categoria do site</label>
       <select name="categoria"><option value="">— Todas —</option>
         {% for c in site_categorias %}<option value="{{ c.code }}" {{ 'selected' if categoria == c.code }}>{{ c.label }}</option>{% endfor %}
@@ -106,6 +111,10 @@
   const nf = new Intl.NumberFormat("pt-BR"), cf = new Intl.NumberFormat("pt-BR", {notation: "compact", maximumFractionDigits: 1});
   const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const tot = r => SERIES.reduce((a, s) => a + (r[s.k] || 0), 0);
+  // % dentro do item (ex.: Trabalho 92% lib. · 8% bloq.) e fatia do item no total do período (10% das liberadas)
+  const pct = (a, b) => b ? Math.round(a * 100 / b) : 0;
+  const CURTO = {liberadas: "lib.", bloqueadas: "bloq."};
+  const dentro = r => SERIES.length > 1 && tot(r) ? SERIES.map(s => pct(r[s.k] || 0, tot(r)) + "% " + CURTO[s.k]).join(" · ") : "";
   function logsUrl(extra) {
     const p = new URLSearchParams();
     Object.entries(Object.assign({}, BASE, extra)).forEach(([k, v]) => { if (v) p.set(k, v); });
@@ -114,14 +123,19 @@
 
   // ---------- tooltip (valor forte, rótulo secundário; textContent sempre)
   const tt = document.getElementById("tt");
-  function mostra(ev, titulo, r) {
+  function mostra(ev, titulo, r, fatia) {
     tt.textContent = ""; tt.appendChild(el("div", "h", titulo));
     SERIES.forEach(s => {
       const row = el("div", "r"), n = el("span"), k = el("span", "k");
       k.style.background = s.cor; n.appendChild(k); n.appendChild(document.createTextNode(s.nome));
-      row.appendChild(n); row.appendChild(el("b", null, nf.format(r[s.k] || 0))); tt.appendChild(row);
+      row.appendChild(n); row.appendChild(el("b", null, nf.format(r[s.k] || 0) + (SERIES.length > 1 && tot(r) ? ` (${pct(r[s.k] || 0, tot(r))}%)` : "")));
+      tt.appendChild(row);
     });
     if (SERIES.length > 1) { const row = el("div", "r"); row.appendChild(el("span", null, "Total")); row.appendChild(el("b", null, nf.format(tot(r)))); tt.appendChild(row); }
+    if (fatia) SERIES.forEach(s => {
+      const row = el("div", "r"); row.appendChild(el("span", null, `% das ${s.nome.toLowerCase()} do período`));
+      row.appendChild(el("b", null, pct(r[s.k] || 0, (D.totais || {})[s.k]) + "%")); tt.appendChild(row);
+    });
     tt.style.display = "block";
     const b = ev.target.getBoundingClientRect ? ev.target.getBoundingClientRect() : null;
     const x = ev.clientX || (b ? b.right : 0), y = ev.clientY || (b ? b.top : 0);
@@ -150,12 +164,14 @@
   // ---------- tabela equivalente de cada gráfico
   function tabela(alvo, cab, linhas) {
     const t = el("table"), th = el("tr");
-    cab.concat(SERIES.map(s => s.nome), SERIES.length > 1 ? ["Total"] : []).forEach(c => th.appendChild(el("th", null, c)));
+    cab.concat(SERIES.map(s => s.nome), SERIES.length > 1 ? ["Total"] : [], SERIES.map(s => `% das ${s.nome.toLowerCase()}`))
+      .forEach(c => th.appendChild(el("th", null, c)));
     const hd = el("thead"); hd.appendChild(th); t.appendChild(hd); const tb = el("tbody");
     linhas.forEach(([rot, r]) => {
       const tr = el("tr"); tr.appendChild(el("td", null, rot));
-      SERIES.forEach(s => tr.appendChild(el("td", null, nf.format(r[s.k] || 0))));
+      SERIES.forEach(s => tr.appendChild(el("td", null, nf.format(r[s.k] || 0) + (SERIES.length > 1 && tot(r) ? ` (${pct(r[s.k] || 0, tot(r))}%)` : ""))));
       if (SERIES.length > 1) tr.appendChild(el("td", null, nf.format(tot(r))));
+      SERIES.forEach(s => tr.appendChild(el("td", null, pct(r[s.k] || 0, (D.totais || {})[s.k]) + "%")));
       tb.appendChild(tr);
     });
     t.appendChild(tb); document.getElementById(alvo).appendChild(t);
@@ -181,7 +197,8 @@
       trk.style.width = Math.max(tot(r) / maior * 100, 0.6) + "%";
       SERIES.forEach(s => { if (!(r[s.k] > 0)) return; const sg = el("div", "sg"); sg.style.background = s.cor; sg.style.flex = String(r[s.k]); trk.appendChild(sg); });
       row.appendChild(trk); row.appendChild(el("span", "vl", cf.format(tot(r))));
-      ["pointermove", "focus"].forEach(ev => row.addEventListener(ev, e => mostra(e, nome, r)));
+      if (dentro(r)) row.appendChild(el("span", "pc", dentro(r)));
+      ["pointermove", "focus"].forEach(ev => row.addEventListener(ev, e => mostra(e, nome, r, true)));
       ["pointerleave", "blur"].forEach(ev => row.addEventListener(ev, esconde));
       g.appendChild(lb); g.appendChild(row);
     });

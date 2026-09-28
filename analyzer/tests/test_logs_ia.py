@@ -172,6 +172,24 @@ def test_charts_filtros(api):
                                       "resposta": "x"}, headers=H).status_code == 400
 
 
+def test_charts_por_filial(api):
+    """Filial = unidade das redes da empresa; o computador fica na rede mais específica (10.1.0.6/32 dentro de 10.1/16)."""
+    from dnsanalyzer import db
+    a = next(t["id"] for t in api.get("/tenants", headers=H).json() if t["name"] == "Empresa A")
+    with db.conn() as c:
+        c.execute("INSERT INTO tenant_networks (tenant_id, cidr, unit) VALUES (%s, '10.1.0.0/16', 'Matriz'), "
+                  "(%s, '10.1.0.6/32', 'Financeiro')", (a, a))
+    try:
+        fin, mat = _charts(api, tid=a, unidade="Financeiro"), _charts(api, tid=a, unidade="Matriz")
+        assert fin["totais"]["liberadas"] + fin["totais"]["bloqueadas"] == 5 and [r["chave"] for r in fin["top_dominios"]] == ["loja.com"]
+        assert mat["totais"] == {"liberadas": 1, "bloqueadas": 3, "sites": 2, "ameacas": 3}
+        assert _charts(api, tid=a, unidade="Nenhuma")["totais"]["sites"] == 0
+        assert _charts(api, unidade="Matriz")["totais"]["sites"] == 3, "sem empresa, a filial não filtra"
+    finally:
+        with db.conn() as c:
+            c.execute("DELETE FROM tenant_networks WHERE cidr IN ('10.1.0.0/16', '10.1.0.6/32')")
+
+
 def test_fases_2_e_3_nao_esperam_a_fila_da_fase_1(api):
     from dnsanalyzer import classifier, db
     with db.conn() as c:

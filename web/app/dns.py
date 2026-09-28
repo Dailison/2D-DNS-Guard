@@ -407,6 +407,11 @@ def graficos():
         inicio = (request.args.get("inicio") or f"{hoje}T00:00").strip()
         fim = (request.args.get("fim") or f"{hoje}T23:59").strip()
     empresa = (request.args.get("empresa") or "").strip()
+    # filiais da empresa escolhida (unidade das redes cadastradas); filial de outra empresa é ignorada
+    unidades = sorted({(n.get("unit") or "").strip() for e in emp.lista() if str(e.get("id")) == empresa
+                       for n in (e.get("networks") or []) if (n.get("unit") or "").strip()}, key=str.lower)
+    unidade = (request.args.get("unidade") or "").strip()
+    unidade = unidade if unidade in unidades else ""
     categoria = (request.args.get("categoria") or "").strip()
     cls_f = (request.args.get("cls") or "").strip().upper()
     cls_f = cls_f if cls_f in dict(CLS_FILTROS) else ""
@@ -419,11 +424,13 @@ def graficos():
     dados = None
     try:
         dados = api.get("/charts", start=utc(inicio), end=utc(fim), tid=int(empresa) if empresa.isdigit() else 0,
-                        cls=_cls_lista(cls_f) or None, categoria=categoria or None, resposta=resposta or None)
+                        cls=_cls_lista(cls_f) or None, categoria=categoria or None, resposta=resposta or None,
+                        unidade=unidade or None)
     except AnalyzerError as e:
         flash(f"Não foi possível carregar os gráficos: {e}", "erro")
     return render_template(
         "admin/graficos.html", dados=dados, periodo=periodo, inicio=inicio, fim=fim, empresa=empresa,
+        unidade=unidade, unidades=unidades,
         resposta=resposta, respostas=RESPOSTAS_GRAF, lista_empresas=emp.lista(),
         coletado_ate=dnslib.utc_para_local(dados["coletado_ate"]) if dados and dados.get("coletado_ate") else None,
         **_ctx_cls(cls_f, categoria))

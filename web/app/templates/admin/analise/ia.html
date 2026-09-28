@@ -1,121 +1,122 @@
 {% extends "admin/analise/_base.html" %}
 {% block an %}
 <style>
-  /* IA ao vivo: dashboard escuro (Alpine.js + Motion, arquivos em static/vendor) */
+  /* IA ao vivo: dashboard escuro compacto (Alpine.js + Motion, arquivos em static/vendor).
+     No desktop a página cabe na janela: as duas etapas dividem a altura e cada tabela rola por dentro. */
   body{background:#070b14}
   .an-top h1{color:#e6edf7}.an-top h1 .mut{color:#7d8aa3!important}
-  .an-tabs{border-bottom-color:#1a2438}.an-tabs a{color:#7d8aa3}.an-tabs a.on,.an-tabs a:hover{color:#fff}
-  main footer{color:#5b6782!important}
+  .an-tabs{border-bottom-color:#1a2438;margin-bottom:.6rem!important}.an-tabs a{color:#7d8aa3}.an-tabs a.on,.an-tabs a:hover{color:#fff}
+  main footer{display:none}
   [x-cloak]{display:none!important}
 
   .iav{--ln:rgba(148,163,184,.13);--tx:#e6edf7;--mu:#8b97ad;--ac:#4aa8e8;--vi:#a78bfa;--ok:#22c55e;--am:#f59e0b;--or:#fb923c;--rd:#ef4444;--sl:#94a3b8;
-       color:var(--tx);display:flex;flex-direction:column;gap:14px}
-  .glass{background:linear-gradient(180deg,rgba(24,34,56,.78),rgba(12,18,32,.78));border:1px solid var(--ln);border-radius:16px;
-         box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 10px 30px rgba(0,0,0,.25);backdrop-filter:blur(10px)}
-  .iav small,.iav .mu{color:var(--mu)}
+       color:var(--tx);display:flex;flex-direction:column;gap:10px}
+  .glass{background:linear-gradient(180deg,rgba(24,34,56,.78),rgba(12,18,32,.78));border:1px solid var(--ln);border-radius:14px;
+         box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 8px 24px rgba(0,0,0,.22)}
+  .iav small{color:var(--mu)}
+  @media (min-width:900px) and (min-height:620px){
+    .iav{height:calc(100vh - var(--topo, 220px) - 12px)}
+    .iav .etapa{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
+    .iav .wrap{flex:1 1 auto;min-height:0;max-height:none}
+  }
 
-  /* status */
-  .stbar{display:flex;align-items:center;gap:10px 18px;flex-wrap:wrap;padding:12px 16px}
-  .stbar .st{display:flex;align-items:center;gap:10px}
-  .stbar b{font-size:.95rem}.stbar small{display:block;font-size:.76rem}
-  .pulse{width:10px;height:10px;border-radius:50%;background:var(--sl);position:relative;flex:0 0 auto}
+  /* faixa do topo: status + números */
+  .topo{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;padding:8px 14px;flex:0 0 auto}
+  .topo .st{display:flex;align-items:center;gap:9px;white-space:nowrap}
+  .topo .st b{font-size:.88rem}
+  .pulse{width:9px;height:9px;border-radius:50%;background:var(--sl);position:relative;flex:0 0 auto}
   .pulse.ok{background:var(--ok)}.pulse.x{background:var(--rd)}
-  .pulse.ok::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--ok);animation:ping 1.8s ease-out infinite}
+  .pulse.ok::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--ok);animation:ping 1.8s ease-out infinite}
   @keyframes ping{from{transform:scale(.6);opacity:.9}to{transform:scale(1.8);opacity:0}}
-  .tag{font-size:.72rem;font-weight:700;letter-spacing:.02em;padding:4px 10px;border-radius:999px;border:1px solid}
+  .tag{font-size:.68rem;font-weight:700;padding:2px 9px;border-radius:999px;border:1px solid}
   .tag.on{color:#c4b5fd;border-color:rgba(167,139,250,.4);background:rgba(167,139,250,.1)}
   .tag.off{color:var(--mu);border-color:var(--ln)}
-  .stbar .sp{flex:1}
-  .iav .ghost{font:inherit;font-size:.8rem;font-weight:600;color:var(--tx);background:rgba(255,255,255,.05);border:1px solid var(--ln);
-              border-radius:999px;padding:6px 14px;cursor:pointer;transition:background .2s}
+  .kp{display:flex;align-items:baseline;gap:6px;padding-left:18px;border-left:1px solid var(--ln);white-space:nowrap}
+  .kp b{font-size:1.15rem;font-weight:800;font-variant-numeric:tabular-nums;color:#fff}
+  .kp span{font-size:.76rem;color:#c3cde0}
+  .topo .sp{flex:1}
+  .iav .ghost{font:inherit;font-size:.76rem;font-weight:600;color:var(--tx);background:rgba(255,255,255,.05);border:1px solid var(--ln);
+              border-radius:999px;padding:4px 12px;cursor:pointer}
   .iav .ghost:hover{background:rgba(255,255,255,.1)}
   .iav .ghost.off{color:#fcd34d;border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.1)}
 
-  /* indicadores */
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-  .kpi{padding:14px 16px;position:relative;overflow:hidden}
-  .kpi::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:linear-gradient(var(--ac),var(--vi))}
-  .kpi .v{font-size:1.9rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
-          background:linear-gradient(90deg,#fff,#9cc9f0);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .kpi .l{font-size:.82rem;color:#c3cde0;margin-top:2px}.kpi .s{font-size:.74rem;color:var(--mu);min-height:1.1em;margin-top:2px}
-
-  /* etapas */
+  /* etapa: cabeçalho (título, filtros, busca) */
   .etapa{overflow:hidden}
-  .eh{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--ln)}
-  .eh .ico{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:1.15rem;
-           background:linear-gradient(135deg,rgba(74,168,232,.25),rgba(74,168,232,.05));border:1px solid rgba(74,168,232,.3)}
-  .etapa.e2 .eh .ico{background:linear-gradient(135deg,rgba(167,139,250,.28),rgba(167,139,250,.05));border-color:rgba(167,139,250,.35)}
-  .iav .eh h2{margin:0;font-size:1.05rem;color:var(--tx);display:flex;align-items:center;gap:8px}
-  .eh p{margin:2px 0 0;font-size:.78rem;color:var(--mu)}
-  .cnt{font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.07);color:#c3cde0}
-  .iav input.busca{margin-left:auto;width:230px;font:inherit;font-size:.85rem;color:var(--tx);background:rgba(0,0,0,.25);
-                   border:1px solid var(--ln);border-radius:10px;padding:7px 11px}
-  .iav input.busca:focus{outline:0;border-color:var(--ac);box-shadow:0 0 0 3px rgba(74,168,232,.18)}
+  .eh{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--ln);flex:0 0 auto}
+  .eh .ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.95rem;
+           background:rgba(74,168,232,.15);border:1px solid rgba(74,168,232,.3);flex:0 0 auto}
+  .etapa.e2 .eh .ico{background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.35)}
+  .iav .eh h2{margin:0 6px 0 0;font-size:.95rem;color:var(--tx);display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .cnt{font-size:.68rem;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.07);color:#c3cde0}
+  .eh .sp{flex:1}
+  .iav .eh select,.iav .eh input.busca{font:inherit;font-size:.78rem;color:var(--tx);background:rgba(0,0,0,.28);border:1px solid var(--ln);
+                                       border-radius:8px;padding:4px 8px;width:auto}
+  .iav .eh select.on{border-color:var(--ac);color:#fff}
+  .iav .eh input.busca{width:180px}
+  .iav .eh select:focus,.iav .eh input.busca:focus{outline:0;border-color:var(--ac);box-shadow:0 0 0 3px rgba(74,168,232,.18)}
+  .iav .eh option{background:#0f1729;color:var(--tx)}
 
-  /* analisando agora */
-  .lane{padding:12px 16px;border-bottom:1px solid var(--ln);background:rgba(74,168,232,.03)}
-  .etapa.e2 .lane{background:rgba(167,139,250,.035)}
-  .lane-h{display:flex;align-items:center;gap:8px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9fb0c8;margin-bottom:10px}
-  .lane-h .lv{width:7px;height:7px;border-radius:50%;background:var(--ac);box-shadow:0 0 10px var(--ac);animation:blink 1.4s infinite}
-  .etapa.e2 .lane-h .lv{background:var(--vi);box-shadow:0 0 10px var(--vi)}
+  /* analisando agora: chips de uma linha */
+  .lane{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--ln);background:rgba(74,168,232,.035);
+        overflow-x:auto;flex:0 0 auto;min-height:44px;scrollbar-width:thin}
+  .etapa.e2 .lane{background:rgba(167,139,250,.04)}
+  .lane-h{display:flex;align-items:center;gap:6px;font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9fb0c8;
+          white-space:nowrap;flex:0 0 auto}
+  .lane-h .lv{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 8px var(--ac);animation:blink 1.4s infinite}
+  .etapa.e2 .lane-h .lv{background:var(--vi);box-shadow:0 0 8px var(--vi)}
   @keyframes blink{50%{opacity:.3}}
-  .cards{display:flex;flex-wrap:wrap;gap:10px;min-height:54px;align-items:flex-start}
-  .lc{width:236px;border-radius:14px;padding:10px 12px;background:rgba(10,16,30,.85);border:1px solid rgba(74,168,232,.35);position:relative;overflow:hidden}
-  .etapa.e2 .lc{border-color:rgba(167,139,250,.38)}
-  .lc .top{display:flex;align-items:baseline;gap:8px}
-  .lc .n{font-weight:700;font-size:.88rem;color:var(--tx);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-  .lc .t{font-size:.75rem;color:var(--mu);font-variant-numeric:tabular-nums}
-  .lc .run small{font-size:.72rem}
-  .shim{height:3px;border-radius:3px;margin:8px 0 6px;background:linear-gradient(90deg,transparent,var(--ac),transparent) 0 0/40% 100% no-repeat,rgba(255,255,255,.06);
-        animation:shim 1.4s linear infinite}
-  .etapa.e2 .shim{background:linear-gradient(90deg,transparent,var(--vi),transparent) 0 0/40% 100% no-repeat,rgba(255,255,255,.06)}
-  @keyframes shim{from{background-position:-40% 0,0 0}to{background-position:140% 0,0 0}}
-  .etapa .lc.done{border-color:var(--cc);box-shadow:0 0 0 1px var(--cc),0 0 24px -6px var(--cc)}
-  .lc .res{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;margin-top:8px}
+  .lc{display:flex;align-items:center;gap:7px;flex:0 0 auto;height:30px;padding:0 10px;border-radius:999px;white-space:nowrap;
+      background:rgba(10,16,30,.9);border:1px solid rgba(74,168,232,.35)}
+  .etapa.e2 .lc{border-color:rgba(167,139,250,.4)}
+  .lc .spin{width:11px;height:11px;border:2px solid rgba(74,168,232,.3);border-top-color:var(--ac);border-radius:50%;animation:sp .9s linear infinite;flex:0 0 auto}
+  .etapa.e2 .lc .spin{border-color:rgba(167,139,250,.3);border-top-color:var(--vi)}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .lc .n{font-weight:700;font-size:.8rem;color:var(--tx);text-decoration:none;max-width:210px;overflow:hidden;text-overflow:ellipsis}
+  .lc .t{font-size:.72rem;color:var(--mu);font-variant-numeric:tabular-nums}
+  .lc.done{border-color:var(--cc);box-shadow:0 0 0 1px var(--cc),0 0 18px -4px var(--cc)}
+  .lc .res{display:flex;align-items:center;gap:6px}
   .lc .res>*{opacity:0}
-  .lc .res .full{grid-column:1/-1}
-  .kv small{display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.05em}
-  .kv b{font-size:1rem;font-variant-numeric:tabular-nums}
-  .vazio-l{font-size:.8rem;color:var(--mu);padding:14px 2px}
+  .lc .res .num{min-width:0;padding:1px 6px;font-size:.74rem}
+  .lc .res .pill,.lc .res .dst{font-size:.7rem;padding:1px 8px}
+  .vazio-l{font-size:.76rem;color:var(--mu);white-space:nowrap}
 
-  /* filtros */
-  .flt{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--ln)}
-  .fg{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-  .fl{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--mu);margin-right:2px}
-  .iav .chip{font:inherit;font-size:.76rem;color:#c3cde0;background:transparent;border:1px solid var(--ln);border-radius:999px;padding:4px 11px;cursor:pointer;transition:all .15s}
-  .iav .chip:hover{border-color:rgba(74,168,232,.5);color:#fff}
-  .iav .chip.on{background:#e6edf7;color:#0b1220;border-color:#e6edf7}
+  /* entrada: novo / reavaliação / reanálise pedida */
+  .eb{font-size:.58rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:999px;border:1px solid;white-space:nowrap;flex:0 0 auto}
+  .eb.novo{color:#67e8f9;border-color:rgba(103,232,249,.4);background:rgba(103,232,249,.1)}
+  .eb.reavaliacao{color:#fcd34d;border-color:rgba(252,211,77,.35);background:rgba(252,211,77,.08)}
+  .eb.pedida{color:#f0abfc;border-color:rgba(240,171,252,.4);background:rgba(240,171,252,.1)}
 
-  /* tabela */
-  .wrap{max-height:52vh;overflow:auto}
-  .iav .tb{width:100%;border-collapse:separate;border-spacing:0;font-size:.88rem}
-  .iav .tb th{position:sticky;top:0;z-index:1;background:#0f1729;text-align:left;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;
-              color:var(--mu);font-weight:700;padding:9px 12px;border-bottom:1px solid var(--ln);white-space:nowrap}
-  .iav .tb td{padding:9px 12px;border-bottom:1px solid rgba(148,163,184,.07);vertical-align:middle;color:var(--tx)}
-  .tb tbody tr{cursor:pointer;transition:background .15s}
+  /* tabela: uma linha por domínio */
+  .wrap{max-height:40vh;overflow:auto}
+  .iav .tb{width:100%;border-collapse:separate;border-spacing:0;font-size:.82rem}
+  .iav .tb th{position:sticky;top:0;z-index:1;background:#0f1729;text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;
+              color:var(--mu);font-weight:700;padding:6px 10px;border-bottom:1px solid var(--ln);white-space:nowrap}
+  .iav .tb td{padding:5px 10px;border-bottom:1px solid rgba(148,163,184,.07);vertical-align:middle;color:var(--tx);white-space:nowrap}
+  .tb tbody tr{cursor:pointer}
   .tb tbody tr:hover td{background:rgba(255,255,255,.035)}
   .tb tr.espera{display:none}.tb tr.chegando{visibility:hidden}
-  .tb .h{color:var(--mu)!important;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:.78rem;width:4.8rem}
-  .tb .dm{max-width:26rem}
-  .tb .dm .n{font-weight:600;color:#9cc9f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tb .sv{font-size:.74rem;color:var(--mu);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:26rem;margin-top:2px}
-  .tb .ds .sv{max-width:18rem}
+  .tb .h{color:var(--mu)!important;font-variant-numeric:tabular-nums;font-size:.74rem;width:4.4rem}
+  .tb .dm{max-width:30rem;overflow:hidden}
+  .tb .dm .n{display:flex;align-items:center;gap:7px;min-width:0}
+  .tb .dm .n b{font-weight:600;color:#9cc9f0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+  .tb .dm .n i{font-style:normal;font-size:.74rem;color:var(--mu);overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:0}
+  .tb .ds{max-width:22rem;overflow:hidden}
+  .tb .ds i{font-style:normal;font-size:.72rem;color:var(--mu);margin-left:6px}
   .tb.e2 .rk{display:none}
-  .tb .vz td{text-align:center;color:var(--mu);padding:28px;cursor:default}
+  .tb .vz td{text-align:center;color:var(--mu);padding:18px;cursor:default}
 
   /* etiquetas */
-  .pill{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;
         color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent)}
-  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--c)}
+  .pill::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--c)}
   .pill.TRABALHO{--c:var(--ok)}.pill.NAO_TRABALHO{--c:var(--am)}.pill.SUSPEITO{--c:var(--or)}.pill.MALICIOSO{--c:var(--rd)}
   .pill.DESCONHECIDO,.pill.PENDENTE{--c:var(--sl)}
-  .num{display:inline-block;min-width:3.2rem;text-align:center;font-weight:700;font-size:.8rem;font-variant-numeric:tabular-nums;padding:3px 8px;border-radius:8px;
+  .num{display:inline-block;min-width:2.9rem;text-align:center;font-weight:700;font-size:.74rem;font-variant-numeric:tabular-nums;padding:2px 6px;border-radius:7px;
        color:#c3cde0;background:rgba(255,255,255,.06)}
   .num.r-hi{color:#fca5a5;background:rgba(239,68,68,.16)}.num.r-md{color:#fcd34d;background:rgba(245,158,11,.14)}.num.r-lo{color:#86efac;background:rgba(34,197,94,.12)}
   .num.c-hi{color:#93c5fd;background:rgba(59,130,246,.2)}.num.c-md{color:#7dd3fc;background:rgba(14,165,233,.13)}
-  .kv b.r-hi{color:#fca5a5}.kv b.r-md{color:#fcd34d}.kv b.r-lo{color:#86efac}.kv b.c-hi{color:#93c5fd}.kv b.c-md{color:#7dd3fc}
-  .dst{display:inline-block;font-size:.76rem;font-weight:700;padding:3px 10px;border-radius:8px;white-space:nowrap;max-width:18rem;overflow:hidden;text-overflow:ellipsis;
-       color:#c3cde0;background:rgba(255,255,255,.06)}
+  .dst{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 9px;border-radius:7px;white-space:nowrap;max-width:15rem;overflow:hidden;
+       text-overflow:ellipsis;vertical-align:middle;color:#c3cde0;background:rgba(255,255,255,.06)}
   .dst.bl{color:#fca5a5;background:rgba(239,68,68,.15)}.dst.wl{color:#86efac;background:rgba(34,197,94,.13)}
   .dst.on{color:#c4b5fd;background:rgba(167,139,250,.16)}.dst.hm{color:#fcd34d;background:rgba(245,158,11,.14)}
   .dst.ok::after{content:" ✓"}
@@ -135,30 +136,26 @@
   .mdl .ft{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-top:1px solid var(--ln)}
   .mdl .ft a{font-size:.82rem;font-weight:700;color:#0b1220;background:#e6edf7;border-radius:999px;padding:7px 14px;text-decoration:none}
 
-  @media (max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.tb .h{display:none}}
+  @media (max-width:1100px){.tb .h{display:none}.kp{padding-left:10px}}
   @media (max-width:640px){
-    .iav input.busca{width:100%;margin-left:0}
-    .lc{width:100%}
-    .tb .rk{display:none}.tb .dm,.tb .sv{max-width:11rem}
-    .kpi .v{font-size:1.5rem}
+    .kp{border-left:0;padding-left:0}
+    .iav .eh input.busca{width:100%}
+    .tb .rk{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
   }
-  @media (prefers-reduced-motion:reduce){.pulse.ok::after,.shim,.lane-h .lv{animation:none}}
+  @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin{animation:none}}
 </style>
 
 <div class="iav" x-data="iav" x-cloak>
-  <section class="stbar glass">
+  <section class="topo glass">
     <div class="st"><span class="pulse" :class="ia.ok ? 'ok' : (ia.ok === false ? 'x' : '')"></span>
-      <div><b x-text="'IA local · ' + (ia.model || '…')"></b><small x-text="ia.txt"></small></div></div>
-    <span class="tag" :class="onlineOn ? 'on' : 'off'" x-show="onlineOn !== null" x-text="onlineOn ? 'IA online ativa' : 'IA online sem chave'"></span>
+      <b x-text="'IA local · ' + (ia.model || '…')"></b><small x-text="ia.txt"></small>
+      <span class="tag" :class="onlineOn ? 'on' : 'off'" x-show="onlineOn !== null" x-text="onlineOn ? 'IA online ativa' : 'IA online sem chave'"></span></div>
+    <template x-for="k in kpis" :key="k.l">
+      <div class="kp" :title="k.s"><b x-text="k.v"></b><span x-text="k.l"></span></div>
+    </template>
     <span class="sp"></span>
     <small x-text="upd"></small>
     <button type="button" class="ghost" :class="{off: paused}" @click="pausar()" x-text="paused ? '▶ Continuar' : '⏸ Pausar'"></button>
-  </section>
-
-  <section class="kpis">
-    <template x-for="k in kpis" :key="k.l">
-      <div class="kpi glass"><div class="v" x-text="k.v"></div><div class="l" x-text="k.l"></div><div class="s" x-text="k.s"></div></div>
-    </template>
   </section>
 
   {% for et, ico, tit, dsc in [("e1", "🧠", "Etapa 1 · IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
@@ -166,43 +163,43 @@
   <section class="etapa glass {{ et }}" data-et="{{ et }}">
     <header class="eh">
       <span class="ico">{{ ico }}</span>
-      <div><h2>{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2><p>{{ dsc }}</p></div>
+      <h2 title="{{ dsc }}">{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2>
+      <span class="sp"></span>
+      <select x-model="f.{{ et }}.cls" :class="{on: f.{{ et }}.cls}" aria-label="Classificação">
+        {% for v, l in [("", "Classificação: todas"), ("TRABALHO", "Trabalho"), ("NAO_TRABALHO", "Não trabalho"), ("RISCO", "Suspeito / Malicioso"), ("DESCONHECIDO", "Desconhecido")] %}
+        <option value="{{ v }}">{{ l }}</option>{% endfor %}
+      </select>
+      <select x-model="f.{{ et }}.dst" :class="{on: f.{{ et }}.dst}" aria-label="Destino">
+        {% for v, l in [("", "Destino: qualquer"), ("bl", "Bloqueio"), ("wl", "Whitelist")] + ([("on", "→ IA online")] if et == "e1" else []) %}
+        <option value="{{ v }}">{{ l }}</option>{% endfor %}
+      </select>
+      <select x-model="f.{{ et }}.ent" :class="{on: f.{{ et }}.ent}" aria-label="Entrada">
+        {% for v, l in [("", "Entrada: todas"), ("novo", "Novos" if et == "e1" else "1ª vez"), ("reavaliacao", "Reavaliações" if et == "e1" else "Revalidações"), ("pedida", "Reanálises pedidas")] %}
+        <option value="{{ v }}">{{ l }}</option>{% endfor %}
+      </select>
       <input type="search" class="busca" placeholder="Filtrar domínio…" autocomplete="off" x-model.debounce.150ms="f.{{ et }}.q">
     </header>
 
     <div class="lane">
-      <div class="lane-h"><span class="lv"></span>Analisando agora <span class="cnt" x-text="lane.{{ et }}.filter(c => !c.res).length"></span></div>
-      <div class="cards">
-        <template x-for="c in lane.{{ et }}" :key="c.key">
-          <div class="lc" :class="{done: c.res}" :data-k="c.key" :style="c.res ? '--cc:' + c.res.cor : ''">
-            <div class="top"><a class="n" :href="urlDom(c.name)" x-text="c.name" :title="c.name"></a>
-              <span class="t" x-show="!c.res" x-text="dur((agora - c.t0) / 1000)"></span></div>
-            <div class="run" x-show="!c.res"><div class="shim"></div><small x-text="c.q != null ? c.q + ' consultas' : 'analisando…'"></small></div>
-            <template x-if="c.res">
-              <div class="res">
-                <span class="full"><span class="pill" :class="c.res.clsK" x-text="c.res.clsL"></span></span>
-                {% if et == "e1" %}<span class="kv"><small>Risco</small><b :class="c.res.rk" x-text="c.res.risco"></b></span>{% endif %}
-                <span class="kv"><small>Confiança</small><b :class="c.res.ck" x-text="c.res.conf"></b></span>
-                <span class="full"><span class="dst" :class="c.res.dk" x-text="c.res.dst"></span></span>
-              </div>
-            </template>
-          </div>
-        </template>
-        <div class="vazio-l" x-show="!lane.{{ et }}.length">Nenhum domínio em análise nesta etapa.</div>
-      </div>
-    </div>
-
-    <div class="flt">
-      <div class="fg"><span class="fl">Classificação</span>
-        {% for v, l in [("", "Todas"), ("TRABALHO", "Trabalho"), ("NAO_TRABALHO", "Não trabalho"), ("RISCO", "Suspeito / Malicioso"), ("DESCONHECIDO", "Desconhecido")] %}
-        <button type="button" class="chip" :class="{on: f.{{ et }}.cls === '{{ v }}'}" @click="f.{{ et }}.cls = '{{ v }}'">{{ l }}</button>
-        {% endfor %}
-      </div>
-      <div class="fg"><span class="fl">Destino</span>
-        {% for v, l in [("", "Qualquer"), ("bl", "Bloqueio"), ("wl", "Whitelist")] + ([("on", "→ IA online")] if et == "e1" else []) %}
-        <button type="button" class="chip" :class="{on: f.{{ et }}.dst === '{{ v }}'}" @click="f.{{ et }}.dst = '{{ v }}'">{{ l }}</button>
-        {% endfor %}
-      </div>
+      <span class="lane-h"><span class="lv"></span>Analisando <span class="cnt" x-text="lane.{{ et }}.filter(c => !c.res).length"></span></span>
+      <template x-for="c in lane.{{ et }}" :key="c.key">
+        <div class="lc" :class="{done: c.res}" :data-k="c.key" :style="c.res ? '--cc:' + c.res.cor : ''"
+             :title="[entSub('{{ et }}', c), c.q != null ? c.q + ' consultas' : ''].filter(Boolean).join(' · ')">
+          <span class="spin" x-show="!c.res"></span>
+          <a class="n" :href="urlDom(c.name)" x-text="c.name"></a>
+          <span class="eb" x-show="c.entrada" :class="c.entrada" x-text="ENT['{{ et }}'][c.entrada]"></span>
+          <span class="t" x-show="!c.res" x-text="dur((agora - c.t0) / 1000)"></span>
+          <template x-if="c.res">
+            <span class="res">
+              <span class="pill" :class="c.res.clsK" x-text="c.res.clsL"></span>
+              {% if et == "e1" %}<span class="num" :class="c.res.rk" x-text="'risco ' + c.res.risco"></span>{% endif %}
+              <span class="num" :class="c.res.ck" x-text="c.res.conf"></span>
+              <span class="dst" :class="c.res.dk" x-text="c.res.dst"></span>
+            </span>
+          </template>
+        </div>
+      </template>
+      <span class="vazio-l" x-show="!lane.{{ et }}.length">nada em análise agora</span>
     </div>
 
     <div class="wrap"><table class="tb {{ et }}">
@@ -211,12 +208,11 @@
         <template x-for="r in visiveis('{{ et }}')" :key="r.name">
           <tr :data-n="r.name" :class="{espera: r._espera, chegando: r._chegando}" @click="sel = r">
             <td class="h" x-text="hora(r.at)"></td>
-            <td class="dm"><div class="n" x-text="r.name"></div><div class="sv" x-show="r.servico" x-text="r.servico" :title="r.servico"></div></td>
+            <td class="dm"><div class="n"><b x-text="r.name"></b><span class="eb" x-show="r.entrada" :class="r.entrada" x-text="ENT['{{ et }}'][r.entrada]"></span><i x-text="r.servico || ''" :title="r.servico"></i></div></td>
             <td><span class="pill" :class="r.cls || 'PENDENTE'" x-text="LBL[r.cls] || r.cls || '—'"></span></td>
             <td class="rk"><span class="num" :class="fr(r.risco)" x-text="r.risco != null ? r.risco : '—'"></span></td>
             <td><span class="num" :class="fc(r.conf)" x-text="r.conf != null ? r.conf + '%' : '—'"></span></td>
-            <td class="ds"><span class="dst" :class="dst(r)[1] + (r.aplicado ? ' ok' : '')" x-text="dst(r)[0]" :title="r.proximo || ''"></span>
-              <div class="sv" x-show="r.veredito || dst(r)[2]" x-text="r.veredito || dst(r)[2]"></div></td>
+            <td class="ds"><span class="dst" :class="dst(r)[1] + (r.aplicado ? ' ok' : '')" x-text="dst(r)[0]" :title="r.proximo || ''"></span><i x-text="r.veredito || dst(r)[2]" :title="r.veredito || dst(r)[2]"></i></td>
           </tr>
         </template>
         <tr class="vz" x-show="!visiveis('{{ et }}').length"><td colspan="6" x-text="carregado ? 'Sem atividade ainda.' : 'Carregando…'"></td></tr>
@@ -279,7 +275,11 @@ document.addEventListener('alpine:init', function () {
     if (INICIO[ev.kind]) {
       if (ev.kind === 'llm_start' && !r.run)   // nova análise do mesmo domínio: o resultado anterior não vale mais
         ['lista', 'conf', 'risco', 'trab', 'estado', 'veredito', 'proximo', 'motivo', 'seg', 'modelo'].forEach(function (k) { r[k] = null; });
-      if (ev.kind === 'llm_start') r.aplicado = false;
+      if (ev.kind === 'llm_start') {
+        r.aplicado = false;
+        var en = / · (novo|reavaliação|reanálise pedida)[^·]*$/.exec(d);
+        r.entrada = en ? {'novo': 'novo', 'reavaliação': 'reavaliacao', 'reanálise pedida': 'pedida'}[en[1]] : null;
+      }
       r.run = true; return;
     }
     r.run = false;
@@ -310,13 +310,18 @@ document.addEventListener('alpine:init', function () {
     return {
       LBL: {TRABALHO: 'Trabalho', NAO_TRABALHO: 'Não trabalho', SUSPEITO: 'Suspeito', MALICIOSO: 'Malicioso', DESCONHECIDO: 'Desconhecido'},
       ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null,
-      kpis: [{v: '–', l: 'Na fila · IA local', s: ''}, {v: '–', l: 'Na fila · IA online', s: ''},
-             {v: '–', l: 'Analisados na última hora', s: ''}, {v: '–', l: 'Tempo médio por domínio', s: ''}],
+      kpis: [{v: '–', l: 'na fila local', s: ''}, {v: '–', l: 'na fila online', s: ''},
+             {v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
       rows: {e1: [], e2: []}, lane: {e1: [], e2: []},
-      f: {e1: {cls: '', dst: '', q: ''}, e2: {cls: '', dst: '', q: ''}},
+      f: {e1: {cls: '', dst: '', ent: '', q: ''}, e2: {cls: '', dst: '', ent: '', q: ''}},
+      ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida'},
+            e2: {novo: '1ª vez', reavaliacao: 'Revalidação', pedida: 'Reanálise pedida'}},
       paused: false, upd: '', agora: Date.now(), carregado: false, sel: null,
 
       init() {
+        // no desktop a página cabe na janela: a altura disponível começa onde o painel começa
+        var topo = () => this.$root.style.setProperty('--topo', (this.$root.getBoundingClientRect().top + window.scrollY) + 'px');
+        topo(); window.addEventListener('resize', topo);
         this.poll(); setInterval(this.poll.bind(this), 3000);
         setInterval(() => { this.agora = Date.now(); }, 1000);
       },
@@ -335,12 +340,17 @@ document.addEventListener('alpine:init', function () {
         if (r.lista.indexOf('wl:') === 0) return ['✅ ' + nomeLista(r.lista), 'wl', ''];
         return ['⛔ ' + nomeLista(r.lista), 'bl', ''];
       },
+      ha(s) { s = Math.max(0, s | 0); return s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min' : s < 172800 ? Math.round(s / 3600) + ' h' : Math.round(s / 86400) + ' dias'; },
+      entSub(et, c) {   // novo: há quanto tempo apareceu; reavaliação: há quanto tempo foi a última resposta
+        if (c.desde == null) return '';
+        return c.entrada === 'novo' ? 'visto há ' + this.ha(c.desde) : (et === 'e2' ? 'última resposta há ' : 'última análise há ') + this.ha(c.desde);
+      },
       grupo(c) { return c === 'SUSPEITO' || c === 'MALICIOSO' ? 'RISCO' : (c || ''); },
       feitos(et) { return this.rows[et].filter(function (r) { return !r.run; }).length; },
       visiveis(et) {
         var f = this.f[et], q = f.q.trim().toLowerCase(), self = this;
         return this.rows[et].filter(function (r) {
-          return !r.run && (!f.cls || self.grupo(r.cls) === f.cls) && (!f.dst || self.dst(r)[1] === f.dst)
+          return !r.run && (!f.cls || self.grupo(r.cls) === f.cls) && (!f.dst || self.dst(r)[1] === f.dst) && (!f.ent || r.entrada === f.ent)
             && (!q || r.name.indexOf(q) >= 0);
         });
       },
@@ -365,7 +375,7 @@ document.addEventListener('alpine:init', function () {
       linha(et, name) {
         if (idx[et][name]) return idx[et][name];
         this.rows[et].unshift({name: name, ev: [], run: false, _espera: false, _chegando: false, _visto: 0, at: null, cls: null, risco: null, conf: null,
-                               lista: null, estado: null, servico: null, veredito: null, proximo: null, motivo: null, seg: null,
+                               lista: null, estado: null, entrada: null, servico: null, veredito: null, proximo: null, motivo: null, seg: null,
                                trab: null, modelo: null, aplicado: false});
         var r = idx[et][name] = this.rows[et][0];
         if (this.rows[et].length > MAX) { var x = this.rows[et].pop(); delete idx[et][x.name]; }
@@ -375,7 +385,7 @@ document.addEventListener('alpine:init', function () {
       cartao(et, name) { return this.lane[et].find(function (c) { return c.name === name; }); },
       novoCartao(et, name, t0, q) {
         var c = this.cartao(et, name);
-        if (!c) { this.lane[et].push({key: et + ':' + name, name: name, t0: t0 || Date.now(), q: q, res: null, visto: Date.now()}); c = this.cartao(et, name); }
+        if (!c) { this.lane[et].push({key: et + ':' + name, name: name, t0: t0 || Date.now(), q: q, res: null, visto: Date.now(), entrada: null, desde: null}); c = this.cartao(et, name); }
         return c;
       },
       tiraCartao(et, c) { var i = this.lane[et].indexOf(c); if (i >= 0) this.lane[et].splice(i, 1); },
@@ -401,6 +411,7 @@ document.addEventListener('alpine:init', function () {
       // resultado aparece no cartão (classificação, risco, confiança, destino) e depois vai p/ a linha da tabela
       celebrar(et, r) {
         var c = this.cartao(et, r.name);
+        if (c && c.entrada) r.entrada = c.entrada;
         if (calmo || document.hidden || !window.Motion || this.lane[et].filter(function (x) { return x.res; }).length >= 4) {
           if (c) this.tiraCartao(et, c);
           return;
@@ -432,6 +443,9 @@ document.addEventListener('alpine:init', function () {
         if (!el || !tr || document.hidden) return fim();
         var a = el.getBoundingClientRect(), b = tr.getBoundingClientRect();
         var fantasma = el.cloneNode(true);
+        [fantasma].concat(Array.from(fantasma.querySelectorAll('*'))).forEach(function (n) {   // cópia estática: sem diretivas do
+          Array.from(n.attributes).forEach(function (at) { if (/^(x-|:|@)/.test(at.name)) n.removeAttribute(at.name); });   // Alpine
+        });
         Object.assign(fantasma.style, {position: 'fixed', left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px',
                                        margin: 0, zIndex: 60, pointerEvents: 'none', boxSizing: 'border-box'});
         this.$root.appendChild(fantasma);   // fora da etapa: o backdrop-filter dela prenderia o position:fixed
@@ -450,6 +464,7 @@ document.addEventListener('alpine:init', function () {
           if (r && !r.run && r.at && Date.parse(r.at) > ini - 2000) return;   // já terminou (a reserva ainda não saiu)
           var c = self.novoCartao(et, x.name, ini, x.total_queries);
           if (!c.res) { c.t0 = ini; c.q = x.total_queries; }
+          if (x.entrada) { c.entrada = x.entrada; c.desde = x.desde_s; }
         });
         ['e1', 'e2'].forEach(function (et) {
           self.lane[et].slice().forEach(function (c) {   // saiu da reserva sem resultado (falha, espera): some
@@ -470,12 +485,13 @@ document.addEventListener('alpine:init', function () {
         this.onlineOn = q.online != null ? !!q.online_on : null;
         var antigo = (q.whois || 0) + (q.busca || 0), m = d.eta_seconds ? Math.round(d.eta_seconds / 60) : 0;
         this.kpis = [
-          {v: d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–', l: 'Na fila · IA local',
+          {v: d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–', l: 'na fila local',
            s: [q.aguarda ? q.aguarda + ' de pouco acesso' : '', antigo ? antigo + ' do fluxo antigo' : ''].filter(Boolean).join(' · ')},
-          {v: q.online != null ? q.online : '–', l: 'Na fila · IA online', s: q.online != null && !q.online_on ? 'sem chave: parada' : ''},
-          {v: d.last_hour ? d.last_hour.done : '–', l: 'Analisados na última hora', s: ''},
-          {v: d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–', l: 'Tempo médio por domínio',
-           s: m ? 'fila zera em ~' + (m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2)) : ''}];
+          {v: q.online != null ? q.online : '–', l: 'na fila online', s: q.online != null && !q.online_on ? 'sem chave: parada' : ''},
+          {v: d.last_hour ? d.last_hour.done : '–', l: 'na última hora', s: 'domínios analisados na última hora'},
+          {v: d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–', l: 'por domínio', s: 'tempo médio da IA local'},
+          {v: m ? '~' + (m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2)) : '–', l: 'p/ zerar a fila',
+           s: 'pelo ritmo da última hora'}];
         this.sincroniza(d);
       },
 

@@ -1159,8 +1159,13 @@ def test_ia_ao_vivo_lista_o_que_esta_em_analise(env, monkeypatch):
                   "('esperando.com', true, now() - interval '20 minutes')")
         c.execute("INSERT INTO domains (name, online_claimed_at, online_falhas) VALUES "
                   "('online-a.com', now() - interval '12 seconds', 0), ('invalida.com', now(), 1)")
+        # local-b.com já tem resposta da IA no histórico: é reavaliação; local-a.com nunca passou pela IA: novo
+        c.execute("INSERT INTO classification_history (domain_id, classification, source, model) "
+                  "SELECT id, 'DESCONHECIDO', 'llm', 'teste' FROM domains WHERE name = 'local-b.com'")
     j = env.get("/ai/events", headers=H).json()
     em = {(r["name"], r["fase"]) for r in j["em_analise"]}
+    ent = {r["name"]: r["entrada"] for r in j["em_analise"]}
+    assert ent["local-a.com"] == "novo" and ent["local-b.com"] == "reavaliacao" and ent["online-a.com"] == "novo", ent
     assert {("local-a.com", "1"), ("local-b.com", "1"), ("online-a.com", "4")} <= em, em
     assert not {n for n, _ in em} & {"esperando.com", "invalida.com"}, em
     assert j["current"]["name"] == "local-b.com"   # o mais recente (console antigo)

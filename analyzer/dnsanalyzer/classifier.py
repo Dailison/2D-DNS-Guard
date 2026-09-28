@@ -249,6 +249,18 @@ def reenfileirar_recorrentes(c) -> int:
         (cfg.llm_min_queries, cfg.llm_min_clients)).rowcount
 
 
+def entrada(drow: dict) -> str:
+    """Por que o domínio chegou à IA local (IA ao vivo e histórico): novo = a IA nunca respondeu sobre ele;
+    reavaliação = já tem resposta da IA no histórico (evidências mudaram ou reanálise periódica); reanálise
+    pedida = alguém pediu. Pelo histórico, não por domains.model: as regras zeram o model ao regravar."""
+    if drow.get("reanalise_pedida"):
+        return "reanálise pedida"
+    with db.conn() as c:
+        ult = c.execute("SELECT max(created_at) AS t FROM classification_history WHERE domain_id = %s AND source = 'llm'",
+                        (drow["id"],)).fetchone()["t"]
+    return f"reavaliação (última análise em {ult:%d/%m})" if ult else "novo"
+
+
 def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
@@ -366,7 +378,7 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
         rule = evaluate(dossier)
     if not etapa2 and not etapa3:   # (fases 2 e 3 já anunciaram o início)
         event("llm_start", name, did, detail=f"{drow['total_queries']} consultas · pelas regras: "
-                                             f"{CLASS_LABEL.get(drow['classification'], '—')}")
+                                             f"{CLASS_LABEL.get(drow['classification'], '—')} · {entrada(drow)}")
     if rule.final:  # (ex.: RDAP/TI mudou o quadro) regras bastam
         with db.conn() as c:
             save(c, drow, dossier, rule, rules_only(rule, False), False, None)

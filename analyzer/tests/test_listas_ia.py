@@ -1152,7 +1152,8 @@ def test_ia_ao_vivo_lista_o_que_esta_em_analise(env, monkeypatch):
     Reservas "de espera" (claimed_at recuado; IA online após resposta inválida) não contam."""
     from dnsanalyzer import db, llm
     monkeypatch.setattr(llm.OllamaClient, "available", lambda self: (True, "ok"))
-    with db.conn() as c:
+    with db.conn() as c:   # reservas deixadas pelos testes anteriores (banco compartilhado) não entram na conta
+        c.execute("UPDATE domains SET claimed_at = NULL, online_claimed_at = NULL, lista_claimed_at = NULL")
         c.execute("INSERT INTO domains (name, llm_pending, claimed_at) VALUES "
                   "('local-a.com', true, now() - interval '40 seconds'), ('local-b.com', true, now() - interval '5 seconds'), "
                   "('esperando.com', true, now() - interval '20 minutes')")

@@ -358,12 +358,17 @@ def test_dominio_novo_passa_na_frente_do_backlog_de_reanalise(api):
                   "('backlog-velho.com', 'com', 'NAO_TRABALHO', 'llm', 'qwen3:8b', true, 900), "
                   "('novo-hoje.com.br', 'br', NULL, NULL, NULL, true, 2), "
                   "('suspeito-velho.net', 'net', 'SUSPEITO', 'llm', 'qwen3:8b', true, 5)")
+        # reanálise já passou pelas regras (model zerado): o histórico de IA é o que a separa de um domínio novo
+        c.execute("INSERT INTO domains (name, tld, classification, classified_by, llm_pending, total_queries, reanalise_pedida) "
+                  "VALUES ('reanalise-regras.com', 'com', 'DESCONHECIDO', 'rules', true, 800, true)")
+        c.execute("INSERT INTO classification_history (domain_id, classification, source) SELECT id, c, 'llm' FROM domains, "
+                  "(VALUES ('NAO_TRABALHO')) v(c) WHERE name IN ('reanalise-regras.com', 'backlog-velho.com', 'suspeito-velho.net')")
         # novo de pouco acesso (aberto uma vez): fica atrás dos novos acessados, mas antes de qualquer reanálise
         c.execute("INSERT INTO domains (name, tld, llm_pending, aguarda_recorrencia, total_queries) VALUES "
                   "('novo-raro.com', 'com', true, true, 1)")
     with db.conn() as c:
-        ordem = [classifier._claim_llm(c)["name"] for _ in range(4)]
-    assert ordem == ["novo-hoje.com.br", "novo-raro.com", "suspeito-velho.net", "backlog-velho.com"], ordem
+        ordem = [classifier._claim_llm(c)["name"] for _ in range(5)]
+    assert ordem == ["novo-hoje.com.br", "novo-raro.com", "suspeito-velho.net", "backlog-velho.com", "reanalise-regras.com"], ordem
 
 
 def test_cada_reforco_com_o_seu_modelo_e_rodizio(monkeypatch):

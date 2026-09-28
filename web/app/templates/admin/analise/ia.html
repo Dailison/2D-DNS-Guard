@@ -104,6 +104,7 @@
   .tb .ds{max-width:22rem;overflow:hidden}
   .tb .ds i{font-style:normal;font-size:.8rem;color:var(--mu);margin-left:6px}
   .tb.e2 .rk{display:none}
+  .iav .tb td.tp{color:#c3cde0;font-variant-numeric:tabular-nums;font-size:.86rem;text-align:right}.iav .tb th.tp{text-align:right}
   .tb .vz td{text-align:center;color:var(--mu);padding:18px;cursor:default}
 
   /* etiquetas */
@@ -141,7 +142,7 @@
   @media (max-width:640px){
     .kp{border-left:0;padding-left:0}
     .iav .eh input.busca{width:100%}
-    .tb .rk{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
+    .tb .rk,.tb .tp{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
   }
   @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin{animation:none}}
 </style>
@@ -196,6 +197,7 @@
               {% if et == "e1" %}<span class="num" :class="c.res.rk" x-text="'risco ' + c.res.risco"></span>{% endif %}
               <span class="num" :class="c.res.ck" x-text="c.res.conf"></span>
               <span class="dst" :class="c.res.dk" x-text="c.res.dst"></span>
+              <span class="t" x-show="c.res.tempo" x-text="c.res.tempo"></span>
             </span>
           </template>
         </div>
@@ -204,7 +206,7 @@
     </div>
 
     <div class="wrap"><table class="tb {{ et }}">
-      <thead><tr><th class="h">Hora</th><th>Domínio</th><th>Classificação</th><th class="rk">Risco</th><th>Confiança</th><th class="ds">Destino</th></tr></thead>
+      <thead><tr><th class="h">Hora</th><th>Domínio</th><th>Classificação</th><th class="rk">Risco</th><th>Confiança</th><th class="tp">Tempo</th><th class="ds">Destino</th></tr></thead>
       <tbody>
         <template x-for="r in visiveis('{{ et }}')" :key="r.name">
           <tr :data-n="r.name" :class="{espera: r._espera, chegando: r._chegando}" @click="sel = r">
@@ -213,10 +215,11 @@
             <td><span class="pill" :class="r.cls || 'PENDENTE'" x-text="LBL[r.cls] || r.cls || '—'"></span></td>
             <td class="rk"><span class="num" :class="fr(r.risco)" x-text="r.risco != null ? r.risco : '—'"></span></td>
             <td><span class="num" :class="fc(r.conf)" x-text="r.conf != null ? r.conf + '%' : '—'"></span></td>
+            <td class="tp" x-text="r.seg != null ? dur(r.seg) : '—'" title="tempo que a IA levou nesta análise"></td>
             <td class="ds"><span class="dst" :class="dst(r)[1] + (r.aplicado ? ' ok' : '')" x-text="dst(r)[0]" :title="r.proximo || ''"></span><i x-text="r.veredito || dst(r)[2]" :title="r.veredito || dst(r)[2]"></i></td>
           </tr>
         </template>
-        <tr class="vz" x-show="!visiveis('{{ et }}').length"><td colspan="6" x-text="carregado ? 'Sem atividade ainda.' : 'Carregando…'"></td></tr>
+        <tr class="vz" x-show="!visiveis('{{ et }}').length"><td colspan="7" x-text="carregado ? 'Sem atividade ainda.' : 'Carregando…'"></td></tr>
       </tbody>
     </table></div>
   </section>
@@ -275,7 +278,7 @@ document.addEventListener('alpine:init', function () {
     if (ev.work != null) r.trab = ev.work;
     if (INICIO[ev.kind]) {
       if (ev.kind === 'llm_start' && !r.run)   // nova análise do mesmo domínio: o resultado anterior não vale mais
-        ['lista', 'conf', 'risco', 'trab', 'estado', 'veredito', 'proximo', 'motivo', 'seg', 'modelo'].forEach(function (k) { r[k] = null; });
+        ['lista', 'conf', 'risco', 'trab', 'estado', 'veredito', 'proximo', 'motivo', 'seg', 'modelo'].forEach(function (k) { r[k] = null; }), r._segLista = false;
       if (ev.kind === 'llm_start') {
         r.aplicado = false;
         var en = / · (novo|reavaliação|reanálise pedida)[^·]*$/.exec(d);
@@ -284,7 +287,9 @@ document.addEventListener('alpine:init', function () {
       r.run = true; return;
     }
     r.run = false;
-    if (ev.seconds != null) r.seg = (r.seg || 0) + ev.seconds;
+    // tempo da análise: a lista vem na mesma pergunta (etapa única) e repete os segundos — só conta se vier sozinha
+    if (ev.seconds != null && ev.kind !== 'lista_local') r.seg = (r._segLista ? 0 : (r.seg || 0)) + ev.seconds, r._segLista = false;
+    else if (ev.seconds != null && r.seg == null) { r.seg = ev.seconds; r._segLista = true; }
     if (ev.kind === 'lista_local') {
       var t = d.split('|').slice(1).join('|');
       if ((m = /^lista (\S+) (\d+)%/.exec(t))) { r.lista = m[1]; r.conf = +m[2]; }
@@ -371,14 +376,14 @@ document.addEventListener('alpine:init', function () {
         var d = this.dst(r);
         return {clsL: this.LBL[r.cls] || r.cls || '—', clsK: r.cls || 'PENDENTE', cor: COR[r.cls] || COR.DESCONHECIDO,
                 risco: r.risco != null ? r.risco : '—', rk: this.fr(r.risco), conf: r.conf != null ? r.conf + '%' : '—', ck: this.fc(r.conf),
-                dst: d[0] + (d[2] ? ' · ' + d[2] : ''), dk: d[1]};
+                dst: d[0] + (d[2] ? ' · ' + d[2] : ''), dk: d[1], tempo: r.seg != null ? this.dur(r.seg) : ''};
       },
 
       // ------------------------------------------------------------ linhas e cartões
       linha(et, name) {
         if (idx[et][name]) return idx[et][name];
         this.rows[et].unshift({name: name, ev: [], run: false, _espera: false, _chegando: false, _visto: 0, at: null, cls: null, risco: null, conf: null,
-                               lista: null, estado: null, entrada: null, servico: null, veredito: null, proximo: null, motivo: null, seg: null,
+                               lista: null, estado: null, entrada: null, _segLista: false, servico: null, veredito: null, proximo: null, motivo: null, seg: null,
                                trab: null, modelo: null, aplicado: false});
         var r = idx[et][name] = this.rows[et][0];
         if (this.rows[et].length > MAX) { var x = this.rows[et].pop(); delete idx[et][x.name]; }

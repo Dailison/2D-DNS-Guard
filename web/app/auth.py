@@ -10,7 +10,7 @@ import secrets
 from functools import wraps
 from types import SimpleNamespace
 
-from flask import Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import analyzer_client as api
@@ -59,8 +59,10 @@ def super_required(f):
     def wrap(*a, **kw):
         adm = admin_atual()
         if not adm or not adm.is_super:
+            if request.is_json or request.headers.get("X-Requested-With") == "fetch":   # ações via fetch (tabelas)
+                return jsonify(ok=False, msg="Só usuários super podem alterar as listas."), 403
             flash("Acesso restrito ao super-admin.", "erro")
-            return redirect(url_for("admin.dashboard"))
+            return redirect(request.referrer or url_for("admin.dashboard"))
         return f(*a, **kw)
     return wrap
 

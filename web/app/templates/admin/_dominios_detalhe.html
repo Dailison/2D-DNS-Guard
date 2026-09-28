@@ -75,18 +75,20 @@
 <div class="dd-bar">
   <label class="chk" style="margin:0;font-weight:400"><input type="checkbox" id="ddTodos"> <span>todos da página</span></label>
   <span class="mut" id="ddN" style="font-size:.85rem">0 selecionado(s)</span>
-  {% if lst %}
+  {% if not (adm and adm.is_super) %}
+  <span class="mut" style="font-size:.8rem">alterar as listas: só usuários super</span>
+  {% elif lst %}
   {% if dec %}<button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" data-dd="aprovar" title="cada domínio vai para a lista que a IA recomendou (bloqueio ou whitelist)">✓ Aprovar parecer da IA</button>{% endif %}
   <button type="button" class="mini {{ 'danger' if dec else 'primary' }}" data-dd="mover">{{ '⛔ Blocklist…' if dec else 'Mover para…' }}</button>
-  {% if dec %}<button type="button" class="mini ok" data-dd="wl" style="background:#16a34a;color:#fff;border:0">✅ Whitelist…</button>
-  {% else %}<button type="button" class="mini danger" data-dd="tirar">✕ Tirar da lista</button>{% endif %}
+  <button type="button" class="mini ok" data-dd="wl" style="background:#16a34a;color:#fff;border:0" title="tira de todas as listas de bloqueio e põe na whitelist escolhida">✅ Whitelist…</button>
+  {% if not dec %}<button type="button" class="mini danger" data-dd="tirar">✕ Tirar da lista</button>{% endif %}
   {% elif wlm %}
   <button type="button" class="mini danger" data-dd="tirar_wl">✕ Tirar da whitelist</button>
   <button type="button" class="mini danger" data-dd="por">⛔ Pôr em lista de bloqueio…</button>
   {% else %}
   <button type="button" class="mini danger" data-dd="por">⛔ Pôr em lista de bloqueio…</button>
   {% endif %}
-  <button type="button" class="mini" data-dd="reanalisar" title="regras agora; IA, busca na web e WHOIS na fila">🔁 Pedir nova análise da IA</button>
+  {% if adm and adm.is_super %}<button type="button" class="mini" data-dd="reanalisar" title="regras agora; IA, busca na web e WHOIS na fila">🔁 Pedir nova análise da IA</button>{% endif %}
   <span class="mut" style="font-size:.8rem;margin-left:auto">{{ det.total }} domínio(s)</span>
 </div>
 
@@ -100,18 +102,19 @@
       <td><input type="checkbox" class="ddSel" value="{{ i.domain }}"></td>
       <td><a class="dd-hist" data-dom="{{ i.domain }}" href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}" title="clique: histórico · Ctrl+clique: página completa">{{ i.domain }}</a></td>
       <td><div class="dd-ra">
-        {% if lst %}
+        {% if not (adm and adm.is_super) %}
+        {% elif lst %}
           {% if dec and tem_sug and i.lista_ia != cat %}<button type="button" class="lib" data-ra="aprovar" data-dom="{{ i.domain }}" title="aprovar o parecer da IA: {{ LISTAS_ROT.get(i.lista_ia, i.lista_ia) if i.lista_ia else ('whitelist ' ~ WL_ROT.get(i.lista_wl, i.lista_wl)) if i.lista_wl else 'nenhuma lista (sai desta)' }}">✓</button>{% endif %}
           <button type="button" class="blk" data-ra="mover" data-dom="{{ i.domain }}" title="{{ 'blocklist' if dec else 'mover para outra lista' }}">⛔</button>
-          {% if dec %}<button type="button" class="lib" data-ra="wl" data-dom="{{ i.domain }}" title="whitelist">✅</button>
-          {% else %}<button type="button" class="lib" data-ra="tirar" data-dom="{{ i.domain }}" title="tirar desta lista (manter liberado)">✅</button>{% endif %}
+          <button type="button" class="lib" data-ra="wl" data-dom="{{ i.domain }}" title="whitelist (sai de todas as listas de bloqueio)">✅</button>
+          {% if not dec %}<button type="button" class="blk" data-ra="tirar" data-dom="{{ i.domain }}" title="tirar desta lista (manter liberado)">✕</button>{% endif %}
         {% elif wlm %}
           <button type="button" class="blk" data-ra="tirar_wl" data-dom="{{ i.domain }}" title="tirar da whitelist">✕</button>
           <button type="button" class="blk" data-ra="por" data-dom="{{ i.domain }}" title="pôr em lista de bloqueio">⛔</button>
         {% else %}
           <button type="button" class="blk" data-ra="por" data-dom="{{ i.domain }}" title="pôr em lista de bloqueio">⛔</button>
         {% endif %}
-        <button type="button" data-ra="reanalisar" data-dom="{{ i.domain }}" title="pedir nova análise da IA">🔁</button>
+        {% if adm and adm.is_super %}<button type="button" data-ra="reanalisar" data-dom="{{ i.domain }}" title="pedir nova análise da IA">🔁</button>{% endif %}
       </div></td>
       <td>{% if c %}<span class="dd-cls" style="background:{{ c[1] }};color:{{ c[2] }}">{{ c[0] }}</span>{% else %}<span class="mut">—</span>{% endif %}
         {% if i.cat_ia %}<div class="dd-sub">{{ scats.get(i.cat_ia, i.cat_ia) }}{% if i.confidence %} · {{ (i.confidence * 100)|round|int }}%{% endif %}</div>{% endif %}
@@ -243,10 +246,12 @@
         headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
         body: JSON.stringify({acao: acao, cat: info().cat, para: para || [], dominios: doms})});
       const j = await r.json(); toast(j.msg, j.ok);
-      if (j.ok) recarregar();
+      if (j.ok && document.getElementById("lbRes")) setTimeout(() => location.reload(), 1200);   // resultados da busca
+      else if (j.ok) recarregar();
     } catch (e) { toast("Falha (sessão expirou?)", false); }
   }
   let acaoDlg = null, domsDlg = [];
+  window.ddPedir = (acao, doms) => pedir(acao, doms);   // (resultados da busca em todas as listas)
   function pedir(acao, doms) {
     const n = doms.length, d = info(), DEC = !!d.dec, nomeCat = d.nomecat, q = n === 1 ? doms[0] : n + " domínio(s)";
     if (!n) { toast("Selecione pelo menos um domínio.", false); return; }

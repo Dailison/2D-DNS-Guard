@@ -10,7 +10,7 @@ from flask import Blueprint, current_app, flash, redirect, render_template, requ
 from app import analyzer_client as api
 from app import technitium as dnslib
 from app.analyzer_client import AnalyzerError
-from app.auth import admin_atual, login_required, next_local
+from app.auth import admin_atual, login_required, next_local, super_required
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -141,6 +141,7 @@ def dominios():
 
 @admin_bp.post("/bloqueios/rem-todos")
 @login_required
+@super_required
 def bloqueios_rem_todos():
     doms = request.form.getlist("dominios")
     qg = (request.form.get("qg") or "").strip()
@@ -471,6 +472,14 @@ def listas_categoria():
         servicos = api.get("/liberacao")
     except AnalyzerError:
         servicos = []
+    busca = (request.args.get("busca") or "").strip().lower()
+    achados = None
+    if len(busca) >= 3:   # procura em TODAS as listas de bloqueio (não só na aberta)
+        try:
+            achados = api.get("/listas-busca", q=busca)
+        except AnalyzerError as e:
+            flash(f"Falha na busca: {e}", "erro")
+            achados = []
     if request.headers.get("X-Partial"):   # filtros/paginação/ações via Ajax: só a tabela
         return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="lista", cat=cat, det=det, fd=fd,
                                categorias=dnslib.CATEGORIAS_LISTA, scats=_site_cats(), pag_url=_pag_url)
@@ -478,7 +487,7 @@ def listas_categoria():
     return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd, pulso=pulso,
                            scats=_site_cats(), pag_url=_pag_url,
                            categorias=dnslib.CATEGORIAS_LISTA, empresas_pol=empresas_pol,
-                           default_tem=default_tem, servicos=servicos)
+                           default_tem=default_tem, servicos=servicos, busca=busca, achados=achados)
 
 
 # --------------------------------------------- tabela detalhada (listas e "Classificados por IA como Trabalho")
@@ -513,6 +522,7 @@ def _site_cats() -> dict[str, str]:
 
 @admin_bp.post("/listas-lote-dominios")
 @login_required
+@super_required
 def listas_lote_dominios():
     """Ações em lote da tabela detalhada: mover p/ outras listas, tirar da lista, pôr em listas,
     pedir nova análise da IA."""
@@ -620,6 +630,7 @@ def _fim_excecao(doms) -> None:
 
 @admin_bp.post("/listas-categoria/aceitar")
 @login_required
+@super_required
 def lista_aceitar():
     """A lista encolheu de propósito (limpeza): aceita publicar a versão menor."""
     cat = request.form.get("cat", "")
@@ -647,6 +658,7 @@ def _decisao_global(dominio: str, status: str) -> None:
 
 @admin_bp.post("/listas-categoria/rem")
 @login_required
+@super_required
 def listas_categoria_rem():
     cat, dom = request.form.get("cat", ""), request.form.get("dominio", "")
     try:
@@ -662,6 +674,7 @@ def listas_categoria_rem():
 
 @admin_bp.post("/listas-categoria/add")
 @login_required
+@super_required
 def listas_categoria_add():
     cat, dom = request.form.get("cat", ""), (request.form.get("dominio") or "").strip().lower().rstrip(".")
     try:
@@ -783,6 +796,7 @@ def lista_empresas():
 
 @admin_bp.post("/dominios/listas")
 @login_required
+@super_required
 def dominio_listas():
     """Em quais listas o domínio fica (Domínios / Decisões / página do domínio). Nenhuma lista =
     decisão 'manter liberado'; alguma = decisão 'bloquear' (sai da fila)."""
@@ -874,6 +888,7 @@ def listas_liberacao():
 
 @admin_bp.post("/whitelist/add")
 @login_required
+@super_required
 def whitelist_add():
     wl = request.form.get("wl", "")
     doms = [x.strip().lower().rstrip(".") for x in re.split(r"[\s,;]+", request.form.get("dominio", "")) if x.strip()]
@@ -907,6 +922,7 @@ def _volta_servico(slug: str):
 
 @admin_bp.post("/servicos/criar")
 @login_required
+@super_required
 def servico_criar():
     nome, cat = (request.form.get("nome") or "").strip(), (request.form.get("categoria") or "").strip() or None
     try:
@@ -920,6 +936,7 @@ def servico_criar():
 
 @admin_bp.post("/servicos/<slug>/editar")
 @login_required
+@super_required
 def servico_editar(slug):
     try:
         api.put(f"/liberacao/{quote(slug, safe='')}", {"name": request.form.get("nome") or slug,
@@ -934,6 +951,7 @@ def servico_editar(slug):
 
 @admin_bp.post("/servicos/<slug>/apagar")
 @login_required
+@super_required
 def servico_apagar(slug):
     try:
         api.delete(f"/liberacao/{quote(slug, safe='')}")
@@ -947,6 +965,7 @@ def servico_apagar(slug):
 
 @admin_bp.post("/servicos/<slug>/dominios")
 @login_required
+@super_required
 def servico_dominios(slug):
     acao, dom = request.form.get("acao"), (request.form.get("dominio") or "").strip().lower().rstrip(".")
     try:

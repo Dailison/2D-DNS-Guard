@@ -1227,3 +1227,20 @@ def test_maquina_ec2_nunca_vai_p_nao_identificados(env, monkeypatch):
         wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains WHERE domain = ANY(%s)", (list(ids),))}
     assert wl.get("ec2-96-0-48-215.compute-1.amazonaws.com") == "infraestrutura" and wl.get("ec2-16-162-21-148.ap-east-1.compute.amazonaws.com") == "infraestrutura", wl
     assert ni == {"ec2-1-1-1-9.compute-1.amazonaws.com", "golpe-app.workers.dev"}, ni
+
+
+def test_busca_em_todas_as_listas(env):
+    """Página Domínios bloqueados: procura o domínio em todas as listas de bloqueio (exato primeiro; whitelist não entra)."""
+    from dnsanalyzer import db
+    with db.conn() as c:
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('apostas', 'qrofertas.com', 't'), "
+                  "('ameaca', 'qrofertas.com', 't'), ('compras', 'loja.qrofertas.com.br', 't'), ('para_revisar', 'qrofertas.net', 't')")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by) VALUES ('fornecedores', 'qrofertas.com.br', 't')")
+    r = env.get("/listas-busca", params={"q": "QROFERTAS.com"}, headers=H)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j[0]["domain"] == "qrofertas.com" and j[0]["listas"] == ["ameaca", "apostas"]
+    por = {x["domain"]: x for x in j}
+    assert por["loja.qrofertas.com.br"]["listas"] == ["compras"] and "qrofertas.com.br" not in por, "whitelist não entra"
+    assert "qrofertas.net" not in por, "Para revisar (fila antiga) não entra"
+    assert env.get("/listas-busca", params={"q": "qr"}, headers=H).json() == [], "mínimo 3 letras"

@@ -17,6 +17,11 @@
   </div>
   <div style="display:flex;justify-content:flex-end;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-top:.8rem">
     <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">
+      <form method="get" style="display:flex;gap:.3rem;margin:0" title="procura em todas as listas de bloqueio (mínimo 3 letras)">
+        <input type="hidden" name="cat" value="{{ cat }}">
+        <input type="text" name="busca" value="{{ busca or '' }}" placeholder="buscar em todas as listas" style="width:15rem" minlength="3" required>
+        <button class="btn">Buscar</button>
+      </form>
       <form method="get" action="{{ url_for('admin.dominios') }}" style="display:flex;gap:.3rem;margin:0" title="abre a página do domínio: todas as listas em que ele está, a análise da IA e o editor de listas">
         <input type="text" name="q" placeholder="abrir domínio (ex.: tiktok.com)" style="width:15rem" required>
         <button class="btn">Abrir</button>
@@ -26,21 +31,45 @@
   </div>
 </div>
 
+{% if achados is not none %}
+<div class="card" id="lbRes">
+  <h2 style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
+    <span>Busca “{{ busca }}” em todas as listas de bloqueio: {{ achados|length }} domínio(s)</span>
+    <a class="mut" style="font-size:.8rem" href="{{ url_for('admin.listas_categoria', cat=cat) }}">fechar</a></h2>
+  {% if achados %}
+  <div class="dd-tw"><table>
+    <thead><tr><th>Domínio</th><th>Listas de bloqueio</th><th>Classificação</th><th class="num">Consultas</th><th></th></tr></thead>
+    <tbody>
+    {% for a in achados %}
+      <tr>
+        <td><a href="{{ url_for('admin.dominios', q=a.domain) }}">{{ a.domain }}</a></td>
+        <td>{% for l in a.listas %}<a href="{{ url_for('admin.listas_categoria', cat=l, q=a.domain) }}" style="display:inline-block;margin:0 .25rem .2rem 0;padding:.05rem .45rem;border:1px solid var(--bd);border-radius:6px;text-decoration:none;font-size:.8rem">{{ rot.get(l, l) }}</a>{% endfor %}</td>
+        <td class="mut" style="font-size:.85rem">{{ a.classification or '—' }}</td>
+        <td class="num">{{ a.total_queries }}</td>
+        <td style="white-space:nowrap">{% if adm and adm.is_super %}<button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" onclick="ddPedir('wl', [{{ a.domain|tojson|forceescape }}])" title="tira de todas as listas de bloqueio e põe na whitelist escolhida">✅ Whitelist…</button>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if pulso and pulso.recusada_at %}
 <div class="card" style="border-left:4px solid #dc2626">
   <b>⚠ A publicação desta lista foi recusada</b>: ela encolheu de {{ pulso.last_n }} para {{ pulso.recusada_n }} domínios de uma vez
-  ({{ pulso.recusada_at|dt_sp }}). O DNS segue com a versão anterior. Se a limpeza foi de propósito, aceite:
+  ({{ pulso.recusada_at|dt_sp }}). O DNS segue com a versão anterior.{% if adm and adm.is_super %} Se a limpeza foi de propósito, aceite:
   <form method="post" action="{{ url_for('admin.lista_aceitar') }}" style="display:inline;margin-left:.4rem" onsubmit="return confirm('Publicar a lista {{ rot.get(cat, cat) }} com {{ pulso.recusada_n }} domínios?')">
-    <input type="hidden" name="cat" value="{{ cat }}"><button class="danger mini">Aceitar lista menor</button></form>
+    <input type="hidden" name="cat" value="{{ cat }}"><button class="danger mini">Aceitar lista menor</button></form>{% endif %}
 </div>
 {% endif %}
-<div class="card">
+{% if adm and adm.is_super %}<div class="card">
   <form method="post" action="{{ url_for('admin.listas_categoria_add') }}" class="row" style="align-items:flex-end;margin:0">
     <input type="hidden" name="cat" value="{{ cat }}">
     <div style="flex:1"><label>Adicionar à lista {{ rot.get(cat, cat) }}</label><input type="text" name="dominio" placeholder="ex.: site-de-apostas.com" required></div>
     <div style="flex:0"><button class="danger">Adicionar</button></div>
   </form>
-</div>
+</div>{% endif %}
 
 <div class="card">
   <h2>{{ det.total }} domínio(s){% if det.total != det.total_geral %} <span class="mut" style="font-size:.8rem">de {{ det.total_geral }} na lista</span>{% endif %}</h2>

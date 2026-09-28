@@ -16,7 +16,7 @@ from flask import (Blueprint, current_app, flash, get_flashed_messages, jsonify,
 from app import analyzer_client as api
 from app import technitium as dnslib
 from app.analyzer_client import AnalyzerError
-from app.auth import admin_atual, login_required, next_local
+from app.auth import admin_atual, login_required, next_local, super_required
 
 analise_bp = Blueprint("analise", __name__, url_prefix="/analise")
 
@@ -189,6 +189,7 @@ def decisoes():
 
 
 @analise_bp.post("/decisoes/lote")
+@super_required
 def decisoes_lote():
     """Bloquear (nas listas escolhidas) ou manter liberado — um ou vários domínios."""
     acao = request.form.get("acao")
@@ -400,6 +401,7 @@ def _registrar_decisao(tid, dominio: str, status: str) -> None:
 
 
 @analise_bp.post("/dominio/<path:nome>/liberar")
+@super_required
 def dominio_liberar(nome):
     """Desbloquear: tira o domínio das listas de bloqueio (escopo "empresa" = só das listas que a
     empresa aplica; senão, de todas) e registra "manter liberado". Listas são compartilhadas: vale
@@ -426,6 +428,7 @@ def dominio_liberar(nome):
 
 
 @analise_bp.post("/dominio/<path:nome>/liberar-empresa")
+@super_required
 def dominio_liberar_empresa(nome):
     """Libera o domínio SÓ para uma empresa: lista de liberação "Exceções · <Empresa>" (criada na 1ª vez e
     ligada à política da empresa e das exceções de unidade) + exceção imediata nos grupos dela."""

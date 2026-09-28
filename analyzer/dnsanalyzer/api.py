@@ -1183,6 +1183,24 @@ def listas_dominios(cats: list[str] = Query(default=[])):
         return {k: listas.dominios(c, k) for k in cats if k in listas.CATEGORIAS}
 
 
+@app.get("/listas-busca", dependencies=[Depends(auth)])
+def listas_busca(q: str, limit: int = Query(100, le=500)):
+    """Procura o domínio (ou parte dele) em TODAS as listas de bloqueio (página Domínios bloqueados):
+    [{domain, listas, classification, total_queries}], exatos primeiro."""
+    termo = q.strip().lower().rstrip(".")
+    if len(termo) < 3:
+        return []
+    padrao = "%" + termo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with db.conn() as c:
+        return c.execute(
+            "SELECT l.domain, array_agg(l.category ORDER BY l.category) AS listas, d.classification, "
+            "       coalesce(d.total_queries, 0) AS total_queries "
+            "FROM category_lists l LEFT JOIN domains d ON d.name = l.domain "
+            "WHERE l.domain LIKE %(p)s AND l.category <> 'para_revisar' GROUP BY l.domain, d.classification, d.total_queries "
+            "ORDER BY (l.domain = %(t)s) DESC, (l.domain LIKE %(fim)s) DESC, coalesce(d.total_queries, 0) DESC, l.domain LIMIT %(n)s",
+            {"p": padrao, "t": termo, "fim": "%." + termo, "n": limit}).fetchall()
+
+
 @app.get("/listas/{categoria}", dependencies=[Depends(auth)])
 def lista_itens(categoria: str, q: Optional[str] = None, limit: int = Query(500, le=20000)):
     if categoria not in listas.CATEGORIAS:

@@ -1178,3 +1178,25 @@ def test_ia_ao_vivo_lista_o_que_esta_em_analise(env, monkeypatch):
     with db.conn() as c:
         c.execute("UPDATE domains SET claimed_at = NULL, online_claimed_at = NULL "
                   "WHERE name IN ('local-a.com', 'local-b.com', 'online-a.com')")
+
+
+def test_endereco_de_provedor_liberado_pela_ia_local_nao_vai_p_ia_online(env, monkeypatch):
+    """28/09: ec2-*.compute.amazonaws.com (DESCONHECIDO: o cliente da AWS) ia p/ a IA online mesmo com a IA local
+    decidindo wl:infraestrutura com 100%. Endereço dentro de provedor: dispensa a fase 4. Domínio próprio desconhecido
+    segue p/ a IA online (ela pode identificar)."""
+    from dnsanalyzer import config, db, listas_ia, online
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        ids = {}
+        for n in ("ec2-18-1-2-3.eu-west-3.compute.amazonaws.com", "k8x2p0zz.com"):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
+                               "VALUES (%s, 'DESCONHECIDO', 'outros', now() - interval '1 minute', 3, now(), now()) RETURNING id",
+                               (n,)).fetchone()["id"]
+        for n in ids:
+            listas_ia.salvar(c, ids[n], "wl:infraestrutura", 1.0, "infraestrutura de nuvem", "AWS", "local", 1, "gemma4:26b")
+        listas_ia.aplicar(c)
+        fila = {n for n, i in ids.items() if online.na_fila(c, i)}
+        wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains WHERE domain = ANY(%s)", (list(ids),))}
+    assert "ec2-18-1-2-3.eu-west-3.compute.amazonaws.com" not in fila, "endereço de provedor: sem fase 4"
+    assert wl.get("ec2-18-1-2-3.eu-west-3.compute.amazonaws.com") == "infraestrutura"
+    assert "k8x2p0zz.com" in fila and "k8x2p0zz.com" not in wl, "domínio próprio desconhecido: IA online (e não fica liberado)"

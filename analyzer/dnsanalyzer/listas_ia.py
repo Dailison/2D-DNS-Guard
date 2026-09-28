@@ -551,6 +551,11 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             # e appshield-sec.workers.dev iam p/ "Outros (trabalho)"); CDN/infraestrutura só segue liberada quando é
             # endereço DENTRO de um provedor (ex.: d1abc.cloudfront.net, bucket.s3.amazonaws.com)
             cat = NAO_IDENT
+        elif local_decide and not cat and cls == "DESCONHECIDO" and r["lista_wl"] in ("cdn", "infraestrutura"):
+            # endereço DENTRO de um provedor (ec2-1-2-3-4.compute.amazonaws.com, d1abc.cloudfront.net) liberado com
+            # certeza pela IA local: "desconhecido" é o cliente do provedor, que a IA online também não tem como
+            # saber — dispensa a fase 4 (28/09: ~110 endereços EC2/dia iam p/ o Gemini com 100% de confiança)
+            c.execute("UPDATE domains SET online_at = now() WHERE id = %s", (r["id"],))
         if not cat:   # liberar: sai das listas que a IA pôs e vai p/ a whitelist
             # da Infraestrutura (migração) só com certeza, a resposta do modelo maior (ou dois modelos) e sem suspeita:
             # senão fica lá (bloqueado como estava)

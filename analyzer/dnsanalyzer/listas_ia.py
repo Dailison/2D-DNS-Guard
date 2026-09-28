@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 
 import httpx
@@ -388,6 +389,11 @@ def _suspeito(r: dict) -> str | None:
         if r.get("classification") in ("SUSPEITO", "MALICIOSO") else None
 
 
+# endereço de máquina de nuvem (nome reverso do IP: ec2-18-1-2-3.eu-west-3.compute.amazonaws.com): quem está por
+# trás é um cliente qualquer do provedor — nunca "não identificado" (bloquearia em todas as empresas); só ameaça (TI)
+_MAQUINA_NUVEM = re.compile(r"^ec2-\d{1,3}(-\d{1,3}){3}\.([a-z0-9-]+\.)?compute(-1)?\.amazonaws\.com(\.cn)?$")
+
+
 def _dominio_proprio(nome: str) -> bool:
     """O nome é um domínio registrado por alguém (r5k9x2.com), não um endereço dentro de um provedor/plataforma
     (d1abc.cloudfront.net, x.azureedge.net: sufixo privado da PSL) nem subdomínio."""
@@ -544,6 +550,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             c.execute(fim_pedida, (r["id"],))
             sai_revisao(r, em)
             continue
+        if cat == NAO_IDENT and _MAQUINA_NUVEM.match(r["name"]) and cls not in ("SUSPEITO", "MALICIOSO"):
+            cat, r["lista_wl"] = None, "infraestrutura"   # (28/09: o Gemini respondia "nao_identificado" p/ EC2)
         if not cat and cls == "DESCONHECIDO" and r["lista_wl"] != "sem_resposta" and (
                 r["lista_wl"] not in ("cdn", "infraestrutura") or _dominio_proprio(r["name"])):
             # não identificado depois das 4 fases não é liberado em whitelist nenhuma (27/09: espelhos de cassino como

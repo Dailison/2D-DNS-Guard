@@ -75,7 +75,12 @@ def analyze_name(name: str, internal_suffixes: list[str] | None = None) -> NameI
 
     ext = _EXTRACT(fqdn)
     if not ext.domain:  # o próprio nome é um sufixo público
-        return NameInfo(fqdn, "public", fqdn, fqdn, ext.suffix, labels[-1], [fqdn])
+        # curinga da PSL (*.compute-1.amazonaws.com): o nome inteiro é "sufixo", mas é endereço DENTRO do provedor —
+        # privado como os das outras regiões (28/09: ec2-*.compute-1 viravam "domínio próprio" e iam p/ Não identificados)
+        ext_i = _EXTRACT_ICANN(fqdn)
+        icann_reg = f"{ext_i.domain}.{ext_i.suffix}" if ext_i.domain and ext_i.suffix else fqdn
+        return NameInfo(fqdn, "public", fqdn, icann_reg, ext.suffix, labels[-1], [fqdn],
+                        bool(getattr(ext, "is_private", False)) and icann_reg != fqdn)
     registrable = f"{ext.domain}.{ext.suffix}" if ext.suffix else ext.domain
     ext_i = _EXTRACT_ICANN(fqdn)
     icann_reg = f"{ext_i.domain}.{ext_i.suffix}" if ext_i.domain and ext_i.suffix else registrable

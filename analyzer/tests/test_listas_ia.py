@@ -1200,3 +1200,30 @@ def test_endereco_de_provedor_liberado_pela_ia_local_nao_vai_p_ia_online(env, mo
     assert "ec2-18-1-2-3.eu-west-3.compute.amazonaws.com" not in fila, "endereço de provedor: sem fase 4"
     assert wl.get("ec2-18-1-2-3.eu-west-3.compute.amazonaws.com") == "infraestrutura"
     assert "k8x2p0zz.com" in fila and "k8x2p0zz.com" not in wl, "domínio próprio desconhecido: IA online (e não fica liberado)"
+
+
+def test_maquina_ec2_nunca_vai_p_nao_identificados(env, monkeypatch):
+    """28/09: ec2-*.compute-1.amazonaws.com (curinga da PSL) era "domínio próprio" e ia p/ Não identificados (bloqueado
+    em todas as empresas); o Gemini também respondia "nao_identificado" p/ EC2 de outras regiões. Máquina EC2 vai p/
+    Infraestrutura (só ameaça bloqueia); site de usuário em plataforma (workers.dev) continua não identificado."""
+    from dnsanalyzer import config, db, listas_ia
+    from dnsanalyzer.features import analyze_name
+    i = analyze_name("ec2-3-4-5-6.compute-1.amazonaws.com")
+    assert i.private_suffix and i.icann_registrable == "amazonaws.com" and i.registrable == "ec2-3-4-5-6.compute-1.amazonaws.com"
+    assert not listas_ia._dominio_proprio("ec2-3-4-5-6.compute-1.amazonaws.com")
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        ids = {}
+        for n, cls in (("ec2-96-0-48-215.compute-1.amazonaws.com", "DESCONHECIDO"), ("ec2-16-162-21-148.ap-east-1.compute.amazonaws.com", "DESCONHECIDO"),
+                       ("ec2-1-1-1-9.compute-1.amazonaws.com", "SUSPEITO"), ("golpe-app.workers.dev", "DESCONHECIDO")):
+            ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at) "
+                               "VALUES (%s, %s, 'outros', now() - interval '1 minute', 3, now(), now()) RETURNING id", (n, cls)).fetchone()["id"]
+        listas_ia.salvar(c, ids["ec2-96-0-48-215.compute-1.amazonaws.com"], "wl:infraestrutura", 1.0, "", "AWS EC2", "local", 1, "gemma4:26b")
+        for n in ("ec2-16-162-21-148.ap-east-1.compute.amazonaws.com", "ec2-1-1-1-9.compute-1.amazonaws.com", "golpe-app.workers.dev"):
+            listas_ia.salvar(c, ids[n], "nao_identificado", 1.0, "", "", "online:gemini", 4)
+        c.execute("UPDATE domains SET online_resp = jsonb_build_object('classificacao', classification) WHERE id = ANY(%s)", (list(ids.values()),))
+        listas_ia.aplicar(c)
+        ni = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'nao_identificado' AND domain = ANY(%s)", (list(ids),))}
+        wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains WHERE domain = ANY(%s)", (list(ids),))}
+    assert wl.get("ec2-96-0-48-215.compute-1.amazonaws.com") == "infraestrutura" and wl.get("ec2-16-162-21-148.ap-east-1.compute.amazonaws.com") == "infraestrutura", wl
+    assert ni == {"ec2-1-1-1-9.compute-1.amazonaws.com", "golpe-app.workers.dev"}, ni

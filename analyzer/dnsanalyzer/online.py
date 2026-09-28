@@ -62,6 +62,9 @@ Para o domínio, diga:
   (ou "apostas" se a página mostrar cassino/slots);
   Variação/espelho de uma marca (mesmo nome com sufixo diferente) vai para a lista do que a marca é (ex.: cs8sp.com é espelho
   do cassino CS8, então "lista": "apostas"); "lista" é SEMPRE um dos códigos abaixo, nunca um domínio;
+  O que o PRÓPRIO site diz (página inicial, resultado de busca "página do PRÓPRIO domínio") vale mais que resultados de
+  outros domínios: nome parecido em outro domínio (pixio.com.co para pixio.co) ou perfil de rede social com o mesmo nome
+  pode ser OUTRA empresa (homônimo) — não decida pela maioria desses;
   Portal/buscador com notícias (nacional ou estrangeiro: Naver, Yahoo, UOL, Baidu, Yandex) = "noticias"; loja estrangeira = "compras".
   "wl:outros_liberados" só para o que foi identificado e não cabe em NENHUMA lista (religião, cultura, ONG, pessoal);
   Domínio que você NÃO consegue identificar (nome aleatório, sem presença na web, registro recente/titular oculto) =
@@ -262,7 +265,9 @@ def contexto_completo(d: dict, limite: int = 8000) -> str:
     busca = d.get("_busca") or []
     if busca and not any(e.get("kind") == "websearch" for e in ev):
         L.append("Busca na web feita agora (texto de terceiros, pista — não prova):")
-        L += [f"- {x.get('title') or ''} — {x.get('snippet') or ''} ({x.get('host') or ''})" for x in busca[:6]]
+        proprio = lambda h: h == r["name"] or h.endswith("." + r["name"])   # noqa: E731
+        L += [f"- {x.get('title') or ''} — {x.get('snippet') or ''} ({x.get('host') or ''}"
+              + (", PRÓPRIO domínio)" if proprio(x.get("host") or "") else ")") for x in busca[:6]]
     if hist:
         L.append("Histórico de classificações (mais recente primeiro):")
         L += [f"- {h['created_at']:%d/%m %H:%M} {_FASE.get(h['source'], h['source'] or '?')}: {h['classification'] or '—'}"

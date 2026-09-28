@@ -105,7 +105,7 @@ def test_pagina_segue_redirecionamento_por_script_e_marca_sinais(monkeypatch):
     class Resp:
         def __init__(self, caminho):
             self.caminho, self.headers, self.encoding = caminho, {"content-type": "text/html"}, "utf-8"
-            self.url = SimpleNamespace(host="x7.com")
+            self.url, self.status_code = SimpleNamespace(host="x7.com"), 200
 
         def iter_bytes(self):
             yield paginas[self.caminho].encode()
@@ -132,3 +132,50 @@ def test_pagina_segue_redirecionamento_por_script_e_marca_sinais(monkeypatch):
     r = webintel.homepage("x7.com")
     assert r["via"] == "x7.com" and "DNS_PROBE" in r["texto"]
     assert any("Voltar" in s for s in r["sinais"]) and any("camuflagem" in s for s in r["sinais"])
+
+
+def test_raiz_sem_pagina_tenta_o_www_e_busca_do_proprio_dominio_e_marcada(monkeypatch):
+    """27/09: pixio.co (jogos) virou "loja de arte de parede": a raiz dá 403 do S3 em XML e o site está no www; sem a
+    página, a busca trouxe homônimos (pixio.com.co, Instagram) que pesaram mais que o resultado do próprio domínio."""
+    from dnsanalyzer import rules, webintel
+    respostas = {"pixio.co": (403, "application/xml", "<Error><Code>AccessDenied</Code></Error>"),
+                 "www.pixio.co": (200, "text/html", "<html><title>Pixio Ltd</title><body>fun games for mobile</body></html>")}
+
+    class Resp:
+        def __init__(self, host):
+            self.status_code, ct, self.corpo = respostas[host]
+            self.headers, self.encoding, self.url = {"content-type": ct}, "utf-8", SimpleNamespace(host=host)
+
+        def iter_bytes(self):
+            yield self.corpo.encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class Cliente:
+        def __init__(self, **kw):
+            pass
+
+        def stream(self, metodo, url):
+            return Resp(url.split("//", 1)[1].split("/", 1)[0])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(webintel.httpx, "Client", Cliente)
+    r = webintel.homepage("pixio.co")
+    assert r["title"] == "Pixio Ltd" and "games" in r["texto"] and webintel.site_com_conteudo(r)
+    respostas["www.pixio.co"] = (403, "application/xml", "<Error/>")
+    assert webintel.homepage("pixio.co") == {"final_host": "pixio.co", "status": 403}, "nenhum dos dois: fica a resposta da raiz"
+    assert not webintel.site_com_conteudo({"final_host": "pixio.co", "status": 403})
+
+    ev = rules.evaluate({"name": "pixio.co", "kind": "public", "search": [
+        {"host": "pixio.co", "title": "Pixio Ltd", "snippet": "fun games"},
+        {"host": "pixio.com.co", "title": "Home page", "snippet": "wall art store"}]}).evidence
+    txt = [e.text for e in ev if e.kind == "websearch"]
+    assert "PRÓPRIO domínio" in txt[0] and "TERCEIROS" in txt[1] and "PRÓPRIO" not in txt[1]

@@ -111,7 +111,11 @@ def build_evidence(d: dict) -> list[Evidence]:
                     + "; ".join(b for b in bits if b) + extra, False)
 
     for r in (d.get("search") or []):
-        add("websearch", f"resultado de busca na web (texto de TERCEIROS, não verificado) em {r['host']}: "
+        # resultado do próprio domínio descreve o serviço; os de outros domínios podem ser homônimos (27/09: pixio.co,
+        # jogos, virou loja de arte por pixio.com.co + Instagram de um fotógrafo "pixio.co")
+        origem = ("página do PRÓPRIO domínio, texto declarado pelo site" if r["host"] == name or r["host"].endswith("." + name)
+                  else "texto de TERCEIROS, não verificado")
+        add("websearch", f"resultado de busca na web ({origem}) em {r['host']}: "
                          f"'{r.get('title') or ''}' — {r.get('snippet') or ''}", False, host=r["host"])
 
     wh = whois_evidencia(d.get("whois"))

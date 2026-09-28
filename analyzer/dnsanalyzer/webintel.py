@@ -94,6 +94,7 @@ def homepage(domain: str) -> dict | None:
     """Título/descrição/trecho do texto da página inicial (texto do próprio site; não confiável).
     Tenta o domínio e, se ele não tiver site (comum: raiz sem endereço), o www. Segue redirecionamento por
     meta refresh/JavaScript ("Redirecting..." — 27/09: plataformas de tigrinho mandam p/ o site real por script)."""
+    reserva = None
     for host in (domain, "www." + domain):
         r = _homepage_host(host)
         if r:
@@ -109,8 +110,17 @@ def homepage(domain: str) -> dict | None:
                 r2["sinais"] = sorted(set(r.get("sinais") or []) | set(r2.get("sinais") or [])) or None
                 r = r2
             r.pop("_redirect", None)
-            return r
-    return None
+            if site_com_conteudo(r):
+                return r
+            reserva = reserva or r   # respondeu sem página (erro, não-HTML): tenta o www antes de desistir
+    return reserva
+
+
+def site_com_conteudo(site: dict | None) -> bool:
+    """Página lida de verdade. 27/09: pixio.co (raiz = 403 do S3 em XML, o site está no www) ficava só com
+    {"final_host"} e a IA classificava pela busca, cheia de homônimos."""
+    return bool(site) and not site.get("status") and any(
+        site.get(k) for k in ("title", "description", "site_name", "texto", "sinais"))
 
 
 _REDIR = (re.compile(r'<meta[^>]+http-equiv=["\']?refresh["\']?[^>]*content=["\'][^"\']*url=([^"\'>\s]+)', re.I),
@@ -136,8 +146,9 @@ def _homepage_host(domain: str, caminho: str = "/") -> dict | None:
             with httpx.Client(timeout=httpx.Timeout(5, connect=4), follow_redirects=True, verify=verify, max_redirects=5,
                               headers={"User-Agent": UA, "Accept": "text/html"}) as cl:
                 with cl.stream("GET", f"https://{domain}{caminho}") as r:
+                    erro = {"status": r.status_code} if r.status_code >= 400 else {}
                     if "html" not in r.headers.get("content-type", ""):
-                        return {"final_host": r.url.host}
+                        return {"final_host": r.url.host, **erro}
                     body = b""
                     for chunk in r.iter_bytes():
                         body += chunk
@@ -162,7 +173,7 @@ def _homepage_host(domain: str, caminho: str = "/") -> dict | None:
                 return m.group(1)
         return None
     t = re.search(r"<title[^>]*>(.{1,300}?)</title>", text, re.S | re.I)
-    out = {"final_host": final, "tls_verified": verify, "title": _clean(t.group(1) if t else None, 120),
+    out = {**erro, "final_host": final, "tls_verified": verify, "title": _clean(t.group(1) if t else None, 120),
            "description": _clean(meta("description", "og:description"), 160),
            "site_name": _clean(meta("og:site_name", "application-name"), 60), "texto": _texto_visivel(text),
            "sinais": [s for s, rx in (("prende o botão Voltar do navegador (history.pushState em laço)", _PRENDE_VOLTAR),
@@ -294,7 +305,7 @@ def lookup(c, domain: str, fetch: bool, allow_site: bool) -> dict | None:
     row = c.execute("SELECT value, fetched_at FROM lookup_cache WHERE kind='web' AND key=%s", (domain,)).fetchone()
     if row and row["fetched_at"] > datetime.now(timezone.utc) - timedelta(days=cfg.web_cache_days):
         v = row["value"] or {}
-        if (fetch and allow_site and cfg.web_intel_enabled and cfg.web_fetch_site and not v.get("site")
+        if (fetch and allow_site and cfg.web_intel_enabled and cfg.web_fetch_site and not site_com_conteudo(v.get("site"))
                 and v.get("site_at", v.get("fetched") or "") < (datetime.now(timezone.utc) - SITE_VAZIO_REABRE).isoformat()):
             try:
                 v["site"] = homepage(domain)

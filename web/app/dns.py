@@ -45,38 +45,48 @@ def liberados():
             flash(f"Descrições indisponíveis (analisador): {e}", "erro")
         for ip in ips:
             m = metas.get(ip) or {}
-            rows.append({k: m.get(k) or "" for k in ("tenant_name", "filial", "empresa", "departamento",
-                                                      "usuario", "tipo")} | {"ip": ip, "tenant_id": m.get("tenant_id")})
+            rows.append({k: m.get(k) or "" for k in ("tenant_name", "filial", "empresa", "departamento", "usuario", "tipo",
+                                                      "autorizado_por", "created_by", "created_at", "updated_by", "updated_at")}
+                        | {"ip": ip, "tenant_id": m.get("tenant_id")})
         if f_emp:
             rows = [r for r in rows if r["tenant_id"] == f_emp]
         if q:
             rows = [r for r in rows if any(q in (r[k] or "").lower() for k in
-                                           ("ip", "tenant_name", "filial", "empresa", "departamento", "usuario"))]
+                                           ("ip", "tenant_name", "filial", "empresa", "departamento", "usuario",
+                                            "autorizado_por", "created_by"))]
     except Exception as e:  # noqa: BLE001
         flash(f"Não foi possível consultar o Technitium: {e}", "erro")
+    try:   # histórico: quem do console liberou/editou/revogou e quem da empresa autorizou
+        historico = api.get("/console/liberados-log", limit=50)
+    except AnalyzerError:
+        historico = []
     empresas = sorted(({"id": e["id"], "name": e["name"],
                         "filiais": sorted({n["unit"] for n in e.get("networks", []) if n.get("unit")}),
                         "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
                        for e in emp.lista()), key=lambda e: e["name"].lower())
-    return render_template("admin/liberados.html", rows=rows, q=q, f_emp=f_emp, empresas=empresas,
+    return render_template("admin/liberados.html", rows=rows, q=q, f_emp=f_emp, empresas=empresas, historico=historico,
                            tipos=TIPOS_LIBERADO, grupo=current_app.config.get("TECHNITIUM_LIBERADOS_GROUP"))
 
 
-def _liberado_meta_upsert(ip):
-    """Grava empresa (cadastro) + filial e a descrição (do form) para o IP normalizado."""
+def _liberado_meta_upsert(ip, acao):
+    """Grava empresa (cadastro) + filial, a descrição e quem da empresa autorizou (do form) para o IP normalizado;
+    o analisador registra no histórico o usuário logado."""
     tid = request.form.get("tenant_id", type=int)
-    api.put("/console/liberados-meta", {"ip": ip, "by": admin_atual().email, "tenant_id": tid,
+    api.put("/console/liberados-meta", {"ip": ip, "by": admin_atual().email, "tenant_id": tid, "acao": acao,
                                         **{k: request.form.get(k) or "" for k in
-                                           ("filial", "empresa", "departamento", "usuario", "tipo")}})
+                                           ("filial", "empresa", "departamento", "usuario", "tipo", "autorizado_por")}})
 
 
 @admin_bp.post("/liberados/liberar")
 @login_required
 def liberados_liberar():
+    if not (request.form.get("autorizado_por") or "").strip():
+        flash("Informe quem da empresa autorizou a liberação.", "erro")
+        return redirect(url_for("admin.liberados"))
     try:
         ip, msg = dnslib.liberar(request.form.get("ip"), por=admin_atual().email)
         if ip:
-            _liberado_meta_upsert(ip)
+            _liberado_meta_upsert(ip, "liberar")
         flash((f"{ip} {msg}." if ip else msg), "ok" if ip else "erro")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao liberar: {e}", "erro")
@@ -89,7 +99,7 @@ def liberados_editar():
     ip = dnslib.norm_ip(request.form.get("ip"))
     try:
         if ip:
-            _liberado_meta_upsert(ip)
+            _liberado_meta_upsert(ip, "editar")
             flash(f"{ip} atualizado.", "ok")
         else:
             flash("IP inválido.", "erro")
@@ -104,7 +114,7 @@ def liberados_revogar():
     try:
         ip = dnslib.revogar(request.form.get("ip"), por=admin_atual().email)
         if ip:
-            api.delete(f"/console/liberados-meta?ip={quote(ip, safe='')}")
+            api.delete(f"/console/liberados-meta?ip={quote(ip, safe='')}&by={quote(admin_atual().email, safe='@')}")
             flash(f"{ip} removido (volta a filtrar).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao revogar: {e}", "erro")

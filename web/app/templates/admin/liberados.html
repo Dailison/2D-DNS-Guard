@@ -35,6 +35,8 @@
     <div><label>Departamento</label><input type="text" name="departamento" placeholder="Ex.: Recepção"></div>
     <div><label>Usuário</label><input type="text" name="usuario" placeholder="Ex.: João"></div>
     <div><label>Tipo</label>{{ sel_tipo(None, None) }}</div>
+    <div><label>Autorizado por (empresa)</label><input type="text" name="autorizado_por" placeholder="Ex.: Maria, gerente" required
+      title="quem da empresa pediu/autorizou a liberação (fica no histórico junto com o seu usuário)"></div>
     <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Liberar</button></div>
   </form>
   <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">IP único vira <code>/32</code> automaticamente. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro de
@@ -54,7 +56,7 @@
   </div>
   <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Edite na linha e clique <b>Salvar</b>.</p>
   <table>
-    <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Filial</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th></th></tr></thead>
+    <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Filial</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th>Autorizado por</th><th>Liberado por</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}
       {% set fid = 'e_' ~ loop.index %}
@@ -67,6 +69,9 @@
         <td><input form="{{ fid }}" name="departamento" value="{{ r.departamento }}" placeholder="—"></td>
         <td><input form="{{ fid }}" name="usuario" value="{{ r.usuario }}" placeholder="—"></td>
         <td>{{ sel_tipo(fid, r.tipo) }}</td>
+        <td><input form="{{ fid }}" name="autorizado_por" value="{{ r.autorizado_por }}" placeholder="—"></td>
+        <td class="mut" style="font-size:.8rem;white-space:nowrap"{% if r.updated_by %} title="última edição: {{ r.updated_by }} em {{ r.updated_at|dt_sp }}"{% endif %}>
+          {% if r.created_by %}{{ r.created_by }}<br>{{ r.created_at|dt_sp }}{% else %}—{% endif %}</td>
         <td style="white-space:nowrap">
           <form id="{{ fid }}" method="post" action="{{ url_for('admin.liberados_editar') }}" style="display:inline">
             <input type="hidden" name="ip" value="{{ r.ip }}">
@@ -79,7 +84,28 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="mut">Nenhum IP liberado.</td></tr>
+      <tr><td colspan="9" class="mut">Nenhum IP liberado.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Histórico</h2>
+  <table>
+    <thead><tr><th>Quando</th><th>Ação</th><th>IP / Faixa</th><th>Empresa</th><th>Autorizado por</th><th>Usuário do console</th></tr></thead>
+    <tbody>
+    {% for h in historico %}
+      <tr>
+        <td style="white-space:nowrap">{{ h.at|dt_sp }}</td>
+        <td>{{ {'liberar': '✅ liberou', 'editar': '✏️ editou', 'revogar': '⛔ revogou'}.get(h.acao, h.acao) }}</td>
+        <td><code>{{ h.ip }}</code>{% set d = h.detalhe or {} %}{% if d.usuario or d.departamento %}<div class="mut" style="font-size:.75rem">{{ [d.usuario, d.departamento]|select|join(' · ') }}</div>{% endif %}</td>
+        <td>{{ h.tenant_name or '—' }}{% if (h.detalhe or {}).filial %} · {{ h.detalhe.filial }}{% endif %}</td>
+        <td>{{ h.autorizado_por or '—' }}</td>
+        <td>{{ h.por or '—' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="mut">Nenhum registro ainda.</td></tr>
     {% endfor %}
     </tbody>
   </table>

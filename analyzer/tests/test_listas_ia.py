@@ -1247,3 +1247,19 @@ def test_busca_em_todas_as_listas(env):
     sub = env.get("/listas-busca", params={"q": "cdn.qrofertas.com"}, headers=H).json()   # subdomínio: acha o pai que bloqueia
     assert sub[0]["domain"] == "qrofertas.com" and sub[0]["pai"] and sub[0]["listas"] == ["ameaca", "apostas"], sub
     assert not j[0]["pai"]
+
+
+def test_liberados_autorizacao_e_historico(env):
+    """IPs liberados: quem da empresa autorizou (mantido na edição sem o campo) e histórico com o usuário do console."""
+    ip = "10.77.20.5/32"
+    r = env.put("/console/liberados-meta", json={"ip": ip, "usuario": "Caixa 1", "autorizado_por": "Maria (gerente)",
+                                                  "acao": "liberar", "by": "ti@2d"}, headers=H)
+    assert r.status_code == 200, r.text
+    env.put("/console/liberados-meta", json={"ip": ip, "usuario": "Caixa 2", "by": "outro@2d"}, headers=H)
+    m = next(x for x in env.get("/console/liberados-meta", headers=H).json() if x["ip"] == ip)
+    assert m["autorizado_por"] == "Maria (gerente)" and m["created_by"] == "ti@2d" and m["updated_by"] == "outro@2d"
+    assert env.delete("/console/liberados-meta", params={"ip": ip, "by": "chefe@2d"}, headers=H).json()["removed"] == 1
+    log = env.get("/console/liberados-log", params={"ip": ip}, headers=H).json()
+    assert [(x["acao"], x["por"], x["autorizado_por"]) for x in log] == [
+        ("revogar", "chefe@2d", "Maria (gerente)"), ("editar", "outro@2d", "Maria (gerente)"), ("liberar", "ti@2d", "Maria (gerente)")]
+    assert log[1]["detalhe"] == {"usuario": "Caixa 2"}

@@ -896,6 +896,8 @@ class LiberadoMetaIn(BaseModel):
     departamento: Optional[str] = None
     usuario: Optional[str] = None
     tipo: Optional[str] = None
+    autorizado_por: Optional[str] = None   # quem da empresa autorizou (vazio na edição = mantém)
+    acao: Optional[str] = None             # liberar | editar (histórico); sem = pelo que já existia
     by: str = ""
 
 
@@ -903,8 +905,18 @@ class LiberadoMetaIn(BaseModel):
 def liberados_meta_list():
     with db.conn() as c:
         return c.execute("SELECT m.ip, m.tenant_id, t.name AS tenant_name, m.filial, m.empresa, m.departamento, "
-                         "m.usuario, m.tipo, m.created_at, m.created_by "
+                         "m.usuario, m.tipo, m.autorizado_por, m.created_at, m.created_by, m.updated_at, m.updated_by "
                          "FROM liberado_meta m LEFT JOIN tenants t ON t.id=m.tenant_id ORDER BY m.ip").fetchall()
+
+
+@app.get("/console/liberados-log", dependencies=[Depends(auth)])
+def liberados_log(ip: Optional[str] = None, limit: int = Query(50, le=500)):
+    """Histórico dos IPs liberados: quem do console liberou/editou/revogou e quem da empresa autorizou."""
+    with db.conn() as c:
+        return c.execute("SELECT l.at, l.ip, l.acao, l.por, l.autorizado_por, l.tenant_id, t.name AS tenant_name, l.detalhe "
+                         "FROM liberado_log l LEFT JOIN tenants t ON t.id = l.tenant_id "
+                         "WHERE %(ip)s::text IS NULL OR l.ip = %(ip)s ORDER BY l.at DESC, l.id DESC LIMIT %(n)s",
+                         {"ip": ip, "n": limit}).fetchall()
 
 
 @app.put("/console/liberados-meta", dependencies=[Depends(auth)])
@@ -915,22 +927,34 @@ def liberados_meta_upsert(body: LiberadoMetaIn):
         if body.tenant_id is not None:
             _tenant(c, body.tenant_id)
         # empresa escolhida no cadastro -> o texto livre (legado) deixa de valer
-        c.execute(
-            "INSERT INTO liberado_meta (ip, tenant_id, filial, empresa, departamento, usuario, tipo, created_by) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (ip) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, "
+        existia = c.execute("SELECT 1 FROM liberado_meta WHERE ip=%s", (body.ip,)).fetchone() is not None
+        r = c.execute(
+            "INSERT INTO liberado_meta (ip, tenant_id, filial, empresa, departamento, usuario, tipo, autorizado_por, created_by) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (ip) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, "
             "filial=EXCLUDED.filial, empresa=EXCLUDED.empresa, departamento=EXCLUDED.departamento, "
-            "usuario=EXCLUDED.usuario, tipo=EXCLUDED.tipo",
+            "usuario=EXCLUDED.usuario, tipo=EXCLUDED.tipo, "
+            "autorizado_por=COALESCE(EXCLUDED.autorizado_por, liberado_meta.autorizado_por), "
+            "updated_at=now(), updated_by=EXCLUDED.created_by "
+            "RETURNING tenant_id, filial, departamento, usuario, tipo, autorizado_por",
             (body.ip, body.tenant_id, s(body.filial, 150) if body.tenant_id else None,
              None if body.tenant_id else s(body.empresa, 150), s(body.departamento, 255), s(body.usuario, 255),
-             s(body.tipo, 20), body.by or None))
+             s(body.tipo, 20), s(body.autorizado_por, 255), body.by or None)).fetchone()
+        acao = body.acao if body.acao in ("liberar", "editar") else ("editar" if existia else "liberar")
+        c.execute("INSERT INTO liberado_log (ip, acao, por, autorizado_por, tenant_id, detalhe) VALUES (%s,%s,%s,%s,%s,%s)",
+                  (body.ip, acao, body.by or None, r["autorizado_por"], r["tenant_id"],
+                   Jsonb({k: r[k] for k in ("filial", "departamento", "usuario", "tipo") if r[k]})))
         return {"ok": True, "ip": body.ip}
 
 
 @app.delete("/console/liberados-meta", dependencies=[Depends(auth)])
-def liberados_meta_delete(ip: str):
+def liberados_meta_delete(ip: str, by: str = ""):
     with db.conn() as c:
-        n = c.execute("DELETE FROM liberado_meta WHERE ip=%s", (ip,)).rowcount
-        return {"ok": True, "removed": n}
+        r = c.execute("DELETE FROM liberado_meta WHERE ip=%s RETURNING tenant_id, autorizado_por, filial, departamento, "
+                      "usuario, tipo", (ip,)).fetchone()
+        c.execute("INSERT INTO liberado_log (ip, acao, por, autorizado_por, tenant_id, detalhe) VALUES (%s,'revogar',%s,%s,%s,%s)",
+                  (ip, by or None, (r or {}).get("autorizado_por"), (r or {}).get("tenant_id"),
+                   Jsonb({k: r[k] for k in ("filial", "departamento", "usuario", "tipo") if r and r[k]})))
+        return {"ok": True, "removed": 1 if r else 0}
 
 
 # ------------------------------------------------------------------ logs agrupados (console)

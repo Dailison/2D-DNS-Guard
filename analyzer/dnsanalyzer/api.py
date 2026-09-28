@@ -745,16 +745,23 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                 "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
                 " WHERE kind = ANY(%(d)s) AND " + so_ia + " ORDER BY id DESC LIMIT %(n)s) ORDER BY id DESC",
                 {"d": list(eventos.DECISAO), "n": limit}).fetchall()
-        # o que está em análise agora e em que fase (1-3 = claimed_at; lista = fase 1; 4 = IA online)
-        cur = c.execute(
+        # o que está em análise agora e em que fase (1-3 = claimed_at; lista = fase 1; 4 = IA online). São vários ao
+        # mesmo tempo (workers da VM + reforço com GPU; a IA online roda em paralelo). Reservas "de espera" não contam:
+        # a IA local recua claimed_at 20-28 min p/ tentar depois, e a online reserva 10 min após resposta inválida
+        # (online_falhas > 0)
+        em_analise = c.execute(
             "SELECT name, total_queries, fase, extract(epoch from now() - t)::int AS elapsed FROM ("
             " SELECT name, total_queries, claimed_at AS t, CASE WHEN llm_pending THEN '1' "
             "   WHEN whois_at IS NULL THEN '2' WHEN web_search_at IS NULL THEN '3' ELSE '1' END AS fase "
-            " FROM domains WHERE claimed_at > now() - interval '30 minutes' "
+            " FROM domains WHERE claimed_at > now() - interval '15 minutes' "
             " UNION ALL SELECT name, total_queries, online_claimed_at, '4' FROM domains "
-            "   WHERE online_claimed_at > now() - interval '10 minutes' "
+            "   WHERE online_claimed_at > now() - interval '10 minutes' AND online_falhas = 0 "
             " UNION ALL SELECT name, total_queries, lista_claimed_at, '1' FROM domains "
-            "   WHERE lista_claimed_at > now() - interval '10 minutes') x ORDER BY t DESC LIMIT 1").fetchone()
+            "   WHERE lista_claimed_at > now() - interval '10 minutes') x ORDER BY t DESC LIMIT 30").fetchall()
+        vistos: set = set()   # o mesmo domínio pode estar reservado na IA local e na fila de lista: aparece uma vez
+        em_analise = [r for r in em_analise if (r["name"], r["fase"] == "4") not in vistos
+                      and not vistos.add((r["name"], r["fase"] == "4"))]
+        cur = em_analise[0] if em_analise else None   # o mais recente (console antigo)
         from .listas_ia import incerta_sql
         _incerta = incerta_sql()   # sugestão de lista sem confiança alta: também passa pelas fases 2 e 3
         # fase 1 inteira: o pouco acesso (aguarda_recorrencia) também roda, no fim da fila
@@ -777,7 +784,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
     eta = None
     if hour["done"] and queue["ia"]:   # pelo ritmo real (várias análises simultâneas / reforço com GPU)
         eta = int(queue["ia"] * 3600 / hour["done"])
-    return {"events": events, "current": cur, "queue": queue, "last_hour": hour, "eta_seconds": eta,
+    return {"events": events, "current": cur, "em_analise": em_analise, "queue": queue, "last_hour": hour, "eta_seconds": eta,
             "llm": {"ok": ok, "detail": msg, "model": settings().ollama_model}}
 
 

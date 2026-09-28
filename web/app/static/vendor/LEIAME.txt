@@ -1,0 +1,4 @@
+Bibliotecas de terceiros (versão fixa, baixadas do registro npm com integridade conferida):
+- alpine-3.17.4.min.js  — alpinejs@3.17.4 dist/cdn.min.js (MIT)
+- motion-13.4.4.min.js  — motion@13.4.4 dist/motion.js (MIT)
+Para atualizar: baixar do registro npm, conferir dist.integrity e trocar o nome do arquivo (versão no nome = cache novo).

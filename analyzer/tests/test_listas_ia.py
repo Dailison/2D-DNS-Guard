@@ -1145,3 +1145,24 @@ def test_etapa_local_unica(env, monkeypatch):
     assert r["81g-certo.com"]["lista_ia"] == "apostas" and r["81g-certo.com"]["lista_fase"] == 1 and em == {"81g-certo.com"}
     assert r["81g-duvida.com"]["busca"] and r["81g-duvida.com"]["whois"] and r["81g-duvida.com"]["lista_duvida"], \
         "sem certeza: direto p/ a IA online (fase 4)"
+
+
+def test_ia_ao_vivo_lista_o_que_esta_em_analise(env, monkeypatch):
+    """Várias análises ao mesmo tempo (workers + reforço; IA online em paralelo): todas aparecem, por etapa.
+    Reservas "de espera" (claimed_at recuado; IA online após resposta inválida) não contam."""
+    from dnsanalyzer import db, llm
+    monkeypatch.setattr(llm.OllamaClient, "available", lambda self: (True, "ok"))
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, llm_pending, claimed_at) VALUES "
+                  "('local-a.com', true, now() - interval '40 seconds'), ('local-b.com', true, now() - interval '5 seconds'), "
+                  "('esperando.com', true, now() - interval '20 minutes')")
+        c.execute("INSERT INTO domains (name, online_claimed_at, online_falhas) VALUES "
+                  "('online-a.com', now() - interval '12 seconds', 0), ('invalida.com', now(), 1)")
+    j = env.get("/ai/events", headers=H).json()
+    em = {(r["name"], r["fase"]) for r in j["em_analise"]}
+    assert {("local-a.com", "1"), ("local-b.com", "1"), ("online-a.com", "4")} <= em, em
+    assert not {n for n, _ in em} & {"esperando.com", "invalida.com"}, em
+    assert j["current"]["name"] == "local-b.com"   # o mais recente (console antigo)
+    with db.conn() as c:
+        c.execute("UPDATE domains SET claimed_at = NULL, online_claimed_at = NULL "
+                  "WHERE name IN ('local-a.com', 'local-b.com', 'online-a.com')")

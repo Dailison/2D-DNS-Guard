@@ -856,7 +856,9 @@ def test_decisao_humana_vale_sem_fase5(env, monkeypatch):
         listas_ia.salvar(c, ids["lib-incerto.com"], "publicidade", 0.6, "talvez", "", "local", 1, "gemma4:26b")
         listas_ia.salvar(c, ids["lib-online.com"], "jogos", 0.95, "jogo", "", "online:gemini", 4)
         c.execute("UPDATE domains SET online_resp = '{\"classificacao\": \"NAO_TRABALHO\"}' WHERE id = %s", (ids["lib-online.com"],))
+        c.execute("UPDATE domains SET reanalise_pedida = true WHERE id = ANY(%s)", (list(ids.values()),))
         ap = listas_ia.aplicar(c)
+        pedida = {r["name"] for r in c.execute("SELECT name FROM domains WHERE reanalise_pedida AND id = ANY(%s)", (list(ids.values()),))}
         rev = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'para_revisar'")}
         bl = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE category <> 'para_revisar'")}
         wl = {r["domain"]: r["added_by"] for r in c.execute("SELECT domain, added_by FROM whitelist_domains")}
@@ -864,6 +866,7 @@ def test_decisao_humana_vale_sem_fase5(env, monkeypatch):
     for n in ("lib-pessoa.com", "lib-incerto.com", "lib-online.com"):
         assert ap["local"][ids[n]] == ("humano",) and wl.get(n) == "decisão humana (liberado)" and not any(d == n for _, d in bl), n
     assert ("jogos", "bl-pessoa.com") in bl and "bl-pessoa.com" not in wl, "lista posta por pessoa: fica"
+    assert not pedida, f"reanálise pedida termina mesmo com a decisão humana mantida: {pedida}"
     assert listas_ia._proximo(("humano",), True) == " · decisão humana mantida (liberado)"
     r = env.post("/listas/publicidade", json={"domain": "lib-pessoa.com", "by": "ti@empresa"}, headers=H)
     assert r.status_code == 200, r.text

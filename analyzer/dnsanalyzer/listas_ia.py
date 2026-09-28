@@ -473,6 +473,9 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         eventos.lista("aprovado", r["name"], f"wl:{wl}", f"{whitelist.CATEGORIAS[wl]} · {_fonte(r)}" + (f" · {trava}" if trava else ""),
                       r["id"], origem(r), cls)
 
+    # reanálise pedida termina aqui também quando a decisão humana/migração segura a lista (28/09: ~1.100 decididos
+    # reanalisados ficavam com reanalise_pedida = true p/ sempre e pareciam "na fila")
+    fim_pedida = "UPDATE domains SET revisado_at = now(), reanalise_pedida = false WHERE id = %s AND reanalise_pedida"
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
         cat = r["lista_ia"]
@@ -487,6 +490,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
 
         if humano_contra:   # uma pessoa decidiu "manter liberado": vale a pessoa (a IA não desfaz a correção humana)
             out["local"][r["id"]] = ("humano",)
+            c.execute(fim_pedida, (r["id"],))
             sai_revisao(r, em)
             if not (set(em) - {PARA_REVISAR}):   # sem lista de bloqueio: whitelist (só na lista), como decisão humana
                 liberar(r, cls, humano=True)
@@ -503,6 +507,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                     sai_revisao(r, em)
                 else:   # pessoa/migração pôs noutra lista: vale a decisão dela
                     out["local"][r["id"]] = ("mantida",)
+                c.execute(fim_pedida, (r["id"],))
                 continue
             # confiança alta de um modelo que passou na prova (LOCAL_DECIDE_MODELS: gemma4) = a IA local decide sozinha
             # (lista de bloqueio ou whitelist), com as travas: coerência, guardado (DoH 2 modelos online, protegido,
@@ -536,6 +541,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
 
         # daqui p/ baixo a resposta é a ÚLTIMA (IA online, IA local que decide, ou sem IA online): sempre há destino
         if fixas and (not cat or cat not in em):   # pessoa/migração pôs noutra lista: vale a decisão dela
+            c.execute(fim_pedida, (r["id"],))
             sai_revisao(r, em)
             continue
         if not cat and cls == "DESCONHECIDO" and r["lista_wl"] != "sem_resposta" and (

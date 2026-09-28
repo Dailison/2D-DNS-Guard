@@ -538,11 +538,12 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         if fixas and (not cat or cat not in em):   # pessoa/migração pôs noutra lista: vale a decisão dela
             sai_revisao(r, em)
             continue
-        if not cat and cls == "DESCONHECIDO" and ((r["lista_wl"] or "outros_liberados") == "outros_liberados"
-                                                  or (r["lista_wl"] in ("cdn", "infraestrutura") and _dominio_proprio(r["name"]))):
-            # não identificado depois das 4 fases não é liberado (27/09: espelhos de cassino como cs8sp.com iam p/
-            # "Outros liberados", e nomes aleatórios como r5k9x2.com viravam "CDN"); CDN/infraestrutura só segue
-            # liberada quando é endereço DENTRO de um provedor (ex.: d1abc.cloudfront.net, bucket.s3.amazonaws.com)
+        if not cat and cls == "DESCONHECIDO" and r["lista_wl"] != "sem_resposta" and (
+                r["lista_wl"] not in ("cdn", "infraestrutura") or _dominio_proprio(r["name"])):
+            # não identificado depois das 4 fases não é liberado em whitelist nenhuma (27/09: espelhos de cassino como
+            # cs8sp.com iam p/ "Outros liberados", nomes aleatórios como r5k9x2.com viravam "CDN"; 28/09: 4-u-h-f.com
+            # e appshield-sec.workers.dev iam p/ "Outros (trabalho)"); CDN/infraestrutura só segue liberada quando é
+            # endereço DENTRO de um provedor (ex.: d1abc.cloudfront.net, bucket.s3.amazonaws.com)
             cat = NAO_IDENT
         if not cat:   # liberar: sai das listas que a IA pôs e vai p/ a whitelist
             # da Infraestrutura (migração) só com certeza, a resposta do modelo maior (ou dois modelos) e sem suspeita:

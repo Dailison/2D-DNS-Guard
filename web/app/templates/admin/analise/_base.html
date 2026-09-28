@@ -54,9 +54,11 @@
 
 {% if aba == 'empresas' %}
 <h1>Empresas <span class="mut" style="font-size:.8rem;font-weight:400">· cadastro empresa ↔ redes (CIDR), usado em todo o DNS Guard</span></h1>
+{% elif aba == 'fontes' %}
+<h1>Fontes de ameaça <span class="mut" style="font-size:.8rem;font-weight:400">· listas de Threat Intelligence baixadas e comparadas localmente (nenhum log sai da rede)</span></h1>
 {% else %}
 <div class="an-top">
-  <h1>Análise DNS <span class="mut" style="font-size:.8rem;font-weight:400">· IA local (Qwen3) + Threat Intelligence</span></h1>
+  <h1>Análise DNS <span class="mut" style="font-size:.8rem;font-weight:400">· IA local + IA online + Threat Intelligence</span></h1>
   {% if aba != 'ia' %}{# IA ao vivo é global: sem filtro de cliente/período #}
   <form method="get">
     <select name="t" onchange="this.form.submit()" title="Cliente">
@@ -79,7 +81,6 @@
   <a href="{{ url_for('analise.computadores', t=tid) }}" class="{{ 'on' if aba=='computadores' }}">Computadores</a>
   <a href="{{ url_for('analise.alertas', t=tid) }}" class="{{ 'on' if aba=='alertas' }}">Alertas</a>
   <a href="{{ url_for('analise.ia_ao_vivo', t=tid) }}" class="{{ 'on' if aba=='ia' }}">IA ao vivo</a>
-  <a href="{{ url_for('analise.fontes', t=tid) }}" class="{{ 'on' if aba=='fontes' }}">Fontes e IA</a>
 </nav>
 {% endif %}
 {% block an %}{% endblock %}

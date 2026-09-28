@@ -144,7 +144,7 @@ fonte aplicou (IA online, IA local, bloqueio automático, whitelist) foi corrigi
 
 ### Threat Intelligence
 
-Fontes na tabela `ti_sources` (ligar/desligar/peso pelo admin, em *Fontes e IA*;
+Fontes na tabela `ti_sources` (ligar/desligar/peso pelo admin, em *Fontes de ameaça*;
 adicionar = `INSERT` na tabela). Só `confidence = high` leva a `MALICIOSO`.
 
 | Fonte | Confiança | Uso |

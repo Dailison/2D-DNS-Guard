@@ -753,19 +753,16 @@ def ia_eventos():
         return jsonify({"error": str(e)}), 502
 
 
-# ------------------------------------------------------------------ fontes / status da IA
+# ------------------------------------------------------------------ fontes de ameaça (Threat Intelligence)
 @analise_bp.get("/fontes")
 def fontes():
     ctx = _ctx()
-    fontes_, stats, health = [], {}, {}
+    fontes_ = []
     try:
         fontes_ = api.get("/sources")
-        stats = api.get("/stats")
-        health = api.get("/health")
     except AnalyzerError as e:
         flash(f"Falha ao consultar o analisador: {e}", "erro")
-    return render_template("admin/analise/fontes.html", fontes=fontes_, stats=stats, health=health,
-                           aba="fontes", **ctx)
+    return render_template("admin/analise/fontes.html", fontes=fontes_, aba="fontes", **ctx)
 
 
 @analise_bp.post("/fontes/<int:sid>")

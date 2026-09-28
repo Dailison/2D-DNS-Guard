@@ -70,6 +70,33 @@
     .dd .ddmenu::before{content:"";position:absolute;left:0;right:0;top:-.6rem;height:.6rem}  /* ponte: o vão não fecha o menu */
     .dd .ddmenu a{display:block;color:var(--navy);padding:.5rem .95rem;white-space:nowrap;text-decoration:none}
     .dd .ddmenu a:hover{background:#eef1f6}
+    /* configurações: engrenagem ao lado do usuário + modal com atalhos */
+    .cfg-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border-radius:8px;
+             background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#c3d2ea;cursor:pointer}
+    .cfg-btn:hover,.cfg-btn.on{color:#fff;background:rgba(255,255,255,.16);border-color:#4aa8e8}
+    .cfg-btn svg{width:18px;height:18px;transition:transform .4s}
+    .cfg-btn:hover svg{transform:rotate(60deg)}
+    dialog.cfg{border:0;border-radius:14px;padding:0;max-width:640px;width:calc(100% - 32px);background:var(--card);color:var(--txt);
+               box-shadow:0 20px 60px rgba(0,0,0,.3)}
+    dialog.cfg::backdrop{background:rgba(15,23,42,.5)}
+    .cfg-h{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.1rem;border-bottom:1px solid var(--bd)}
+    .cfg-h h2{margin:0}
+    .cfg-h button{border:0;background:none;font-size:1.4rem;line-height:1;padding:.1rem .35rem;cursor:pointer;color:var(--mut)}
+    .cfg-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.7rem;padding:1.1rem}
+    .cfg-g a{display:flex;flex-direction:column;gap:.35rem;padding:.9rem;border:1px solid var(--bd);border-radius:12px;
+             text-decoration:none;color:var(--txt);transition:border-color .15s,transform .15s,box-shadow .15s}
+    .cfg-g a:hover{border-color:var(--b);transform:translateY(-1px);box-shadow:0 6px 18px rgba(15,114,188,.14)}
+    .cfg-g a.on{border-color:var(--b);box-shadow:inset 0 0 0 1px var(--b)}
+    .cfg-g .ic{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+               background:linear-gradient(135deg,var(--b2),var(--navy));color:#fff}
+    .cfg-g .ic svg{width:19px;height:19px}
+    .cfg-g b{font-size:.95rem;color:var(--navy)}
+    .cfg-g span{font-size:.8rem;color:var(--mut);line-height:1.4}
+    html[data-theme="dark"] .cfg-g b{color:#e2e8f0}
+    html[data-theme="dark"] dialog.cfg .cfg-h button:not(.primary):not(.danger){background:none}
+    html[data-theme="dark"] header .cfg-btn.cfg-btn:not(.primary):not(.danger){background:rgba(255,255,255,.08);color:#c3d2ea}
+    html[data-theme="dark"] header .cfg-btn.cfg-btn:not(.primary):not(.danger):hover,
+    html[data-theme="dark"] header .cfg-btn.on.cfg-btn:not(.primary):not(.danger){background:rgba(255,255,255,.16);color:#fff}
   </style>
   {% include '_tema_escuro.html' %}
 </head>
@@ -84,21 +111,53 @@
     <nav>
       {% if adm %}
       {% if config.ANALYZER_ENABLED %}
-      <a href="{{ url_for('analise.painel') }}" class="{{ 'on' if request.blueprint == 'analise' and request.endpoint != 'analise.empresas' }}">Análise (IA)</a>{% endif %}
+      <a href="{{ url_for('analise.painel') }}" class="{{ 'on' if request.blueprint == 'analise' and request.endpoint not in ('analise.empresas', 'analise.fontes') }}">Análise (IA)</a>{% endif %}
       {% if config.TECHNITIUM_ENABLED %}
-      <a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">Empresas</a>
       <a href="{{ url_for('admin.listas_categoria') }}" class="{{ 'on' if request.endpoint == 'admin.listas_categoria' }}">Domínios bloqueados</a>
       <a href="{{ url_for('admin.listas_liberacao') }}" class="{{ 'on' if request.endpoint in ('admin.listas_liberacao', 'admin.servico') }}">Domínios liberados</a>
       <a href="{{ url_for('admin.liberados') }}" class="{{ 'on' if request.endpoint == 'admin.liberados' }}">IPs liberados</a>
       <a href="{{ url_for('admin.logs_dns') }}" class="{{ 'on' if request.endpoint == 'admin.logs_dns' }}">Logs</a>{% endif %}
       {% if config.ANALYZER_ENABLED %}<a href="{{ url_for('admin.graficos') }}" class="{{ 'on' if request.endpoint == 'admin.graficos' }}">Gráficos</a>{% endif %}
-      {% if adm.is_super %}<a href="{{ url_for('operadores.lista') }}" class="{{ 'on' if request.blueprint == 'operadores' }}">Operadores</a>{% endif %}
       {% endif %}
     </nav>
     <span class="sp"></span>
-    {% if adm %}<span class="mut" style="color:#a9b8d4;font-size:.85rem">{{ adm.nome }}</span>{% endif %}
-    {% if adm %}<a href="{{ url_for('auth.logout') }}">Sair</a>{% endif %}
+    {% if adm %}<span class="mut" style="color:#a9b8d4;font-size:.85rem">{{ adm.nome }}</span>
+    {% set cfg_on = request.endpoint in ('analise.empresas', 'analise.fontes') or request.blueprint == 'operadores' %}
+    <button type="button" class="cfg-btn{{ ' on' if cfg_on }}" id="cfgBtn" title="Configurações" aria-label="Configurações" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <a href="{{ url_for('auth.logout') }}">Sair</a>{% endif %}
   </header>
+  {% if adm %}
+  <dialog class="cfg" id="cfgDlg" aria-labelledby="cfgTit">
+    <div class="cfg-h"><h2 id="cfgTit">Configurações</h2><button type="button" id="cfgX" aria-label="Fechar">×</button></div>
+    <div class="cfg-g">
+      {% if config.TECHNITIUM_ENABLED %}
+      <a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1"/></svg></span>
+        <b>Empresas</b><span>Empresas e suas redes (CIDR), usadas em todo o DNS Guard.</span></a>
+      {% endif %}
+      {% if config.ANALYZER_ENABLED %}
+      <a href="{{ url_for('analise.fontes') }}" class="{{ 'on' if request.endpoint == 'analise.fontes' }}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/></svg></span>
+        <b>Fontes de ameaça</b><span>Listas de Threat Intelligence: ligar, desligar e peso.</span></a>
+      {% endif %}
+      {% if adm.is_super %}
+      <a href="{{ url_for('operadores.lista') }}" class="{{ 'on' if request.blueprint == 'operadores' }}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+        <b>Operadores</b><span>Quem acessa o console e com qual permissão.</span></a>
+      {% endif %}
+    </div>
+  </dialog>
+  <script>
+  (function () {
+    var d = document.getElementById("cfgDlg");
+    document.getElementById("cfgBtn").onclick = function () { d.showModal(); };
+    document.getElementById("cfgX").onclick = function () { d.close(); };
+    d.addEventListener("click", function (e) { if (e.target === d) d.close(); });   // clique fora fecha
+  })();
+  </script>
+  {% endif %}
   <main>
     {% with msgs = get_flashed_messages(with_categories=true) %}
       {% for cat,msg in msgs %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}

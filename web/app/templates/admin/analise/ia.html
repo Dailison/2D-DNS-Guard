@@ -41,20 +41,19 @@
   .iav .ghost:hover{background:rgba(255,255,255,.1)}
   .iav .ghost.off{color:#fcd34d;border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.1)}
 
-  /* etapa: cabeçalho (título à esquerda, "analisando agora" à direita) */
+  /* etapa: cabeçalho ("analisando agora" à esquerda, título à direita) */
   .etapa{overflow:hidden}
   .eh{display:flex;align-items:center;gap:8px 14px;padding:8px 12px;border-bottom:1px solid var(--ln);flex:0 0 auto;min-height:56px}
   .eh .ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.95rem;
            background:rgba(74,168,232,.15);border:1px solid rgba(74,168,232,.3);flex:0 0 auto}
   .etapa.e2 .eh .ico{background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.35)}
-  .iav .eh h2{margin:0 6px 0 0;font-size:.95rem;color:var(--tx);display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .iav .eh h2{margin:0;font-size:.95rem;color:var(--tx);display:flex;align-items:center;gap:7px;white-space:nowrap}
   .cnt{font-size:.68rem;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.07);color:#c3cde0}
 
   /* analisando agora: chips de uma linha */
-  /* à direita do título: rola p/ o lado quando há muitos; o mais novo fica à direita */
+  /* à esquerda do título, ocupando o espaço livre: rola p/ o lado quando há muitos */
   .lane{display:flex;align-items:center;gap:8px;flex:1 1 0;min-width:0;overflow-x:auto;padding:2px 0;
-        scrollbar-width:thin}
-  .lane>:first-child{margin-left:auto}
+        scrollbar-width:thin;order:-1}
   .lane-h{display:flex;align-items:center;gap:6px;font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9fb0c8;
           white-space:nowrap;flex:0 0 auto}
   .lane-h .lv{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 8px var(--ac);animation:blink 1.4s infinite}
@@ -135,7 +134,7 @@
   @media (max-width:1100px){.tb .h{display:none}.kp{padding-left:10px}}
   @media (max-width:640px){
     .kp{border-left:0;padding-left:0}
-    .eh{flex-wrap:wrap}.lane{flex-basis:100%}.lane>:first-child{margin-left:0}
+    .eh{flex-wrap:wrap}.lane{flex-basis:100%;order:1}
     .tb .rk,.tb .tp{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
   }
   @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin{animation:none}}

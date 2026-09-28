@@ -426,3 +426,29 @@ def test_reservas_orfas_voltam_a_fila_ao_iniciar(api):
                                              "WHERE name IN ('orfa-fase1.com', 'orfa-lista.com')")}
     assert n >= 1 and m >= 1 and r["orfa-fase1.com"]["claimed_at"] is None and r["orfa-lista.com"]["lista_claimed_at"] is None
     assert r["orfa-lista.com"]["online_claimed_at"] is not None, "reserva da IA online (rodada externa) fica"
+
+
+def test_reserva_vence_em_5_min_e_quem_trabalha_renova(api, monkeypatch):
+    """27/09: a reserva vence em 5 min (antes 30); análise longa renova e não é pega por outro worker."""
+    import time
+    from dnsanalyzer import classifier, db
+    with db.conn() as c:   # o resto da fila (banco compartilhado entre os testes) fica reservado durante o teste
+        c.execute("UPDATE domains SET claimed_at = now()")
+        c.execute("INSERT INTO domains (name, tld, llm_pending, claimed_at) VALUES "
+                  "('vencida.com', 'com', true, now() - interval '6 minutes'), "
+                  "('longa.com', 'com', true, now() - interval '290 seconds'), "
+                  "('adiada.com', 'com', true, now() + interval '5 minutes')")
+        assert classifier._claim_llm(c)["name"] == "vencida.com"
+        assert classifier._claim_llm(c) is None, "longa.com (vigente) e adiada.com (futuro) não saem"
+        d = c.execute("SELECT * FROM domains WHERE name = 'longa.com'").fetchone()
+    monkeypatch.setattr(classifier, "RENOVA_RESERVA_S", 0.2)
+    monkeypatch.setattr(classifier, "_refine_reservado", lambda *a, **k: time.sleep(0.7) or "done")
+    assert classifier._refine(None, [], d) == "done"
+    with db.conn() as c:
+        r = c.execute("SELECT claimed_at > now() - interval '5 seconds' AS renovada FROM domains "
+                      "WHERE name = 'longa.com'").fetchone()
+        assert r["renovada"]
+        a = c.execute("SELECT claimed_at > now() + interval '4 minutes' AS futuro FROM domains "
+                      "WHERE name = 'adiada.com'").fetchone()
+        assert a["futuro"], "adiamento do WHOIS não é renovado"
+        c.execute("UPDATE domains SET claimed_at = NULL")

@@ -266,7 +266,7 @@ def _claim_llm(c) -> dict | None:
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE llm_pending AND NOT locked
                AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
-               AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
+               AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
              ORDER BY EXISTS (SELECT 1 FROM classification_history h WHERE h.domain_id = domains.id
                               AND h.source IN ('llm', 'online')) ASC,   -- já passou por IA = reanálise
                aguarda_recorrencia ASC, (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC, total_queries DESC
@@ -287,8 +287,35 @@ def phase_b(client: OllamaClient, cats: list[dict]) -> str:
     return _refine(client, cats, drow)
 
 
+RENOVA_RESERVA_S = 60   # a reserva (claimed_at) vence em 5 min; quem está trabalhando renova a cada minuto
+
+
 def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = False,
             esperar_busca: bool = False, etapa3: bool = False) -> str:
+    """Analisa um domínio reservado renovando a reserva enquanto trabalha: a fila devolve em 5 min só o que parou
+    (reinício, worker morto) — análise longa (carga do modelo: até ~5,5 min em 27/09) não é pega por outro worker.
+    Só renova reserva vigente: a devolvida (NULL) ou adiada p/ o futuro (WHOIS ~10 min) fica como está."""
+    import threading
+    fim = threading.Event()
+
+    def renova():
+        while not fim.wait(RENOVA_RESERVA_S):
+            try:
+                with db.conn() as c:
+                    c.execute("UPDATE domains SET claimed_at = now() WHERE id = %s AND claimed_at <= now() "
+                              "AND claimed_at > now() - interval '5 minutes'", (drow["id"],))
+            except Exception:  # noqa: BLE001 — sem renovar, no pior caso outro worker refaz a análise
+                log.warning("não renovou a reserva de %s", drow["name"], exc_info=True)
+    t = threading.Thread(target=renova, daemon=True, name=f"reserva-{drow['id']}")
+    t.start()
+    try:
+        return _refine_reservado(client, cats, drow, etapa2, esperar_busca, etapa3)
+    finally:
+        fim.set()
+
+
+def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = False,
+                      esperar_busca: bool = False, etapa3: bool = False) -> str:
     """Regras + fontes externas + IA para um domínio já reservado (claimed).
     etapa2 = domínio que a IA deixou DESCONHECIDO: busca na web antes de reclassificar.
     esperar_busca = espera a vez da busca na web (1 domínio pedido na mão) em vez de adiar."""
@@ -331,8 +358,8 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
                 c.execute("UPDATE domains SET claimed_at=NULL, whois_tries=%s, whois_at=now() WHERE id=%s", (tries, did))
                 event("whois_error", name, did, detail=f"WHOIS indisponível pela {tries}ª vez ({e}); segue sem WHOIS")
                 return "done"
-            # tenta de novo em ~10 min (claimed_at "vence" em 30 min) e pega outro domínio agora
-            c.execute("UPDATE domains SET claimed_at=now() - interval '20 minutes', whois_tries=%s WHERE id=%s", (tries, did))
+            # tenta de novo em ~10 min (claimed_at "vence" em 5 min: fica 5 min no futuro) e pega outro domínio agora
+            c.execute("UPDATE domains SET claimed_at=now() + interval '5 minutes', whois_tries=%s WHERE id=%s", (tries, did))
             event("whois_error", name, did, detail=f"WHOIS indisponível: {e}; tentativa {tries} de 3")
             return "deferred"
         if etapa3:
@@ -359,7 +386,7 @@ def _refine(client: OllamaClient, cats: list[dict], drow: dict, etapa2: bool = F
                 # 1 busca a cada WEB_SEARCH_MIN_INTERVAL p/ todos: em vez de esperar a vez (com o
                 # reforço, 8+ workers ficavam minutos parados), adia ~2 min e pega outro domínio.
                 # O dossiê (certificado/site) já ficou no cache.
-                c.execute("UPDATE domains SET claimed_at = now() - interval '28 minutes' WHERE id=%s", (did,))
+                c.execute("UPDATE domains SET claimed_at = now() - interval '3 minutes' WHERE id=%s", (did,))
                 return "deferred"
             except (httpx.HTTPError, webintel.BuscaIndisponivel) as e:
                 log.info("busca antes da IA indisponível p/ %s: %s", name, e)   # segue só com a IA
@@ -490,7 +517,7 @@ def _claim_etapa2(c) -> dict | None:
                AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
                AND (whois_at IS NOT NULL OR NOT %(whois)s)
                AND (NOT dominio_decidido(id) OR reanalise_pedida)
-               AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
+               AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
              ORDER BY total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
            RETURNING *""", {"whois": settings().whois_enabled}).fetchone()
 
@@ -516,7 +543,7 @@ def _claim_etapa3(c) -> dict | None:
         + listas_ia.incerta_sql() + """)
                AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
                AND (NOT dominio_decidido(id) OR reanalise_pedida)""" + sem_br + """
-               AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
+               AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
              ORDER BY (name LIKE '%.br') DESC, total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
            RETURNING *""").fetchone()
 
@@ -676,7 +703,7 @@ def liberar_reservas_orfas() -> tuple[int, int]:
     depois de um deploy). As da IA online não entram (a rodada externa reserva por horas; após resposta inválida a
     espera de 10 min é de propósito)."""
     with db.conn() as c:
-        n = c.execute("UPDATE domains SET claimed_at = NULL WHERE claimed_at > now() - interval '30 minutes'").rowcount
+        n = c.execute("UPDATE domains SET claimed_at = NULL WHERE claimed_at > now() - interval '5 minutes'").rowcount
         m = c.execute("UPDATE domains SET lista_claimed_at = NULL WHERE lista_claimed_at > now() - interval '10 minutes'").rowcount
     if n or m:
         log.info("reservas órfãs devolvidas à fila ao iniciar: %d da fase 1, %d da pergunta de lista", n, m)

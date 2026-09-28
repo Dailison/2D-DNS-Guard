@@ -301,7 +301,7 @@ def test_whois_que_falha_sempre_nao_trava(env, monkeypatch):
             d = c.execute("SELECT * FROM domains WHERE id = %s", (i,)).fetchone()
         res.append(classifier._refine(None, [], d, etapa3=True))
         with db.conn() as c:
-            r = c.execute("SELECT whois_tries, whois_at, claimed_at > now() - interval '30 minutes' AS adiado "
+            r = c.execute("SELECT whois_tries, whois_at, claimed_at > now() + interval '4 minutes' AS adiado "
                           "FROM domains WHERE id = %s", (i,)).fetchone()
         if len(res) < 3:
             assert r["adiado"] and r["whois_at"] is None, "adiado ~10 min (o worker pega outro)"
@@ -1156,7 +1156,7 @@ def test_ia_ao_vivo_lista_o_que_esta_em_analise(env, monkeypatch):
         c.execute("UPDATE domains SET claimed_at = NULL, online_claimed_at = NULL, lista_claimed_at = NULL")
         c.execute("INSERT INTO domains (name, llm_pending, claimed_at) VALUES "
                   "('local-a.com', true, now() - interval '40 seconds'), ('local-b.com', true, now() - interval '5 seconds'), "
-                  "('esperando.com', true, now() - interval '20 minutes')")
+                  "('esperando.com', true, now() + interval '5 minutes')")
         c.execute("INSERT INTO domains (name, online_claimed_at, online_falhas) VALUES "
                   "('online-a.com', now() - interval '12 seconds', 0), ('invalida.com', now(), 1)")
         # local-b.com já tem resposta da IA no histórico: é reavaliação; local-a.com nunca passou pela IA: novo

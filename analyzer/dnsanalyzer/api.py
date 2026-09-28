@@ -747,7 +747,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                 {"d": list(eventos.DECISAO), "n": limit}).fetchall()
         # o que está em análise agora e em que fase (1-3 = claimed_at; lista = fase 1; 4 = IA online). São vários ao
         # mesmo tempo (workers da VM + reforço com GPU; a IA online roda em paralelo). Reservas "de espera" não contam:
-        # a IA local recua claimed_at 20-28 min p/ tentar depois, e a online reserva 10 min após resposta inválida
+        # a IA local adia com claimed_at no futuro (WHOIS) ou recuado (busca ocupada) p/ tentar depois, e a online reserva 10 min após resposta inválida
         # (online_falhas > 0)
         # entrada: novo (nunca passou pela IA / pela IA online), reavaliacao (já tinha resposta) ou pedida (alguém pediu);
         # desde_s: há quanto tempo foi visto pela 1ª vez (novo) ou analisado pela última vez (reavaliação)
@@ -760,7 +760,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "SELECT name, total_queries, fase, entrada, desde_s, extract(epoch from now() - t)::int AS elapsed FROM ("
             " SELECT name, total_queries, claimed_at AS t, CASE WHEN llm_pending THEN '1' "
             "   WHEN whois_at IS NULL THEN '2' WHEN web_search_at IS NULL THEN '3' ELSE '1' END AS fase, " + local +
-            " FROM domains" + ult + "WHERE claimed_at > now() - interval '15 minutes' "
+            " FROM domains" + ult + "WHERE claimed_at BETWEEN now() - interval '5 minutes' AND now() "
             " UNION ALL SELECT name, total_queries, online_claimed_at, '4', "
             "   CASE WHEN reanalise_pedida THEN 'pedida' WHEN online_resp IS NOT NULL THEN 'reavaliacao' ELSE 'novo' END, "
             "   extract(epoch from now() - CASE WHEN online_resp IS NOT NULL THEN COALESCE(online_at, first_seen) ELSE first_seen END)::int FROM domains "

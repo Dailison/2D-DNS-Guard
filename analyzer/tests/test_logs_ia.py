@@ -358,9 +358,12 @@ def test_dominio_novo_passa_na_frente_do_backlog_de_reanalise(api):
                   "('backlog-velho.com', 'com', 'NAO_TRABALHO', 'llm', 'qwen3:8b', true, 900), "
                   "('novo-hoje.com.br', 'br', NULL, NULL, NULL, true, 2), "
                   "('suspeito-velho.net', 'net', 'SUSPEITO', 'llm', 'qwen3:8b', true, 5)")
+        # novo de pouco acesso (aberto uma vez): fica atrás dos novos acessados, mas antes de qualquer reanálise
+        c.execute("INSERT INTO domains (name, tld, llm_pending, aguarda_recorrencia, total_queries) VALUES "
+                  "('novo-raro.com', 'com', true, true, 1)")
     with db.conn() as c:
-        ordem = [classifier._claim_llm(c)["name"] for _ in range(3)]
-    assert ordem == ["suspeito-velho.net", "novo-hoje.com.br", "backlog-velho.com"], ordem
+        ordem = [classifier._claim_llm(c)["name"] for _ in range(4)]
+    assert ordem == ["novo-hoje.com.br", "novo-raro.com", "suspeito-velho.net", "backlog-velho.com"], ordem
 
 
 def test_cada_reforco_com_o_seu_modelo_e_rodizio(monkeypatch):

@@ -267,13 +267,13 @@ def _claim_llm(c) -> dict | None:
              SELECT id FROM domains WHERE llm_pending AND NOT locked
                AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
                AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
-             ORDER BY aguarda_recorrencia ASC, (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC, (model IS NULL) DESC,
+             ORDER BY (model IS NULL) DESC, aguarda_recorrencia ASC, (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC,
                total_queries DESC
              LIMIT 1 FOR UPDATE SKIP LOCKED)
            RETURNING *""").fetchone()
-    # (27/09) nunca passou pela IA (domínio novo) vai antes do backlog de reanálise; os de pouco acesso
-    # (aguarda_recorrencia) ficam por último: só quando a fila ativa esvazia (pedido do usuário: todo site acaba
-    # numa lista, sem atrasar o que as pessoas acessam de fato)
+    # (27/09) TODO domínio novo (nunca passou pela IA) vem antes do backlog de reanálise — inclusive os de pouco
+    # acesso (aguarda_recorrencia), que só ficam atrás dos novos acessados de verdade (pedido do usuário: com ~750
+    # reanálises na fila, sites novos abertos uma vez esperavam ~9 h)
 
 
 def phase_b(client: OllamaClient, cats: list[dict]) -> str:

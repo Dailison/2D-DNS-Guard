@@ -726,5 +726,5 @@ def grupos_da_empresa(nome_empresa: str) -> list[str]:
 
 
 def msg_liberado(grupos: list[str]) -> str:
-    return (f" Liberado agora em {', '.join(rotulo_grupo(g) for g in grupos)}; a lista atualiza em até 1 h." if grupos
-            else " O DNS atualiza em até 1 h.")
+    return (f" Liberado agora em {', '.join(rotulo_grupo(g) for g in grupos)}; a lista atualiza em até 2 min." if grupos
+            else " O DNS atualiza em até 2 min.")

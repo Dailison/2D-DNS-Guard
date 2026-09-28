@@ -222,7 +222,7 @@ def decisoes_lote():
                 for n in nomes:
                     _registrar_global(n, "blocked")
             current_app.logger.info("DNS: %s pôs %s nas listas %s (decisão em lote)", _quem(), nomes, listas)
-            flash(f"{len(nomes)} domínio(s) nas listas: {', '.join(rot[c] for c in listas)} (vale no DNS em até 1 h).", "ok")
+            flash(f"{len(nomes)} domínio(s) nas listas: {', '.join(rot[c] for c in listas)} (vale no DNS em até 2 min).", "ok")
         elif acao == "sugerida":
             por_cat: dict[str, list] = {}
             for s in request.form.getlist("sug"):
@@ -241,7 +241,7 @@ def decisoes_lote():
                     for n in nomes:
                         _registrar_global(n, "blocked")
             current_app.logger.info("DNS: %s pôs nas listas sugeridas: %s", _quem(), {c: [n for _, n in v] for c, v in por_cat.items()})
-            flash("Nas listas sugeridas: " + "; ".join(f"{rot[c]} ({len(v)})" for c, v in por_cat.items()) + " — vale no DNS em até 1 h.", "ok")
+            flash("Nas listas sugeridas: " + "; ".join(f"{rot[c]} ({len(v)})" for c, v in por_cat.items()) + " — vale no DNS em até 2 min.", "ok")
         elif acao == "liberar":
             for t, n in itens:
                 _registrar_decisao(t, n, "allowed")

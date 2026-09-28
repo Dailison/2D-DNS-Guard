@@ -153,7 +153,7 @@ def bloqueios_rem_todos():
             flash("Nenhuma entrada encontrada nas listas de bloqueio.", "erro")
         else:
             alvo = ", ".join(doms) if len(doms) <= 3 else f"{len(doms)} domínios"
-            flash(f"{alvo}: fora de {rem} lista(s) de bloqueio (vale no DNS em até 1 h).", "ok")
+            flash(f"{alvo}: fora de {rem} lista(s) de bloqueio (vale no DNS em até 2 min).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao remover de todas as listas: {e}", "erro")
     if next_local(voltar):  # veio da tela de logs: volta pra ela
@@ -534,7 +534,7 @@ def listas_lote_dominios():
         if acao == "tirar_wl":
             api.post("/whitelist-remover", {"domains": doms, "by": quem})
             current_app.logger.info("DNS: %s tirou %s da whitelist", quem, doms)
-            return _json(True, f"{len(doms)} domínio(s) fora da whitelist (voltam a valer as listas de bloqueio; o DNS atualiza em até 1 h).")
+            return _json(True, f"{len(doms)} domínio(s) fora da whitelist (voltam a valer as listas de bloqueio; o DNS atualiza em até 2 min).")
         if acao == "aprovar":
             if cat not in rot:
                 return _json(False, "lista inválida")
@@ -554,7 +554,7 @@ def listas_lote_dominios():
             movidos = [x for ds in (r.get("movidos") or {}).values() for x in ds]
             if movidos:
                 _fim_excecao(movidos)
-            fim = _libera_agora(r.get("tirados") or [], antes) if r.get("tirados") else " O DNS atualiza em até 1 h."
+            fim = _libera_agora(r.get("tirados") or [], antes) if r.get("tirados") else " O DNS atualiza em até 2 min."
             return _json(True, "Sugestões aprovadas: " + "; ".join(partes or ["nada a fazer"]) + "." + fim)
         if acao in ("mover", "tirar"):
             if cat not in rot:
@@ -569,7 +569,7 @@ def listas_lote_dominios():
             if acao == "tirar":
                 return _json(True, f"{len(doms)} domínio(s) fora da lista {rot[cat]} (decisão: manter liberado)." + _libera_agora(doms, antes))
             _fim_excecao(doms)
-            return _json(True, f"{len(doms)} domínio(s) movidos de {rot[cat]} para {', '.join(rot[c] for c in para)}. O DNS atualiza em até 1 h.")
+            return _json(True, f"{len(doms)} domínio(s) movidos de {rot[cat]} para {', '.join(rot[c] for c in para)}. O DNS atualiza em até 2 min.")
         if acao == "wl":
             wl = (d.get("para") or [None])[0]
             rot_wl = dict(dnslib.CATEGORIAS_WHITELIST)
@@ -587,7 +587,7 @@ def listas_lote_dominios():
             for x in doms:
                 _decisao_global(x, "blocked")
             current_app.logger.info("DNS: %s pôs %s nas listas %s", quem, doms, para)
-            return _json(True, f"{len(doms)} domínio(s) nas listas {', '.join(rot[c] for c in para)}. O DNS atualiza em até 1 h.")
+            return _json(True, f"{len(doms)} domínio(s) nas listas {', '.join(rot[c] for c in para)}. O DNS atualiza em até 2 min.")
         return _json(False, "ação inválida")
     except Exception as e:  # noqa: BLE001
         return _json(False, f"Falha: {e}")
@@ -607,7 +607,7 @@ def _libera_agora(doms, antes) -> str:
     try:
         return dnslib.msg_liberado(dnslib.liberar_agora(doms, antes, admin_atual().email))
     except Exception as e:  # noqa: BLE001
-        return f" O DNS atualiza em até 1 h (não consegui liberar na hora: {e})."
+        return f" O DNS atualiza em até 2 min (não consegui liberar na hora: {e})."
 
 
 def _fim_excecao(doms) -> None:
@@ -625,7 +625,7 @@ def lista_aceitar():
     cat = request.form.get("cat", "")
     try:
         r = api.post(f"/listas/{quote(cat, safe='')}/aceitar?by={quote(admin_atual().email)}")
-        flash(f"Lista aceita com {r.get('dominios')} domínios; o DNS baixa a versão nova em até 1 h.", "ok")
+        flash(f"Lista aceita com {r.get('dominios')} domínios; o DNS baixa a versão nova em até 2 min.", "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")
     return redirect(url_for("admin.listas_categoria", cat=cat))
@@ -669,7 +669,7 @@ def listas_categoria_add():
         _fim_excecao([dom])
         _decisao_global(dom, "blocked")
         current_app.logger.info("DNS: %s pôs %s na lista %s", admin_atual().email, dom, cat)
-        flash(f"{dom} entrou na lista {cat}. O Technitium atualiza em até 1 h.", "ok")
+        flash(f"{dom} entrou na lista {cat}. O Technitium atualiza em até 2 min.", "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")
     return redirect(url_for("admin.listas_categoria", cat=cat))
@@ -743,7 +743,7 @@ def empresa_politica(tid):
                                                            "services_blocked": d.get("blocked") or [], "by": admin_atual().email})
         r = pol.sincronizar()
         current_app.logger.info("DNS: %s: política %s = %s / %s", admin_atual().email, scope, d.get("lists"), d.get("services"))
-        return _json(True, "Salvo e aplicado no DNS (listas valem em até 1 h; exceções na hora).", redes=r["redes"])
+        return _json(True, "Salvo e aplicado no DNS (listas valem em até 2 min; exceções na hora).", redes=r["redes"])
     except Exception as e:  # noqa: BLE001
         return _json(False, f"Falha: {e}")
 
@@ -808,7 +808,7 @@ def dominio_listas():
         current_app.logger.info("DNS: %s: %s -> listas %s", admin_atual().email, doms, quer)
         alvo = doms[0] if len(doms) == 1 else f"{len(doms)} domínios"
         return _json(True, f"{alvo}: " + (", ".join(rot[c] for c in quer) if quer else "fora de todas as listas (manter liberado)")
-                     + "." + (_libera_agora(doms, antes) if antes else " O DNS atualiza em até 1 h."))
+                     + "." + (_libera_agora(doms, antes) if antes else " O DNS atualiza em até 2 min."))
     except Exception as e:  # noqa: BLE001
         return _json(False, f"Falha: {e}")
 
@@ -956,7 +956,7 @@ def servico_dominios(slug):
         else:
             doms = [x.strip() for x in (request.form.get("dominio") or "").replace(",", "\n").splitlines() if x.strip()]
             r = api.post(f"/liberacao/{quote(slug, safe='')}/dominios", {"domains": doms, "by": admin_atual().email})
-            flash(f"{r.get('dominios', 0)} domínio(s) adicionado(s). Vale no DNS em até 1 h.", "ok")
+            flash(f"{r.get('dominios', 0)} domínio(s) adicionado(s). Vale no DNS em até 2 min.", "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")
     return _volta_servico(slug)

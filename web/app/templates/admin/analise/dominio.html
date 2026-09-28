@@ -97,7 +97,7 @@
         <div style="margin:.3rem 0;font-size:.9rem">⛔ Na <a href="{{ url_for('admin.listas_categoria', cat=l.cat) }}"><b>lista {{ l.rot }}</b></a>
           (<code>{{ l.entrada }}</code>{% if l.por %}, {{ l.por }}{% endif %}){% if l.da_empresa %} <span class="tag" style="font-size:.7rem">vale para {{ tenant.name if tenant else 'esta empresa' }}</span>{% endif %} — aplicada por:
           {% if l.empresas %}<b>{{ l.empresas|join(', ') }}</b>{% else %}<b>nenhuma empresa</b> (não bloqueia){% endif %}
-          <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline;margin-left:.3rem" onsubmit="return confirm('Tirar {{ l.entrada }} da lista {{ l.rot }}? Fica registrado como “manter liberado”; vale para todas as empresas que aplicam a lista (em até 1 h).')">
+          <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline;margin-left:.3rem" onsubmit="return confirm('Tirar {{ l.entrada }} da lista {{ l.rot }}? Fica registrado como “manter liberado”; vale para todas as empresas que aplicam a lista (em até 2 min).')">
             <input type="hidden" name="cat" value="{{ l.cat }}"><input type="hidden" name="dominio" value="{{ l.entrada }}">
             <input type="hidden" name="voltar" value="{{ request.full_path }}">
             <button style="padding:.1rem .5rem;font-size:.78rem;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer">🔓 tirar da lista</button>
@@ -115,7 +115,7 @@
         <script>(function () { const nas = {{ nas|tojson }}, sug = {{ (dm.lista_ia or '')|tojson }};
           document.querySelectorAll("#fListasG .lx-sec input").forEach(i => { i.checked = nas.includes(i.value);
             i.closest("label").querySelector(".lx-sug").hidden = i.value !== sug; }); })();</script>
-        <button type="button" class="danger" id="bListas" title="Vale para todas as empresas que aplicam cada lista (no DNS em até 1 h); nenhuma marcada = manter liberado.">Salvar listas</button>
+        <button type="button" class="danger" id="bListas" title="Vale para todas as empresas que aplicam cada lista (no DNS em até 2 min); nenhuma marcada = manter liberado.">Salvar listas</button>
       </form>
       <script>
       document.getElementById("bListas").addEventListener("click", async (ev) => {

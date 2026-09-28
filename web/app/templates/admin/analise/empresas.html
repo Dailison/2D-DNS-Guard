@@ -163,7 +163,7 @@ II 10.52.0.0/16"></textarea>
     {% endif %}
   </div>
   <div class="previa" id="pPrev" hidden></div>
-  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = listas de risco. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 1 h; as exceções, na hora.</p>
+  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = listas de risco. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 2 min; as exceções, na hora.</p>
   <div style="display:flex;gap:.5rem;justify-content:flex-end">
     <button type="button" onclick="document.getElementById('dlgPol').close()">Cancelar</button>
     <button type="button" class="primary" id="pSalvar">Salvar e aplicar</button>

@@ -30,7 +30,7 @@
     <div class="mut" style="font-size:.85rem;flex:1;min-width:260px">
       {% if bloqueia %}<b style="color:#b91c1c">Bloqueado sozinho por:</b> {{ bloqueia|join(', ') }}<br>{% endif %}
       <b style="color:#16a34a">Liberado por:</b> {{ libera|join(', ') if libera else 'nenhuma empresa' }}
-      <br>O DNS baixa a lista de novo a cada 1 h.
+      <br>O DNS baixa a lista de novo a cada minuto.
     </div>
     <div style="display:flex;gap:.4rem">
       <button type="button" class="primary" onclick="document.getElementById('dlgLib').showModal()">Empresas que liberam…</button>

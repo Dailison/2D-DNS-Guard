@@ -253,7 +253,7 @@
     if (acao === "tirar") {
       if (confirm(`Tirar ${q} da lista ${nomeCat}? Fica registrado como “manter liberado” e vale na hora.`)) envia("tirar", [], doms);
     } else if (acao === "tirar_wl") {
-      if (confirm(`Tirar ${q} da whitelist? Voltam a valer as listas de bloqueio (o DNS atualiza em até 1 h).`)) envia("tirar_wl", [], doms);
+      if (confirm(`Tirar ${q} da whitelist? Voltam a valer as listas de bloqueio (o DNS atualiza em até 2 min).`)) envia("tirar_wl", [], doms);
     } else if (acao === "aprovar") {
       if (n === 1 || confirm(`Aprovar o parecer da IA para ${q}? Cada um vai para a lista recomendada (bloqueio ou whitelist).`)) envia("aprovar", [], doms);
     } else if (acao === "wl") {

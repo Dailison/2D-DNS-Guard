@@ -410,3 +410,19 @@ def test_etapas_so_na_gpu_rapida_e_workers_por_reforco(monkeypatch):
         assert r.cliente().url == "http://pc1:11434", "a preferida fora: outro reforço"
     finally:
         config._settings = None
+
+
+def test_reservas_orfas_voltam_a_fila_ao_iniciar(api):
+    """27/09: reinício no meio de uma análise deixava o domínio "em análise" por 30 min (reserva órfã)."""
+    from dnsanalyzer import classifier, db
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, tld, llm_pending, claimed_at) VALUES "
+                  "('orfa-fase1.com', 'com', true, now() - interval '3 minutes')")
+        c.execute("INSERT INTO domains (name, tld, lista_claimed_at, online_claimed_at) VALUES "
+                  "('orfa-lista.com', 'com', now() - interval '1 minute', now() + interval '3 hours')")
+    n, m = classifier.liberar_reservas_orfas()
+    with db.conn() as c:
+        r = {x["name"]: x for x in c.execute("SELECT name, claimed_at, lista_claimed_at, online_claimed_at FROM domains "
+                                             "WHERE name IN ('orfa-fase1.com', 'orfa-lista.com')")}
+    assert n >= 1 and m >= 1 and r["orfa-fase1.com"]["claimed_at"] is None and r["orfa-lista.com"]["lista_claimed_at"] is None
+    assert r["orfa-lista.com"]["online_claimed_at"] is not None, "reserva da IA online (rodada externa) fica"

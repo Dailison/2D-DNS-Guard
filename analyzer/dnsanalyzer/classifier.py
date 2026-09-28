@@ -670,11 +670,25 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
             time.sleep(30)
 
 
+def liberar_reservas_orfas() -> tuple[int, int]:
+    """Ao iniciar: as reservas da fase 1 e da pergunta de lista são deste processo — as que existem ao subir ficaram
+    de uma análise que morreu no reinício (27/09: cloudflareresolve.com e tenjin.com ficaram 30 min "em análise"
+    depois de um deploy). As da IA online não entram (a rodada externa reserva por horas; após resposta inválida a
+    espera de 10 min é de propósito)."""
+    with db.conn() as c:
+        n = c.execute("UPDATE domains SET claimed_at = NULL WHERE claimed_at > now() - interval '30 minutes'").rowcount
+        m = c.execute("UPDATE domains SET lista_claimed_at = NULL WHERE lista_claimed_at > now() - interval '10 minutes'").rowcount
+    if n or m:
+        log.info("reservas órfãs devolvidas à fila ao iniciar: %d da fase 1, %d da pergunta de lista", n, m)
+    return n, m
+
+
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
     db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
                     + cfg.whois_workers)
+    liberar_reservas_orfas()
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:

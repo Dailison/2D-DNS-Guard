@@ -1244,3 +1244,6 @@ def test_busca_em_todas_as_listas(env):
     assert por["loja.qrofertas.com.br"]["listas"] == ["compras"] and "qrofertas.com.br" not in por, "whitelist não entra"
     assert "qrofertas.net" not in por, "Para revisar (fila antiga) não entra"
     assert env.get("/listas-busca", params={"q": "qr"}, headers=H).json() == [], "mínimo 3 letras"
+    sub = env.get("/listas-busca", params={"q": "cdn.qrofertas.com"}, headers=H).json()   # subdomínio: acha o pai que bloqueia
+    assert sub[0]["domain"] == "qrofertas.com" and sub[0]["pai"] and sub[0]["listas"] == ["ameaca", "apostas"], sub
+    assert not j[0]["pai"]

@@ -42,7 +42,7 @@
     <tbody>
     {% for a in achados %}
       <tr>
-        <td><a href="{{ url_for('admin.dominios', q=a.domain) }}">{{ a.domain }}</a></td>
+        <td><a href="{{ url_for('admin.dominios', q=a.domain) }}">{{ a.domain }}</a>{% if a.pai %} <span class="mut" style="font-size:.78rem">(domínio-pai: cobre {{ busca }})</span>{% endif %}</td>
         <td>{% for l in a.listas %}<a href="{{ url_for('admin.listas_categoria', cat=l, q=a.domain) }}" style="display:inline-block;margin:0 .25rem .2rem 0;padding:.05rem .45rem;border:1px solid var(--bd);border-radius:6px;text-decoration:none;font-size:.8rem">{{ rot.get(l, l) }}</a>{% endfor %}</td>
         <td class="mut" style="font-size:.85rem">{{ a.classification or '—' }}</td>
         <td class="num">{{ a.total_queries }}</td>

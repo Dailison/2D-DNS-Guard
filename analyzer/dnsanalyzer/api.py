@@ -1186,7 +1186,8 @@ def listas_dominios(cats: list[str] = Query(default=[])):
 @app.get("/listas-busca", dependencies=[Depends(auth)])
 def listas_busca(q: str, limit: int = Query(100, le=500)):
     """Procura o domínio (ou parte dele) em TODAS as listas de bloqueio (página Domínios bloqueados):
-    [{domain, listas, classification, total_queries}], exatos primeiro."""
+    [{domain, listas, classification, total_queries, pai}], exatos primeiro. Subdomínio também acha a entrada do
+    domínio-pai que o bloqueia (pai = true; 28/09: cdn.qrofertas.com, bloqueado por qrofertas.com em Compras)."""
     termo = q.strip().lower().rstrip(".")
     if len(termo) < 3:
         return []
@@ -1194,10 +1195,12 @@ def listas_busca(q: str, limit: int = Query(100, le=500)):
     with db.conn() as c:
         return c.execute(
             "SELECT l.domain, array_agg(l.category ORDER BY l.category) AS listas, d.classification, "
-            "       coalesce(d.total_queries, 0) AS total_queries "
+            "       coalesce(d.total_queries, 0) AS total_queries, right(%(t)s, length(l.domain) + 1) = '.' || l.domain AS pai "
             "FROM category_lists l LEFT JOIN domains d ON d.name = l.domain "
-            "WHERE l.domain LIKE %(p)s AND l.category <> 'para_revisar' GROUP BY l.domain, d.classification, d.total_queries "
-            "ORDER BY (l.domain = %(t)s) DESC, (l.domain LIKE %(fim)s) DESC, coalesce(d.total_queries, 0) DESC, l.domain LIMIT %(n)s",
+            "WHERE (l.domain LIKE %(p)s OR right(%(t)s, length(l.domain) + 1) = '.' || l.domain) AND l.category <> 'para_revisar' "
+            "GROUP BY l.domain, d.classification, d.total_queries "
+            "ORDER BY (l.domain = %(t)s OR right(%(t)s, length(l.domain) + 1) = '.' || l.domain) DESC, (l.domain LIKE %(fim)s) DESC, "
+            "         coalesce(d.total_queries, 0) DESC, l.domain LIMIT %(n)s",
             {"p": padrao, "t": termo, "fim": "%." + termo, "n": limit}).fetchall()
 
 

@@ -232,6 +232,11 @@ setx OLLAMA_KEEP_ALIVE 60m
 setx OLLAMA_NUM_PARALLEL 1
 setx OLLAMA_MAX_LOADED_MODELS 1
 setx OLLAMA_CONTEXT_LENGTH 8192
+# GPU pequena que também mostra a tela (GTX 1060): meta de VRAM livre do cálculo de camadas, em MiB.
+# O modelo de rascunho e os buffers (~1,85 GB) carregam DEPOIS do cálculo; com o padrão sobravam ~600 MB
+# e a carga estourava (CUDA out of memory) quando o Edge/WhatsApp pediam VRAM. 2600 = 15 de 31 camadas
+# na GPU e ~1 GB livre. (OLLAMA_GPU_OVERHEAD não tem efeito no Ollama 0.34.)
+setx LLAMA_ARG_FIT_TARGET 2600
 # firewall (admin): só a VM do analisador fala com o Ollama
 New-NetFirewallRule -DisplayName "Ollama (analisador DNS)" -Direction Inbound -Protocol TCP -LocalPort 11434 -RemoteAddress 10.100.10.4 -Action Allow
 ```
@@ -246,8 +251,13 @@ OLLAMA_EXTRA_URLS=<os de antes>,http://10.100.20.6:11434=gemma4:26b
 LLM_EXTRA_WORKERS_URL=<os de antes>,http://10.100.20.6:11434=1
 ```
 
-Deixe a GPU lenta fora de `OLLAMA_ETAPAS_URLS` (fases 2/3 e pergunta de lista), para as fases não
-ficarem presas nela. Medido na GTX 1060 em 29/09 com a pergunta real da fase 1 (~5,2 mil tokens):
+```
+OLLAMA_ETAPAS_URLS=http://10.100.50.201:11434
+```
+
+Assim a GPU lenta fica fora das fases 2/3, da pergunta de lista e da investigação (só entra nelas se
+a RX 9070 cair), e as fases não ficam presas nela. Configurado assim na VM em 29/09 (cópia anterior:
+`analyzer.env.bak-20260929-thor`). Medido na GTX 1060 em 29/09 com a pergunta real da fase 1 (~5,2 mil tokens):
 carga do modelo 63 s (uma vez por hora ociosa), 34 s sem cache, 13-16 s com cache. O primeiro pedido
 depois da carga pode passar dos 90 s de `LLM_EXTRA_TIMEOUT_SECONDS`: volta à fila e o seguinte já pega
 o modelo carregado.

@@ -216,7 +216,8 @@ def fase(client: OllamaClient) -> str:
 
 
 def lista_do_catalogo(d: dict, fase_n: int = 1) -> bool:
-    """Catálogo com lista fixa (amazonaws.com, cloudfront.net -> wl:infraestrutura): grava e aplica sem perguntar à IA.
+    """Catálogo com lista fixa (amazonaws.com, cloudfront.net, cloudfunctions.net -> wl:infraestrutura): grava e aplica
+    sem perguntar à IA.
     Segue o fluxo normal: ameaça (SUSPEITO/MALICIOSO) e quem já está numa lista de bloqueio (bucket/distribuição que a
     IA ou uma pessoa identificou como apostas, adulto, ameaça… — não desbloqueia)."""
     e = catalog.match(d["name"])

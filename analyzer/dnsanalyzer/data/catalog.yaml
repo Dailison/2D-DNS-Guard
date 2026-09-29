@@ -82,6 +82,9 @@ entries:
   - {suffix: amazonaws.com,        classification: TRABALHO, topic: "Amazon Web Services (AWS)", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
   - {suffix: amazonaws.com.cn,     classification: TRABALHO, topic: "Amazon Web Services (AWS China)", work: 60, category: infraestrutura, lista: "wl:infraestrutura"}
   - {suffix: cloudfront.net,       classification: TRABALHO, topic: "Amazon CloudFront (CDN)", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
+  # Google Cloud Functions (pedido do usuário 29/09): o mesmo tratamento da AWS — sem IA, whitelist Infraestrutura, NÃO
+  # protegido (função de terceiro em feed de ameaça de alta confiança vira MALICIOSO; quem está numa lista de bloqueio fica)
+  - {suffix: cloudfunctions.net,   classification: TRABALHO, topic: "Google Cloud Functions", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
 
   # ---------------- Governo e bancos (Brasil)
   - {suffix: gov.br,               classification: TRABALHO, topic: "Governo", work: 90, protected: true}

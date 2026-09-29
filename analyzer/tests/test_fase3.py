@@ -474,3 +474,27 @@ def test_whitelist_do_dominio_ignora_pai_nao_publicado(api):
     assert [(x["category"], x["domain"], x["pai"]) for x in r] == [("essenciais", "gov.br", True)], r
     r = api.get("/whitelist-dominio/QuizTeste.com.br.", headers=H).json()
     assert [(x["category"], x["pai"], x["publicar"]) for x in r] == [("sem_resposta", False, False)], r
+
+
+# ---------------------------------------------------------------- catálogo com lista fixa: Google Cloud Functions
+def test_cloudfunctions_vai_para_a_whitelist_sem_ia(api):
+    """29/09: cloudfunctions.net como amazonaws.com — a pergunta de lista grava wl:infraestrutura pelo catálogo, sem IA;
+    quem já está numa lista de bloqueio (função de jogo) fica onde está; SUSPEITO/MALICIOSO segue o fluxo normal."""
+    from dnsanalyzer import db, listas_ia
+    with db.conn() as c:
+        ids = {}
+        for n, cls in (("us-central1-loja-ab12.cloudfunctions.net", "TRABALHO"), ("us-central1-jogo-prod.cloudfunctions.net", "TRABALHO"),
+                       ("us-central1-susp-99.cloudfunctions.net", "SUSPEITO")):
+            ids[n] = c.execute("INSERT INTO domains (name, kind, classification, category, classified_by, analyzed_at, total_queries) "
+                               "VALUES (%s, 'public', %s, 'infraestrutura', 'catalog', now(), 5) RETURNING id", (n, cls)).fetchone()["id"]
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('jogos', 'us-central1-jogo-prod.cloudfunctions.net', 'IA automática (jogos)')")
+    assert listas_ia.sugerir(None, ids["us-central1-loja-ab12.cloudfunctions.net"]) == "done", "sem cliente de IA: não foi chamada"
+    for n in ("us-central1-jogo-prod.cloudfunctions.net", "us-central1-susp-99.cloudfunctions.net"):
+        assert not listas_ia.lista_do_catalogo({"id": ids[n], "name": n, "classification": "SUSPEITO" if "susp" in n else "TRABALHO"})
+    with db.conn() as c:
+        wl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM whitelist_domains WHERE domain LIKE '%%.cloudfunctions.net'")}
+        bl = {r["domain"]: r["category"] for r in c.execute("SELECT domain, category FROM category_lists WHERE domain LIKE '%%.cloudfunctions.net'")}
+        d = c.execute("SELECT lista_wl, lista_fonte, lista_conf FROM domains WHERE id = %s", (ids["us-central1-loja-ab12.cloudfunctions.net"],)).fetchone()
+    assert wl == {"us-central1-loja-ab12.cloudfunctions.net": "infraestrutura"}, wl
+    assert bl == {"us-central1-jogo-prod.cloudfunctions.net": "jogos"}, bl
+    assert d["lista_fonte"] == "catalogo" and d["lista_conf"] == 1.0 and d["lista_wl"] == "infraestrutura", d

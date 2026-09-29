@@ -173,7 +173,8 @@ def load_settings() -> Settings:
         local_decide_models=_list("LOCAL_DECIDE_MODELS", "gemma4:26b,gemma4:31b"),
         llm_vm_reserva=_bool(os.environ.get("LLM_VM_RESERVA"), True),
         llm_timeout=_int("LLM_TIMEOUT_SECONDS", 600),
-        llm_num_ctx=_int("LLM_NUM_CTX", 4096),
+        # (29/09) a pergunta da etapa única tem ~5,2 mil tokens: 4096 cortava o começo (kwai.com saía MALICIOSO)
+        llm_num_ctx=_int("LLM_NUM_CTX", 8192),
         llm_num_thread=_int("LLM_NUM_THREAD", 0),
         llm_keep_alive=os.environ.get("LLM_KEEP_ALIVE", "60m"),
         # análises simultâneas (combine com OLLAMA_NUM_PARALLEL). Em CPU sem GPU não ganhou nada

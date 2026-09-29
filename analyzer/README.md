@@ -209,7 +209,48 @@ sudo systemctl start dnsanalyzer-collector dnsanalyzer-classifier
 
 Override recomendado do Ollama (`/etc/systemd/system/ollama.service.d/override.conf`):
 `OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_KEEP_ALIVE=60m`, `OLLAMA_NUM_PARALLEL=1`,
-`OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_CONTEXT_LENGTH=4096`.
+`OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_CONTEXT_LENGTH=8192`.
+
+### Reforço com GPU (PC da rede)
+
+Um PC com GPU acelera a fila: a VM o usa enquanto ele responde e volta sozinha para a própria IA
+quando ele cai (`OLLAMA_EXTRA_URLS`, checado a cada 60 s). Use o **mesmo modelo** da VM decidir
+(`LOCAL_DECIDE_MODELS`, hoje `gemma4:26b`): com outro modelo as respostas dele não decidem sozinhas.
+
+| PC | GPU | Análises simultâneas |
+|---|---|---|
+| 10.100.50.201 | AMD RX 9070 16 GB | 4 |
+| 10.100.20.6 (THOR) | GTX 1060 6 GB + 32 GB RAM (camadas em CPU) | 1 |
+
+No PC (Windows, Ollama instalado):
+
+```powershell
+ollama pull gemma4:26b
+# variáveis do usuário (o app do Ollama as lê ao abrir; reinicie o app depois)
+setx OLLAMA_HOST 0.0.0.0:11434
+setx OLLAMA_KEEP_ALIVE 60m
+setx OLLAMA_NUM_PARALLEL 1
+setx OLLAMA_MAX_LOADED_MODELS 1
+setx OLLAMA_CONTEXT_LENGTH 8192
+# firewall (admin): só a VM do analisador fala com o Ollama
+New-NetFirewallRule -DisplayName "Ollama (analisador DNS)" -Direction Inbound -Protocol TCP -LocalPort 11434 -RemoteAddress 10.100.10.4 -Action Allow
+```
+
+Desative as regras "ollama.exe" que o Windows cria no primeiro uso (liberam a porta para qualquer
+IP; o Ollama não tem senha). O PC não pode suspender, e o IP precisa ser fixo (reserva no DHCP).
+
+Na VM (`/etc/2d-dnsanalyzer/analyzer.env`), acrescente o PC e reinicie o classificador:
+
+```
+OLLAMA_EXTRA_URLS=<os de antes>,http://10.100.20.6:11434=gemma4:26b
+LLM_EXTRA_WORKERS_URL=<os de antes>,http://10.100.20.6:11434=1
+```
+
+Deixe a GPU lenta fora de `OLLAMA_ETAPAS_URLS` (fases 2/3 e pergunta de lista), para as fases não
+ficarem presas nela. Medido na GTX 1060 em 29/09 com a pergunta real da fase 1 (~5,2 mil tokens):
+carga do modelo 63 s (uma vez por hora ociosa), 34 s sem cache, 13-16 s com cache. O primeiro pedido
+depois da carga pode passar dos 90 s de `LLM_EXTRA_TIMEOUT_SECONDS`: volta à fila e o seguinte já pega
+o modelo carregado.
 
 No console (k3s, namespace `dns-guard`): `ANALYZER_URL` no ConfigMap `dns-guard-config` e
 `ANALYZER_TOKEN` no Secret `dns-guard-secrets` (= `API_TOKEN` do analyzer.env).

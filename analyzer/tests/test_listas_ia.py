@@ -1326,7 +1326,10 @@ def test_ia_chat_repassa_ao_ollama_local(env, monkeypatch):
     assert r.json()["content"] == "Olá!" and r.json()["completion_tokens"] == 3
     j = enviado["json"]
     assert enviado["url"] == f"{cfg.ollama_url}/api/chat" and j["think"] is False and j["keep_alive"] == cfg.llm_keep_alive
-    assert j["options"] == {"num_ctx": cfg.llm_num_ctx, "num_predict": 600} and j["model"] == cfg.ollama_model
+    from dnsanalyzer.llm import OllamaClient
+    cli = OllamaClient()
+    esperado = {"num_ctx": cli.num_ctx, "num_predict": 600, **({"num_thread": cli.num_thread} if cli.num_thread else {})}
+    assert j["options"] == esperado and j["model"] == cli.model, j["options"]   # mesmas opções de carga do classificador
     assert env.post("/ia/chat", json={"messages": [{"role": "x", "content": "a"}]}, headers=H).status_code == 400
 
     def lento(*a, **k):

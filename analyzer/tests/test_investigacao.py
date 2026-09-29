@@ -129,6 +129,7 @@ def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600):
     monkeypatch.setattr(inv, "cnpjs", lambda c, ns: [])
     monkeypatch.setattr(inv, "subdominios", lambda ns, http: [])
     monkeypatch.setattr(inv, "paginas_dos_resultados", lambda *a: [])
+    monkeypatch.setattr(inv, "tem_visao", lambda c: False)
     passos = iter([{"hipotese": "ERP", "confianca": 0.6, "pronto": False, "buscas": ["x erp"], "paginas": [],
                     "subdominios": [], "cnpjs": []},
                    {"hipotese": "ERP X", "confianca": 0.9, "pronto": True, "buscas": [], "paginas": [],
@@ -201,3 +202,105 @@ def test_paginas_dos_resultados_nao_repete_nem_abre_o_proprio_dominio(monkeypatc
 
 def test_busca_com_outra_pontuacao_conta_como_repetida():
     assert inv._chave('"dnofd.com" tracking') == inv._chave("'dnofd.com'  \"Tracking\"") == "dnofd.com tracking"
+
+
+def test_evidencias_de_rastreadores_urlscan_e_virustotal():
+    ev = inv.novas_evidencias(0, {
+        "rastreadores": {"ghostery": {"dominio": "online-metrix.net", "servico": "ThreatMetrix", "empresa": "LexisNexis",
+                                      "site": "https://www.lexisnexis.com", "categoria": "Utilities", "descricao": ""},
+                         "tracker_radar": {"empresa": "RELX Group", "site": None, "categorias": ["Fraud Prevention"],
+                                           "sites_que_carregam": 1200}},
+        "urlscan_detalhe": {"paginas": ["www.bancobmg.com.br", "acesso.pagbank.com.br"],
+                            "iniciadores": ["https://www.bancobmg.com.br/static/app.js"],
+                            "pistas": [{"script": "https://www.bancobmg.com.br/static/app.js", "cabecalho": "/*! antifraude v2 */",
+                                        "fornecedores_citados": ["threatmetrix"], "tamanho_kb": 120}]},
+        "virustotal": {"categorias": {"Forcepoint ThreatSeeker": "information technology"}, "maliciosos": 0, "suspeitos": 0,
+                       "total_fornecedores": 94, "reputacao": 0, "tags": [], "registrador": None, "criado": "2023-05-01",
+                       "ranks": {"Majestic": 40000}},
+    })
+    txt = " | ".join(e["text"] for e in ev)
+    assert "ThreatMetrix" in txt and "LexisNexis" in txt and "Fraud Prevention" in txt
+    assert "carregado pelas páginas de acesso.pagbank.com.br, www.bancobmg.com.br" in txt
+    assert "cita fornecedores: threatmetrix" in txt
+    assert "0 de 94 fornecedores" in txt and "information technology" in txt and "Majestic #40000" in txt
+
+
+def test_rastreadores_consulta_ghostery_e_radar(monkeypatch):
+    base = {"domains": {"x.net": "px"}, "patterns": {"px": {"name": "X SDK", "organization": "ox", "category": "utilities"}},
+            "organizations": {"ox": {"name": "Empresa X", "website_url": "https://x.com"}},
+            "categories": {"utilities": {"name": "Utilities"}}}
+    monkeypatch.setattr(inv, "_base_ghostery", lambda cli: base)
+
+    class R:
+        def __init__(self, code, j=None):
+            self.status_code, self._j = code, j
+
+        def json(self):
+            return self._j
+
+    class Cli:
+        pedidos = []
+
+        def get(self, url, **k):
+            self.pedidos.append(url)
+            return R(200, {"owner": {"displayName": "Dono Y", "url": "y.com"}, "categories": ["Analytics"], "sites": 5}) \
+                if url.endswith("/GB/x.net.json") else R(404)
+    out = inv.rastreadores("cdn.x.net", Cli())
+    assert out["ghostery"]["empresa"] == "Empresa X" and out["ghostery"]["dominio"] == "x.net"
+    assert "tracker_radar" not in out   # o radar é consultado pelo nome exato (cdn.x.net): 404 em todas
+    assert inv.rastreadores("x.net", Cli())["tracker_radar"]["empresa"] == "Dono Y"
+    assert inv.rastreadores("nada.com", Cli()) is None
+
+
+def test_evidencia_das_imagens():
+    ev = inv.novas_evidencias(0, {"imagens": {"origens": ["captura de tela (URLScan) de https://x.com/"], "urls": ["u"],
+                                              "olhar": {"descricao": "Página de login com logotipo 'Ecocentauro'", "marca": "Ecocentauro",
+                                                        "tipo_de_site": "portal de clientes/ERP", "idioma": "português",
+                                                        "sinais": [], "confianca": 0.9}}})
+    assert ev[0]["kind"] == "imagem" and "marca lida: Ecocentauro" in ev[0]["text"] and "portal de clientes" in ev[0]["text"]
+
+
+def test_imagens_do_site(monkeypatch):
+    import base64
+    png = b"\x89PNG" + b"\0" * 2000
+    html = ('<html><head><meta property="og:image" content="/share.jpg">'
+            '<link rel="icon" href="/fav.ico"><link rel="apple-touch-icon" href="/touch.png"></head>'
+            '<body><img class="logo" src="/img/logo.png"></body></html>')
+
+    class R:
+        def __init__(self, code, content=b"", ct="", j=None):
+            self.status_code, self.content, self._j = code, content, j
+            self.headers = {"content-type": ct}
+            self.text = content.decode(errors="ignore")
+            self.url = type("U", (), {"host": "x.com"})()
+
+        def json(self):
+            return self._j
+
+    baixadas = []
+
+    class Cli:
+        def get(self, url, **k):
+            baixadas.append(url)
+            if "urlscan.io/api" in url:
+                return R(200, j={"results": [{"task": {"uuid": "abc"}, "page": {"url": "https://x.com/"}}]})
+            if url.endswith(".png") or url.endswith(".jpg") or url.endswith(".ico"):
+                return R(200, png, "image/png")
+            return R(200, html.encode(), "text/html")
+    monkeypatch.setattr(inv, "_endereco_publico", lambda u: True)
+    out = inv.imagens("x.com", Cli(), abre_site=True)
+    assert [o["origem"].split(" (")[0] for o in out] == ["captura de tela", "imagem de compartilhamento", "logotipo da página inicial"]
+    assert out[0]["url"] == "https://urlscan.io/screenshots/abc.png" and out[0]["b64"] == base64.b64encode(png).decode()
+    assert "https://x.com/touch.png" not in baixadas and "https://x.com/fav.ico" not in baixadas   # 3 no máximo; .ico nunca
+    sem_site = inv.imagens("x.com", Cli(), abre_site=False)   # com sinal de ameaça: só a captura pública, sem visitar o site
+    assert len(sem_site) == 1
+
+
+def test_sem_visao_nao_olha(monkeypatch):
+    class Cli:
+        url, model = "http://vm", "modelo-sem-visao"
+    monkeypatch.setattr(inv.httpx, "post", lambda *a, **k: type("R", (), {"status_code": 200, "json": lambda s: {"capabilities": ["completion"]}})())
+    assert not inv.tem_visao(Cli())
+    inv._visao[("http://vm", "gemma4:26b")] = True
+    Cli.model = "gemma4:26b"
+    assert inv.tem_visao(Cli())

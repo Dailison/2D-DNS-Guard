@@ -117,6 +117,8 @@ class Settings:
     investigacao_dias: int             # reinvestiga depois de N dias (ou quando o domínio é reanalisado)
     investigacao_confianca_min: float  # aplica classificação/lista só com esta confiança (e serviço reconhecido)
     investigacao_tempo_max: int        # s por domínio (rodadas extras só enquanto sobra tempo p/ veredito + revisor)
+    urlscan_api_key: str               # fase 6: detalhe das varreduras (script que chama o domínio); vazio = só a busca pública
+    virustotal_api_key: str            # fase 6: categorias de ~10 fornecedores de segurança; vazio = desligado
     online_workers: int
     gemini_api_key: str
     gemini_api_keys_extra: list
@@ -245,6 +247,8 @@ def load_settings() -> Settings:
         investigacao_dias=_int("INVESTIGACAO_DIAS", 14),
         investigacao_confianca_min=float(os.environ.get("INVESTIGACAO_CONFIANCA_MIN") or 0.85),
         investigacao_tempo_max=_int("INVESTIGACAO_TEMPO_MAX", 600),   # 10 min por domínio (pedido do usuário 29/09)
+        urlscan_api_key=os.environ.get("URLSCAN_API_KEY", "").strip(),
+        virustotal_api_key=os.environ.get("VIRUSTOTAL_API_KEY", "").strip(),
         online_workers=max(_int("ONLINE_WORKERS", 6), 1),   # consultas simultâneas (Gemma é lento; a cota é por modelo)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
         # chaves de outros projetos (cada uma com a própria cota por modelo), usadas depois da principal

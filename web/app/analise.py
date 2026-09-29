@@ -85,20 +85,32 @@ def _tid(tenants: list[dict]) -> int | None:
     return TODOS
 
 
-def _days() -> int:
-    d = request.args.get("dias", type=int) or session.get("an_periodo") or 1
-    d = d if d in (1, 7, 30, 90) else 1
+ULTIMA_HORA = 0   # dias=0 = "Última hora" (29/09: só nas telas de computadores; o analisador recebe hours=1)
+
+
+def _days(com_hora: bool = False) -> int:
+    d = request.args.get("dias", type=int)
+    if d is None:
+        d = session.get("an_periodo")
+    validos = (ULTIMA_HORA, 1, 7, 30, 90) if com_hora else (1, 7, 30, 90)
+    if d not in validos:
+        d = 1
     session["an_periodo"] = d
     return d
 
 
-def _ctx(**kw):
+def _periodo_api(dias: int) -> dict:
+    """Parâmetro de período para a API do analisador."""
+    return {"hours": 1} if dias == ULTIMA_HORA else {"days": dias}
+
+
+def _ctx(com_hora: bool = False, **kw):
     tenants = kw.pop("tenants", None) or _tenants()
     tid = _tid(tenants)
     tenant = ({"id": TODOS, "name": "Todos os clientes", "networks": []} if tid == TODOS
               else next((t for t in tenants if t["id"] == tid), None))
-    return {"tenants": tenants, "tid": tid, "tenant": tenant, "todos": tid == TODOS, "dias": _days(),
-            "CLASSES": CLASSES, "CLASS_LABEL": CLASS_LABEL, **kw}
+    return {"tenants": tenants, "tid": tid, "tenant": tenant, "todos": tid == TODOS, "dias": _days(com_hora),
+            "com_hora": com_hora, "CLASSES": CLASSES, "CLASS_LABEL": CLASS_LABEL, **kw}
 
 
 # ------------------------------------------------------------------ status bloqueado/liberado
@@ -536,11 +548,11 @@ def dominio_reanalisar(nome):
 # ------------------------------------------------------------------ computadores
 @analise_bp.get("/computadores")
 def computadores():
-    ctx = _ctx()
+    ctx = _ctx(com_hora=True)
     lista = []
     if ctx["tid"] is not None:
         try:
-            lista = api.get(f"/tenants/{ctx['tid']}/clients", days=ctx["dias"], limit=500)
+            lista = api.get(f"/tenants/{ctx['tid']}/clients", limit=500, **_periodo_api(ctx["dias"]))
         except AnalyzerError as e:
             flash(f"Falha ao listar computadores: {e}", "erro")
     return render_template("admin/analise/computadores.html", lista=lista, aba="computadores", **ctx)
@@ -548,11 +560,11 @@ def computadores():
 
 @analise_bp.get("/computador/<ip>")
 def computador(ip):
-    ctx = _ctx()
+    ctx = _ctx(com_hora=True)
     c = None
     if ctx["tid"] is not None:
         try:
-            c = api.get(f"/tenants/{ctx['tid']}/clients/{ip}", days=ctx["dias"])
+            c = api.get(f"/tenants/{ctx['tid']}/clients/{ip}", **_periodo_api(ctx["dias"]))
         except AnalyzerError as e:
             flash(f"Computador {ip}: {e}", "erro")
     return render_template("admin/analise/computador.html", c=c, ip=ip, aba="computadores", **ctx)

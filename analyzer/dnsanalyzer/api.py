@@ -388,7 +388,17 @@ def _summary(tid: int, days: int) -> dict:
         return out
 
 
-def _clients(c, tid: int, since: datetime, limit: int, ip: str | None = None) -> list[dict]:
+def _periodo(days: int, hours: int | None) -> tuple[datetime, datetime | None]:
+    """(início dos buckets, atividade desde). Em horas (29/09: "última hora" nos computadores): query_agg é por hora
+    cheia, então pega as horas que cobrem a janela e só as linhas com consulta dentro dela (last_seen)."""
+    if not hours:
+        return _since(days), None
+    desde = datetime.now(timezone.utc) - timedelta(hours=max(1, min(hours, 24)))
+    return desde.replace(minute=0, second=0, microsecond=0), desde
+
+
+def _clients(c, tid: int, since: datetime, limit: int, ip: str | None = None,
+             ativo: datetime | None = None) -> list[dict]:
     rows = c.execute(
         f"""
         WITH q AS (
@@ -398,7 +408,8 @@ def _clients(c, tid: int, since: datetime, limit: int, ip: str | None = None) ->
                  count(DISTINCT q.domain_id) FILTER (WHERE v.classification='MALICIOSO') AS mal,
                  max(q.last_seen) AS last_seen
           FROM query_agg q JOIN v_tenant_domains v ON v.tenant_id=q.tenant_id AND v.domain_id=q.domain_id
-          WHERE {_tf('q')} AND q.bucket >= %(s)s GROUP BY q.client_id),
+          WHERE {_tf('q')} AND q.bucket >= %(s)s AND (%(a)s::timestamptz IS NULL OR q.last_seen >= %(a)s)
+          GROUP BY q.client_id),
         nd AS (SELECT cd.client_id, count(*) AS n FROM client_domains cd
                JOIN tenant_domains td ON td.tenant_id=cd.tenant_id AND td.domain_id=cd.domain_id
                WHERE {_tf('cd')} AND cd.first_seen >= now() - interval '24 hours'
@@ -410,7 +421,7 @@ def _clients(c, tid: int, since: datetime, limit: int, ip: str | None = None) ->
         FROM q JOIN clients cl ON cl.id=q.client_id JOIN tenants t ON t.id=cl.tenant_id
         LEFT JOIN nd ON nd.client_id=q.client_id LEFT JOIN al ON al.client_id=q.client_id
         WHERE (%(ip)s::inet IS NULL OR cl.ip = %(ip)s::inet)
-        """, {"t": tid, "s": since, "ip": ip}).fetchall()
+        """, {"t": tid, "s": since, "ip": ip, "a": ativo}).fetchall()
     out = []
     for r in rows:
         share = float(r["nonwork_q"] or 0) / float(r["queries"] or 1)
@@ -645,19 +656,20 @@ def reanalyze(name: str, by: str = ""):
 
 # ------------------------------------------------------------------ computadores e alertas
 @app.get("/tenants/{tid}/clients", dependencies=[Depends(auth)])
-def clients(tid: int, days: int = 7, limit: int = Query(200, le=1000)):
+def clients(tid: int, days: int = 7, hours: Optional[int] = None, limit: int = Query(200, le=1000)):
+    since, ativo = _periodo(days, hours)
     with db.conn() as c:
         _scope(c, tid)
-        return _clients(c, tid, _since(days), limit)
+        return _clients(c, tid, since, limit, ativo=ativo)
 
 
 @app.get("/tenants/{tid}/clients/{ip}", dependencies=[Depends(auth)])
-def client_detail(tid: int, ip: str, days: int = 7):
+def client_detail(tid: int, ip: str, days: int = 7, hours: Optional[int] = None):
     try:
         ipaddress.ip_address(ip)
     except ValueError:
         raise HTTPException(400, "IP inválido")
-    since = _since(days)
+    since, ativo = _periodo(days, hours)
     with db.conn() as c:
         if tid == ALL:   # visão geral: o computador pertence a uma empresa — usa a dela
             r = c.execute("SELECT tenant_id FROM clients WHERE ip=%s::inet ORDER BY last_seen DESC LIMIT 1",
@@ -666,7 +678,7 @@ def client_detail(tid: int, ip: str, days: int = 7):
                 raise HTTPException(404, "computador nunca observado")
             tid = r["tenant_id"]
         _tenant(c, tid)
-        info = _clients(c, tid, since, 1, ip)
+        info = _clients(c, tid, since, 1, ip, ativo)
         if not info:
             raise HTTPException(404, "computador sem consultas no período")
         doms = c.execute(
@@ -674,8 +686,9 @@ def client_detail(tid: int, ip: str, days: int = 7):
             " max(q.last_seen) AS last_seen FROM query_agg q JOIN clients cl ON cl.id=q.client_id "
             "JOIN v_tenant_domains v ON v.tenant_id=q.tenant_id AND v.domain_id=q.domain_id "
             "WHERE q.tenant_id=%s AND cl.ip=%s::inet AND q.bucket >= %s "
+            " AND (%s::timestamptz IS NULL OR q.last_seen >= %s) "
             "GROUP BY v.name, v.classification, v.topic, v.risk_score, v.work_score ORDER BY queries DESC LIMIT 300",
-            (tid, ip, since)).fetchall()
+            (tid, ip, since, ativo, ativo)).fetchall()
         alerts = c.execute("SELECT a.* FROM alerts a JOIN clients cl ON cl.id=a.client_id "
                            "WHERE a.tenant_id=%s AND cl.ip=%s::inet ORDER BY a.created_at DESC LIMIT 50",
                            (tid, ip)).fetchall()

@@ -1298,3 +1298,38 @@ def test_aws_e_cloudfront_vao_p_infraestrutura_sem_ia(env, monkeypatch):
     assert wl == {"meu-bucket.s3.us-east-1.amazonaws.com": "infraestrutura", "d1abcxyz.cloudfront.net": "infraestrutura"}, wl
     assert not bl, "saiu de Não identificados (não é identificação)"
     assert (f["lista_fonte"], f["lista_wl"], f["lista_conf"]) == ("catalogo", "infraestrutura", 1.0)
+
+
+def test_ia_chat_repassa_ao_ollama_local(env, monkeypatch):
+    """Atendente virtual (2D-Suporte -> ERP API -> /ia/chat): repassa ao Ollama local com o num_ctx/keep_alive do
+    classificador (senão recarrega o modelo), sem raciocínio; valida a conversa; exige token."""
+    import httpx
+    from dnsanalyzer import config
+    enviado = {}
+
+    class R:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"message": {"content": " Olá! "}, "done_reason": "stop", "prompt_eval_count": 40, "eval_count": 3}
+
+    def post(url, json=None, timeout=None):
+        enviado.update(url=url, json=json)
+        return R()
+    monkeypatch.setattr(httpx, "post", post)
+    cfg = config.settings()
+    msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "oi"}]
+    assert env.post("/ia/chat", json={"messages": msgs}).status_code == 401
+    r = env.post("/ia/chat", json={"messages": msgs, "max_tokens": 9999}, headers=H)
+    assert r.status_code == 200, r.text
+    assert r.json()["content"] == "Olá!" and r.json()["completion_tokens"] == 3
+    j = enviado["json"]
+    assert enviado["url"] == f"{cfg.ollama_url}/api/chat" and j["think"] is False and j["keep_alive"] == cfg.llm_keep_alive
+    assert j["options"] == {"num_ctx": cfg.llm_num_ctx, "num_predict": 600} and j["model"] == cfg.ollama_model
+    assert env.post("/ia/chat", json={"messages": [{"role": "x", "content": "a"}]}, headers=H).status_code == 400
+
+    def lento(*a, **k):
+        raise httpx.ReadTimeout("lento")
+    monkeypatch.setattr(httpx, "post", lento)
+    assert env.post("/ia/chat", json={"messages": msgs}, headers=H).status_code == 504

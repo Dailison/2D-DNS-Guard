@@ -2174,3 +2174,54 @@ def auto_block_candidates(limit: int = Query(300, le=2000)):
     """O que o bloqueio automático vai colocar nas listas no próximo ciclo."""
     with db.conn() as c:
         return listas.candidatos(c, limite=limit)
+
+
+# ------------------------------------------------------------------ atendente virtual (2D-Suporte via 2D ERP API)
+class IaChatIn(BaseModel):
+    messages: list[dict]
+    max_tokens: int = 400
+    temperature: Optional[float] = None
+
+
+_IA_PAPEIS = {"system", "user", "assistant"}
+
+
+@app.post("/ia/chat", dependencies=[Depends(auth)])
+def ia_chat(body: IaChatIn):
+    """Conversa do atendente virtual do 2D-Suporte. Quem chama é a 2D ERP API (o app do cliente nunca fala com a
+    VM); o Ollama continua só em 127.0.0.1. Mesmo modelo, num_ctx e keep_alive do classificador: opção diferente
+    recarregaria o modelo a cada troca entre chat e análise (1-2 min na CPU)."""
+    import httpx
+    cfg = settings()
+    msgs = body.messages
+    if not msgs or len(msgs) > 40:
+        raise HTTPException(400, "messages: de 1 a 40 mensagens")
+    total = 0
+    for m in msgs:
+        if m.get("role") not in _IA_PAPEIS or not isinstance(m.get("content"), str):
+            raise HTTPException(400, "cada mensagem precisa de role (system/user/assistant) e content (texto)")
+        total += len(m["content"])
+    if total > 20000:
+        raise HTTPException(400, "conversa longa demais (máximo 20000 caracteres)")
+    opcoes: dict = {"num_ctx": cfg.llm_num_ctx, "num_predict": max(16, min(body.max_tokens, 600))}
+    if body.temperature is not None:
+        opcoes["temperature"] = max(0.0, min(body.temperature, 1.5))
+    payload = {"model": cfg.ollama_model, "stream": False, "think": False, "keep_alive": cfg.llm_keep_alive,
+               "messages": [{"role": m["role"], "content": m["content"]} for m in msgs], "options": opcoes}
+    t0 = time.monotonic()
+    try:
+        r = httpx.post(f"{cfg.ollama_url}/api/chat", json=payload, timeout=httpx.Timeout(150, connect=5))
+    except httpx.TimeoutException:
+        raise HTTPException(504, "a IA demorou demais para responder")
+    except httpx.HTTPError as e:
+        log.warning("ia/chat: Ollama indisponível: %s", e)
+        raise HTTPException(502, "IA indisponível")
+    if r.status_code != 200:
+        log.warning("ia/chat: Ollama HTTP %s: %s", r.status_code, r.text[:300])
+        raise HTTPException(502, "IA indisponível")
+    j = r.json()
+    seg = round(time.monotonic() - t0, 1)
+    log.info("ia/chat: %d mensagem(ns) -> %d tokens em %.1fs", len(msgs), j.get("eval_count") or 0, seg)
+    return {"content": ((j.get("message") or {}).get("content") or "").strip(), "model": cfg.ollama_model,
+            "done_reason": j.get("done_reason"), "prompt_tokens": j.get("prompt_eval_count") or 0,
+            "completion_tokens": j.get("eval_count") or 0, "seconds": seg}

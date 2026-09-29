@@ -304,3 +304,39 @@ def test_sem_visao_nao_olha(monkeypatch):
     inv._visao[("http://vm", "gemma4:26b")] = True
     Cli.model = "gemma4:26b"
     assert inv.tem_visao(Cli())
+
+
+def test_chat_usa_as_mesmas_opcoes_de_carga(monkeypatch):
+    """29/09: sem num_thread a fase 6 alternava com o classificador (-t 22) e o Ollama da VM recarregava o modelo
+    a cada chamada (3-6 min). Mesmas opções de carga do OllamaClient."""
+    import httpx
+    from types import SimpleNamespace
+    from dnsanalyzer import investigacao
+    enviado = {}
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"message": {"content": "{}"}, "eval_count": 1, "prompt_eval_count": 1}
+
+    monkeypatch.setattr(httpx, "post", lambda url, json=None, timeout=None: enviado.update(json) or R())
+    cli = SimpleNamespace(model="m", keep_alive="60m", num_ctx=8192, num_thread=22, url="http://x", extra=False)
+    investigacao._chat(cli, [{"role": "user", "content": "oi"}], {"type": "object"}, False, 10)
+    assert enviado["options"]["num_thread"] == 22 and enviado["options"]["num_ctx"] == 8192
+    cli.num_thread = None   # GPU (reforço): o Ollama de lá decide as threads
+    investigacao._chat(cli, [{"role": "user", "content": "oi"}], {"type": "object"}, False, 10)
+    assert "num_thread" not in enviado["options"]
+
+
+def test_fase6_so_na_gpu(monkeypatch):
+    """Sem GPU no ar, a fase 6 fica parada (não cai para a VM, que fica p/ a fase 1 e o atendente virtual)."""
+    from types import SimpleNamespace
+    from dnsanalyzer import classifier, investigacao
+    chamadas, passos = [], []
+    monkeypatch.setattr(investigacao, "fase", lambda *a, **k: chamadas.append(a) or "done")
+    monkeypatch.setattr(classifier, "_fase_worker", lambda stop, passo, nome: passos.append(passo))
+    reforco = SimpleNamespace(cliente=lambda: SimpleNamespace(extra=False))
+    classifier._investigacao_worker(lambda: False, [], reforco)
+    assert passos[0]() == "idle" and not chamadas

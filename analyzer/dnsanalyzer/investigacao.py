@@ -744,8 +744,10 @@ def _dossie_texto(nome: str, ev: list[dict], atual: dict) -> str:
 def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> tuple[dict, dict]:
     payload = {"model": client.model, "messages": mensagens, "format": schema, "stream": False, "think": pensar,
                "keep_alive": client.keep_alive,
-               # mesmo num_ctx das outras fases: outro valor faria o Ollama recarregar o modelo (e tirar a GPU da fila)
-               "options": {"temperature": 0, "seed": 42, "num_ctx": client.num_ctx, "num_predict": n}}
+               # mesmas opções de CARGA das outras fases (num_ctx, num_thread): outro valor faria o Ollama recarregar o
+               # modelo (29/09: sem num_thread, na VM cada troca com o classificador recarregava — 3-6 min por chamada)
+               "options": {"temperature": 0, "seed": 42, "num_ctx": client.num_ctx, "num_predict": n,
+                           **({"num_thread": client.num_thread} if client.num_thread else {})}}
     t0 = time.monotonic()
     r = httpx.post(f"{client.url}/api/chat", json=payload, timeout=900)
     r.raise_for_status()

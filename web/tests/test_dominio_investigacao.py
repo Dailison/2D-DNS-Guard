@@ -8,6 +8,7 @@ INV = {"at": "2026-09-29T04:00:00+00:00", "segundos": 108.4, "aplicado": True, "
        "veredito": {"service": "Ecocentauro (ERP)", "classification": "TRABALHO", "category": "produtividade",
                     "lista": "wl:erp_gestao", "confidence": 0.9, "motivo": "Portal de clientes da Ecocentauro.",
                     "evidencias": ["E1", "E17"]},
+       "revisao": {"sustentado": True, "problema": ""}, "etapas": [{"etapa": "fontes"}],
        "plano": {"hipotese": "sistema de gestão"}, "rodadas": [{"modelo": "gemma4:26b", "gpu": True}],
        "evidencias": [{"id": "E17", "kind": "certs", "text": "6 certificado(s) públicos desde 2026-07-14"}],
        "antes": {"classification": "DESCONHECIDO", "category": "desconhecido", "lista_ia": "nao_identificado"}}
@@ -45,6 +46,7 @@ def test_mostra_o_dossie_aplicado(pagina):
     assert "Investigação profunda" in html and "✓ aplicado" in html
     assert "Ecocentauro (ERP)" in html and "wl:erp_gestao" in html and "6 certificado(s)" in html
     assert "Antes: DESCONHECIDO" in html and "gemma4:26b (GPU)" in html
+    assert "Revisor: concordou" in html
 
 
 def test_sem_certeza_mostra_o_motivo(pagina):

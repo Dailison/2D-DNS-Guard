@@ -45,6 +45,8 @@
     {% if v.lista %} · lista <code>{{ v.lista }}</code>{% endif %}
     · confiança {{ ((v.confidence or 0) * 100)|round|int }}%</p>
   {% if v.motivo %}<p style="margin:0 0 .6rem">{{ v.motivo }}{% if v.evidencias %} <span class="mut">({{ v.evidencias|join(', ') }})</span>{% endif %}</p>{% endif %}
+  {% if inv.revisao %}<p class="hint" style="margin:0 0 .6rem">Revisor: {{ 'concordou' if inv.revisao.sustentado else 'discordou' }}{% if inv.revisao.problema %} — {{ inv.revisao.problema }}{% endif %}
+    {%- if inv.etapas %} · {{ inv.etapas|length }} etapas{% endif %}</p>{% endif %}
   {% if inv.antes and inv.aplicado %}<p class="hint" style="margin:0 0 .6rem">Antes: {{ inv.antes.classification or '—' }} · {{ inv.antes.category or '—' }} · lista {{ inv.antes.lista_ia or inv.antes.lista_wl or '—' }}</p>{% endif %}
   <details>
     <summary class="mut" style="cursor:pointer">Evidências novas desta investigação ({{ (inv.evidencias or [])|length }})</summary>

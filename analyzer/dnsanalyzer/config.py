@@ -116,6 +116,7 @@ class Settings:
     investigacao_enabled: bool         # fase 6: investigação profunda com a fila da IA vazia
     investigacao_dias: int             # reinvestiga depois de N dias (ou quando o domínio é reanalisado)
     investigacao_confianca_min: float  # aplica classificação/lista só com esta confiança (e serviço reconhecido)
+    investigacao_tempo_max: int        # s por domínio (rodadas extras só enquanto sobra tempo p/ veredito + revisor)
     online_workers: int
     gemini_api_key: str
     gemini_api_keys_extra: list
@@ -243,6 +244,7 @@ def load_settings() -> Settings:
         investigacao_enabled=_bool(os.environ.get("INVESTIGACAO_ENABLED"), False),
         investigacao_dias=_int("INVESTIGACAO_DIAS", 14),
         investigacao_confianca_min=float(os.environ.get("INVESTIGACAO_CONFIANCA_MIN") or 0.85),
+        investigacao_tempo_max=_int("INVESTIGACAO_TEMPO_MAX", 600),   # 10 min por domínio (pedido do usuário 29/09)
         online_workers=max(_int("ONLINE_WORKERS", 6), 1),   # consultas simultâneas (Gemma é lento; a cota é por modelo)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
         # chaves de outros projetos (cada uma com a própria cota por modelo), usadas depois da principal

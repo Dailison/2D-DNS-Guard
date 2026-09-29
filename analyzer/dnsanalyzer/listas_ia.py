@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from . import catalog, corporate, db, eventos, listas, whitelist
 from .config import settings
-from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
+from .llm import LLMBadOutput, LLMUnavailable, OllamaClient, vaga
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +150,8 @@ def perguntar(client: OllamaClient, d: dict) -> tuple[ListaResult, dict]:
                             {"role": "user", "content": _contexto(d) + "\n\nA qual lista este site pertence? /no_think"}]}
     t0 = time.monotonic()
     try:
-        r = httpx.post(f"{client.url}/api/chat", json=payload, timeout=client.timeout)
+        with vaga(client):
+            r = httpx.post(f"{client.url}/api/chat", json=payload, timeout=client.timeout)
     except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
         raise LLMUnavailable(str(e)) from e
     if r.status_code >= 500 or r.status_code == 404:

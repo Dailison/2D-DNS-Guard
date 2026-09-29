@@ -143,3 +143,30 @@ def test_web_search_available_but_not_used_is_not_enough():
     r = base("kudabibi.com", search=_busca("a.com", "b.com"))
     f = combine(r, llm("NAO_TRABALHO", work=5, recognized=True), ev(r))
     assert f.classification == "DESCONHECIDO"
+
+
+def test_vaga_da_vm_uma_chamada_por_vez():
+    """29/09: Ollama da VM com 2 vagas — a análise usa no máximo 1 (a outra é do atendente virtual). Reforço (GPU)
+    não espera."""
+    import threading
+    import time
+    from types import SimpleNamespace
+    from dnsanalyzer.llm import vaga
+
+    def pico(client):
+        dentro, maior, lock = [0], [0], threading.Lock()
+
+        def chamada():
+            with vaga(client):
+                with lock:
+                    dentro[0] += 1
+                    maior[0] = max(maior[0], dentro[0])
+                time.sleep(0.05)
+                with lock:
+                    dentro[0] -= 1
+        ts = [threading.Thread(target=chamada) for _ in range(4)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        return maior[0]
+    assert pico(SimpleNamespace(extra=False)) == 1
+    assert pico(SimpleNamespace(extra=True)) > 1

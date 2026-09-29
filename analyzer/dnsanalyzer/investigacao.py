@@ -749,7 +749,9 @@ def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> 
                "options": {"temperature": 0, "seed": 42, "num_ctx": client.num_ctx, "num_predict": n,
                            **({"num_thread": client.num_thread} if client.num_thread else {})}}
     t0 = time.monotonic()
-    r = httpx.post(f"{client.url}/api/chat", json=payload, timeout=900)
+    from .llm import vaga
+    with vaga(client):
+        r = httpx.post(f"{client.url}/api/chat", json=payload, timeout=900)
     r.raise_for_status()
     d = r.json()
     return json.loads((d.get("message") or {}).get("content") or "{}"), {

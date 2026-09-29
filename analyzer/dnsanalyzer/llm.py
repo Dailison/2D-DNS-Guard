@@ -6,9 +6,11 @@ A IA recebe SOMENTE o dossiê do domínio em forma de evidências numeradas
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import threading
 import time
 
 import httpx
@@ -167,6 +169,17 @@ def build_messages(dossier_name: str, evidence: list[dict], categories: list[dic
     return [{"role": "system", "content": sistema}, {"role": "user", "content": user}]
 
 
+# Ollama da VM com 2 vagas (OLLAMA_NUM_PARALLEL=2): a análise (todos os workers deste processo) usa no máximo UMA;
+# a outra fica sempre livre p/ o atendente virtual do 2D-Suporte (/ia/chat, no processo da API) — 29/09: as GPUs
+# não ficam ligadas 24 h e o chat esperava a fila das análises
+_VAGA_VM = threading.Lock()
+
+
+def vaga(client) -> contextlib.AbstractContextManager:
+    """Uma chamada por vez ao Ollama da VM entre os workers da análise; reforço (GPU) não espera."""
+    return contextlib.nullcontext() if getattr(client, "extra", False) else _VAGA_VM
+
+
 class OllamaClient:
     def __init__(self, url: str | None = None):
         """url = Ollama de reforço (OLLAMA_EXTRA_URLS); sem url, o da própria VM."""
@@ -211,7 +224,8 @@ class OllamaClient:
         }
         t0 = time.monotonic()
         try:
-            r = httpx.post(f"{self.url}/api/chat", json=payload, timeout=self.timeout)
+            with vaga(self):
+                r = httpx.post(f"{self.url}/api/chat", json=payload, timeout=self.timeout)
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
             raise LLMUnavailable(str(e)) from e
         if r.status_code >= 500 or r.status_code == 404:

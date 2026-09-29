@@ -51,8 +51,15 @@ def site_categories(c) -> list[dict]:
     return [dict(r) for r in c.execute("SELECT code, label, description FROM site_categories ORDER BY sort_order")]
 
 
+def _pular_busca(d: dict) -> bool:
+    """Fase 1: domínio popular (até WEB_SEARCH_SKIP_RANK no Tranco) a IA conhece sem busca — a fila de buscas
+    (intervalo mínimo por SearXNG) fica para quem precisa (28/09: a busca era o teto da fila, com a GPU ociosa)."""
+    lim = getattr(settings(), "web_search_skip_rank", 0)
+    return bool(lim and d.get("popularity_rank") and d["popularity_rank"] <= lim)
+
+
 def build_dossier(c, drow: dict, with_rdap: bool = False, with_web: bool = False,
-                  with_search: bool = False, with_whois: bool = False) -> dict:
+                  with_search: bool = False, with_whois: bool = False, pular_conhecido: bool = False) -> dict:
     cfg = settings()
     name = drow["name"]
     info = analyze_name(name, cfg.internal_suffixes)
@@ -84,7 +91,7 @@ def build_dossier(c, drow: dict, with_rdap: bool = False, with_web: bool = False
         d["web"] = webintel.lookup(c, name, fetch=with_web,
                                    allow_site=not d["ti_hits"] and not d["abused_tld"])
         # etapa 2: resultados de busca (só busca na rede quando with_search; senão usa o cache)
-        d["search"] = webintel.search(c, name, fetch=with_search)
+        d["search"] = webintel.search(c, name, fetch=with_search and not (pular_conhecido and _pular_busca(d)))
         # etapa 3: WHOIS do domínio registrável (na rede só com with_whois; senão o cache).
         # Subdomínio de plataforma (x.myshopify.com): o WHOIS seria o da plataforma — não vale.
         if not info.private_suffix:
@@ -331,7 +338,8 @@ def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2
     with db.conn() as c:
         if unica:
             try:
-                dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=True, with_whois=True)
+                dossier = build_dossier(c, drow, with_rdap=True, with_web=True, with_search=True, with_whois=True,
+                                        pular_conhecido=True)
             except (httpx.HTTPError, webintel.BuscaIndisponivel, webintel.BuscaOcupada, whois.WhoisIndisponivel) as e:
                 log.info("etapa única %s: segue sem o que falhou (%s)", name, e.__class__.__name__)
                 dossier = build_dossier(c, drow, with_rdap=True, with_web=True)

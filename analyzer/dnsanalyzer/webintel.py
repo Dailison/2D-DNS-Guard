@@ -197,34 +197,66 @@ class BuscaIndisponivel(Exception):
     NÃO é "sem resultado" — senão o domínio ficaria marcado como sem presença na web."""
 
 
-_ultima_busca = 0.0
 _busca_lock = threading.Lock()
+_ultima: dict[str, float] = {}    # SearXNG -> última busca (o intervalo mínimo vale para cada um)
+_fora_ate: dict[str, float] = {}  # SearXNG que falhou (ex.: PC do reforço desligado) -> até quando fica de lado
+FORA_S = 300
 
 
-_motores: tuple[float, set[str]] = (0.0, set())
+def _urls(cfg) -> list[str]:
+    return list(getattr(cfg, "web_search_urls", None) or [cfg.web_search_url])
 
 
-def _motores_web(cfg) -> set[str]:
+def _reservar(cfg, wait: bool, evitar: set[str] = frozenset()) -> str:
+    """Escolhe o SearXNG que pode buscar primeiro e marca a busca nele. wait=False: nenhum livre agora ->
+    BuscaOcupada (o worker adia o domínio e segue com outro em vez de ficar parado na fila)."""
+    import time
+    while True:
+        with _busca_lock:
+            agora = time.monotonic()
+            urls = [u for u in _urls(cfg) if u not in evitar] or _urls(cfg)
+            vivos = [u for u in urls if _fora_ate.get(u, 0) <= agora] or urls   # todos fora: tenta assim mesmo
+            espera, _, url = min((cfg.web_search_min_interval - (agora - _ultima.get(u, 0.0)), i, u)   # empate: ordem
+                                 for i, u in enumerate(vivos))                                     # da configuração
+            if espera <= 0:
+                _ultima[url] = agora
+                return url
+        if not wait:
+            raise BuscaOcupada("")
+        time.sleep(espera)
+
+
+def _deixar_de_lado(url: str) -> None:
+    import time
+    with _busca_lock:
+        _fora_ate[url] = time.monotonic() + FORA_S
+
+
+_motores: dict[str, tuple[float, set[str]]] = {}
+
+
+def _motores_web(cfg, url: str | None = None) -> set[str]:
     """Buscadores de web habilitados no SearXNG (categorias general+web), com cache de 1 h.
     Falhou ao consultar: conjunto vazio (= comportamento antigo, conservador)."""
     import time
-    global _motores
-    if time.monotonic() - _motores[0] < 3600 and _motores[1]:
-        return _motores[1]
+    url = url or cfg.web_search_url
+    t, nomes = _motores.get(url, (0.0, set()))
+    if time.monotonic() - t < 3600 and nomes:
+        return nomes
     try:
-        r = httpx.get(cfg.web_search_url.rstrip("/") + "/config", timeout=15)
+        r = httpx.get(url.rstrip("/") + "/config", timeout=15)
         r.raise_for_status()
         nomes = {e["name"] for e in r.json().get("engines", [])   # geral + web (fora imagens/vídeos)
                  if e.get("enabled") and {"general", "web"} <= set(e.get("categories") or [])}
     except (httpx.HTTPError, ValueError, KeyError):
         return set()
-    _motores = (time.monotonic(), nomes)
+    _motores[url] = (time.monotonic(), nomes)
     return nomes
 
 
-def _consulta(cfg, q: str, relevante=None) -> tuple[list[dict], list[str]]:
+def _consulta(cfg, q: str, relevante=None, url: str | None = None) -> tuple[list[dict], list[str]]:
     """Uma consulta ao SearXNG: (resultados limpos, buscadores sem resposta)."""
-    r = httpx.get(cfg.web_search_url.rstrip("/") + "/search", timeout=40,
+    r = httpx.get((url or cfg.web_search_url).rstrip("/") + "/search", timeout=40,
                   params={"q": q, "format": "json", "language": "pt-BR", "safesearch": 0})
     r.raise_for_status()
     j = r.json()
@@ -245,6 +277,31 @@ def _consulta(cfg, q: str, relevante=None) -> tuple[list[dict], list[str]]:
     return out, [e[0] for e in j.get("unresponsive_engines") or []]
 
 
+def _buscar_em(cfg, domain: str, url: str) -> list[dict]:
+    label = domain.split(".")[0]
+    alvo = (domain, label) if len(label) >= 5 else (domain,)
+    cita = lambda t: any(a in t for a in alvo)   # noqa: E731
+    # só entram resultados que citam o domínio (ou o nome dele, se distintivo) — até entre aspas vem lixo
+    # (27/09: '"herosistemas-storage.s3.amazonaws.com"' voltou 4 resultados do Google Tradutor)
+    out, fora = _consulta(cfg, f'"{domain}"', cita, url)
+    if not out:
+        # entre aspas o Bing às vezes volta vazio sem erro (e o DuckDuckGo quebra); sem aspas acha, com ruído
+        out2, fora2 = _consulta(cfg, domain, cita, url)
+        out, fora = out2, sorted(set(fora) & set(fora2))
+        # nome composto (ex.: herosistemas-storage.s3.amazonaws.com): pelas palavras do nome, só com
+        # resultado que cite a palavra mais distintiva (o nome completo quase nunca aparece na web)
+        palavras = [p for p in re.split(r"[-_]", label) if p.isalpha()]
+        chave = max(palavras, key=len, default="")
+        if not out and len(palavras) >= 2 and len(chave) >= 5:
+            out3, fora3 = _consulta(cfg, " ".join(palavras), lambda t: chave in t, url)
+            out, fora = out3, sorted(set(fora) & set(fora3))
+    # sem resultado só é "indisponível" se NENHUM buscador de web respondeu. Alguns vivem
+    # suspensos (captcha): antes, domínio sem presença na web era retentado para sempre.
+    if not out and fora and not (_motores_web(cfg, url) - set(fora)):
+        raise BuscaIndisponivel("buscadores sem resposta: " + ", ".join(fora))
+    return out
+
+
 def search(c, domain: str, fetch: bool, wait: bool = True) -> list[dict] | None:
     """Etapa 2: resultados de busca na web (SearXNG local) sobre o domínio. Texto de
     TERCEIROS (pista, não prova). Cache permanente em lookup_cache kind='search'."""
@@ -252,42 +309,24 @@ def search(c, domain: str, fetch: bool, wait: bool = True) -> list[dict] | None:
     row = c.execute("SELECT value FROM lookup_cache WHERE kind='search' AND key=%s", (domain,)).fetchone()
     if row or not (fetch and cfg.web_search_url):
         return row["value"].get("results") if row else None
-    import time
-    global _ultima_busca
-    # vários workers da IA: o intervalo mínimo vale entre todos. wait=False: sem vaga agora,
-    # BuscaOcupada (o worker adia o domínio e segue com outro em vez de ficar parado na fila)
-    if not _busca_lock.acquire(blocking=wait):
-        raise BuscaOcupada(domain)
-    try:
-        espera = cfg.web_search_min_interval - (time.monotonic() - _ultima_busca)
-        if espera > 0:
-            if not wait:
-                raise BuscaOcupada(domain)
-            time.sleep(espera)
-        _ultima_busca = time.monotonic()
-    finally:
-        _busca_lock.release()
-    label = domain.split(".")[0]
-    alvo = (domain, label) if len(label) >= 5 else (domain,)
-    cita = lambda t: any(a in t for a in alvo)   # noqa: E731
-    # só entram resultados que citam o domínio (ou o nome dele, se distintivo) — até entre aspas vem lixo
-    # (27/09: '"herosistemas-storage.s3.amazonaws.com"' voltou 4 resultados do Google Tradutor)
-    out, fora = _consulta(cfg, f'"{domain}"', cita)
-    if not out:
-        # entre aspas o Bing às vezes volta vazio sem erro (e o DuckDuckGo quebra); sem aspas acha, com ruído
-        out2, fora2 = _consulta(cfg, domain, cita)
-        out, fora = out2, sorted(set(fora) & set(fora2))
-        # nome composto (ex.: herosistemas-storage.s3.amazonaws.com): pelas palavras do nome, só com
-        # resultado que cite a palavra mais distintiva (o nome completo quase nunca aparece na web)
-        palavras = [p for p in re.split(r"[-_]", label) if p.isalpha()]
-        chave = max(palavras, key=len, default="")
-        if not out and len(palavras) >= 2 and len(chave) >= 5:
-            out3, fora3 = _consulta(cfg, " ".join(palavras), lambda t: chave in t)
-            out, fora = out3, sorted(set(fora) & set(fora3))
-    # sem resultado só é "indisponível" se NENHUM buscador de web respondeu. Alguns vivem
-    # suspensos (captcha): antes, domínio sem presença na web era retentado para sempre.
-    if not out and fora and not (_motores_web(cfg) - set(fora)):
-        raise BuscaIndisponivel("buscadores sem resposta: " + ", ".join(fora))
+    # vários workers da IA: o intervalo mínimo vale entre todos, em cada SearXNG. Um SearXNG que falha (fora do ar,
+    # todos os buscadores dele bloqueados) fica FORA_S de lado e a busca vai para o próximo.
+    tentados: set[str] = set()
+    while True:
+        try:
+            url = _reservar(cfg, wait, tentados)
+        except BuscaOcupada:
+            raise BuscaOcupada(domain) from None
+        tentados.add(url)
+        try:
+            out = _buscar_em(cfg, domain, url)
+            break
+        except (httpx.HTTPError, BuscaIndisponivel) as e:
+            if len(_urls(cfg)) > 1:
+                _deixar_de_lado(url)
+                log.warning("SearXNG %s fora por %d s: %s", url, FORA_S, str(e)[:150])
+            if tentados >= set(_urls(cfg)):
+                raise
     c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('search', %s, true, %s) "
               "ON CONFLICT (kind, key) DO UPDATE SET value=EXCLUDED.value, ok=true, fetched_at=now()",
               (domain, Jsonb({"results": out, "fetched": datetime.now(timezone.utc).isoformat()})))

@@ -43,7 +43,7 @@ def test_busca_pelas_palavras_do_nome_composto(monkeypatch):
     monkeypatch.setattr(webintel, "_ultima_busca", 0.0, raising=False)
     consultas = []
 
-    def falsa(cfg, q, relevante=None):
+    def falsa(cfg, q, relevante=None, url=None):
         consultas.append(q)
         if q == "herosistemas storage":
             res = [{"title": "Hero Sistemas - ERP", "snippet": "software de gestão herosistemas", "host": "herosistemas.com.br", "url": "u"},
@@ -61,6 +61,70 @@ def test_busca_pelas_palavras_do_nome_composto(monkeypatch):
     out = webintel.search(C(), "herosistemas-storage.s3.amazonaws.com", fetch=True)
     assert consultas == ['"herosistemas-storage.s3.amazonaws.com"', "herosistemas-storage.s3.amazonaws.com", "herosistemas storage"]
     assert [r["host"] for r in out] == ["herosistemas.com.br"]
+
+
+class _SemCache:
+    def execute(self, sql, *a):
+        return self
+
+    def fetchone(self):
+        return None
+
+
+def _varios_searxng(monkeypatch, intervalo=8):
+    from dnsanalyzer import webintel
+    monkeypatch.setattr(webintel, "settings", lambda: SimpleNamespace(
+        web_search_url="http://vm:8888", web_search_urls=["http://vm:8888", "http://pc:8888"],
+        web_search_min_interval=intervalo, web_search_results=6))
+    monkeypatch.setattr(webintel, "_ultima", {})
+    monkeypatch.setattr(webintel, "_fora_ate", {})
+    return webintel
+
+
+def test_varios_searxng_cada_um_com_o_seu_intervalo(monkeypatch):
+    """(28/09) VM + PC do reforço: o intervalo mínimo vale para cada SearXNG — a 2ª busca vai para o outro sem
+    esperar, e a 3ª (os dois ocupados) é BuscaOcupada quando o worker não espera."""
+    webintel = _varios_searxng(monkeypatch)
+    usados = []
+    monkeypatch.setattr(webintel, "_consulta", lambda cfg, q, rel=None, url=None: (usados.append(url) or
+                        ([{"title": "t", "snippet": "s", "host": "h", "url": "u"}], [])))
+    webintel.search(_SemCache(), "a.com", fetch=True, wait=False)
+    webintel.search(_SemCache(), "b.com", fetch=True, wait=False)
+    assert usados == ["http://vm:8888", "http://pc:8888"]
+    import pytest
+    with pytest.raises(webintel.BuscaOcupada):
+        webintel.search(_SemCache(), "c.com", fetch=True, wait=False)
+
+
+def test_searxng_fora_do_ar_fica_de_lado(monkeypatch):
+    """PC do reforço desligado: a busca vai para o outro SearXNG e o que falhou fica FORA_S de lado."""
+    import httpx
+    webintel = _varios_searxng(monkeypatch, intervalo=0)
+    usados = []
+
+    def consulta(cfg, q, rel=None, url=None):
+        usados.append(url)
+        if url == "http://pc:8888":
+            raise httpx.ConnectError("desligado")
+        return [{"title": "t", "snippet": "s", "host": "h", "url": "u"}], []
+    monkeypatch.setattr(webintel, "_consulta", consulta)
+    webintel._ultima.update({"http://vm:8888": 1.0, "http://pc:8888": 0.0})   # a vez é do PC
+    out = webintel.search(_SemCache(), "a.com", fetch=True)
+    assert out and usados == ["http://pc:8888", "http://vm:8888"]
+    assert webintel._fora_ate.get("http://pc:8888", 0) > 0
+    usados.clear()
+    webintel.search(_SemCache(), "b.com", fetch=True)
+    assert usados == ["http://vm:8888"]   # o PC segue de lado
+
+
+def test_fase1_pula_busca_do_top_do_tranco(monkeypatch):
+    monkeypatch.setattr(classifier, "settings", lambda: SimpleNamespace(web_search_skip_rank=100000))
+    assert classifier._pular_busca({"popularity_rank": 5000})
+    assert classifier._pular_busca({"popularity_rank": 100000})
+    assert not classifier._pular_busca({"popularity_rank": 100001})
+    assert not classifier._pular_busca({"popularity_rank": None})
+    monkeypatch.setattr(classifier, "settings", lambda: SimpleNamespace(web_search_skip_rank=0))
+    assert not classifier._pular_busca({"popularity_rank": 5})
 
 
 def test_pagina_vazia_no_cache_e_reaberta(monkeypatch):

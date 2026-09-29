@@ -99,8 +99,10 @@ class Settings:
     web_fetch_site: bool
     web_cache_days: int
     web_search_url: str
+    web_search_urls: list[str]   # todos os SearXNG (WEB_SEARCH_URL com vírgula); web_search_url = o primeiro
     web_search_results: int
     web_search_min_interval: int
+    web_search_skip_rank: int    # fase 1: não busca p/ domínio até esta posição do Tranco (0 = busca em todos)
     web_search_before_llm: bool
     web_search_before_llm_todos: bool   # "todos": todo domínio da fase 1, não só os que a IA não reconheceria
     local_etapa_unica: bool   # (27/09) fase 1 = etapa local única: site + busca + WHOIS numa pergunta que já diz a lista
@@ -205,10 +207,16 @@ def load_settings() -> Settings:
         web_intel_enabled=_bool(os.environ.get("WEB_INTEL_ENABLED"), True),
         web_fetch_site=_bool(os.environ.get("WEB_FETCH_SITE"), True),
         web_cache_days=_int("WEB_CACHE_DAYS", 30),
-        web_search_url=os.environ.get("WEB_SEARCH_URL", ""),   # SearXNG local (etapa 2); vazio = desligada
+        # SearXNG (etapa 2); vazio = desligada. Vários separados por vírgula (28/09: VM + PC do reforço, cada um com o
+        # seu IP público = cota própria nos buscadores); o intervalo mínimo vale para cada um
+        web_search_url=(_list("WEB_SEARCH_URL") or [""])[0],
+        web_search_urls=_list("WEB_SEARCH_URL"),
         web_search_results=_int("WEB_SEARCH_RESULTS", 6),
-        # buscadores gratuitos bloqueiam rajadas (~10-15 buscas seguidas): intervalo mínimo (s)
+        # buscadores gratuitos bloqueiam rajadas (~10-15 buscas seguidas): intervalo mínimo (s) por SearXNG
         web_search_min_interval=_int("WEB_SEARCH_MIN_INTERVAL", 20),
+        # (28/09) a busca era o teto da fila (1 a cada 8 s = 7,5 domínios/min com a GPU ociosa): o top 100 mil do Tranco
+        # a IA conhece sem busca
+        web_search_skip_rank=_int("WEB_SEARCH_SKIP_RANK", 0),
         # busca ANTES da IA na etapa 1 (desligada a pedido do usuário em 2026-09-26: a IA analisa
         # primeiro; o que ela não reconhecer vai p/ Decisões e a etapa 2 busca quando a fila zerar)
         # (27/09: WEB_SEARCH_BEFORE_LLM=todos a pedido do usuário — busca em todo domínio novo, IA local na VM)

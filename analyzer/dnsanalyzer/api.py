@@ -10,6 +10,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -320,8 +321,26 @@ def _tf(alias: str) -> str:
     return f"(%(t)s = 0 OR {alias}.tenant_id = %(t)s)"
 
 
+_SUMMARY_TTL = 60   # s: o painel abre várias vezes seguidas (filtros, voltar); os números mudam devagar
+_summary_cache: dict[tuple[int, int], tuple[float, dict]] = {}
+
+
+def _top(rows: list[dict], cond, key) -> list[dict]:
+    return sorted((r for r in rows if cond(r)), key=key)[:15]
+
+
 @app.get("/tenants/{tid}/summary", dependencies=[Depends(auth)])
 def summary(tid: int, days: int = 7):
+    agora = time.monotonic()
+    hit = _summary_cache.get((tid, days))
+    if hit and agora - hit[0] < _SUMMARY_TTL:
+        return hit[1]
+    out = _summary(tid, days)
+    _summary_cache[(tid, days)] = (agora, out)
+    return out
+
+
+def _summary(tid: int, days: int) -> dict:
     p = {"t": tid, "s": _since(days), "s1": _since(1)}
     vt = _vt(tid)
     with db.conn() as c:
@@ -330,21 +349,20 @@ def summary(tid: int, days: int = 7):
             f"SELECT classification, count(*) AS n FROM {vt} v WHERE last_seen >= %(s)s GROUP BY classification", p)}
         pending_ai = c.execute(f"SELECT count(*) AS n FROM {vt} v WHERE last_seen >= %(s)s AND llm_pending",
                                p).fetchone()["n"]
-        per_domain = (
+        # (29/09) as 3 listas saem de UM agregado por domínio: antes cada uma refazia a soma sobre query_agg
+        # (1,25 mi linhas/dia) juntando com a visão do escopo — 18 s de 25 s do painel "Todos os clientes"
+        por_dominio = c.execute(
+            "WITH q AS (SELECT q.domain_id, sum(q.queries) AS queries, count(DISTINCT q.client_id) AS clients, "
+            " count(DISTINCT q.tenant_id) AS tenants, max(q.last_seen) AS last_seen FROM query_agg q "
+            f" WHERE {_tf('q')} AND q.bucket >= %(s)s GROUP BY q.domain_id) "
             "SELECT v.name, v.classification, v.topic, v.category, v.risk_score, v.work_score, v.overridden, "
-            " v.corp_action, v.corp_reason, v.corp_by, "
-            " sum(q.queries) AS queries, count(DISTINCT q.client_id) AS clients, count(DISTINCT q.tenant_id) AS tenants, "
-            " max(q.last_seen) AS last_seen "
-            f"FROM query_agg q JOIN {vt} v ON v.domain_id=q.domain_id AND (%(t)s = 0 OR v.tenant_id=q.tenant_id) "
-            f"WHERE {_tf('q')} AND q.bucket >= %(s)s AND {{cond}} "
-            "GROUP BY v.name, v.classification, v.topic, v.category, v.risk_score, v.work_score, v.overridden, "
-            " v.corp_action, v.corp_reason, v.corp_by "
-            "ORDER BY {order} LIMIT 15")
-        top_nonwork = c.execute(per_domain.format(cond="v.classification='NAO_TRABALHO'", order="queries DESC"),
-                                p).fetchall()
-        top_risk = c.execute(per_domain.format(cond="v.classification IN ('SUSPEITO','MALICIOSO')",
-                                               order="v.risk_score DESC, queries DESC"), p).fetchall()
-        top_all = c.execute(per_domain.format(cond="true", order="queries DESC"), p).fetchall()
+            " v.corp_action, v.corp_reason, v.corp_by, q.queries, q.clients, q.tenants, q.last_seen "
+            f"FROM q JOIN {vt} v ON v.domain_id = q.domain_id", p).fetchall()
+        mais = lambda r: -(r["queries"] or 0)   # noqa: E731
+        top_nonwork = _top(por_dominio, lambda r: r["classification"] == "NAO_TRABALHO", mais)
+        top_risk = _top(por_dominio, lambda r: r["classification"] in ("SUSPEITO", "MALICIOSO"),
+                        lambda r: (-(r["risk_score"] if r["risk_score"] is not None else 101), mais(r)))
+        top_all = _top(por_dominio, lambda r: True, mais)
         new_domains = c.execute(
             f"SELECT name, classification, topic, risk_score, first_seen, total_queries, clients_count, tenants "
             f"FROM {vt} v WHERE first_seen >= %(s1)s AND kind='public' ORDER BY first_seen DESC LIMIT 15", p).fetchall()

@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 from flask import (Blueprint, current_app, flash, get_flashed_messages, jsonify, redirect, render_template,
                    request, session, url_for)
+from markupsafe import escape
 
 from app import analyzer_client as api
 from app import technitium as dnslib
@@ -166,19 +167,31 @@ def _por_categoria(tid: int, dias: int, tenant: dict | None) -> list[dict]:
 # ------------------------------------------------------------------ painel
 @analise_bp.get("")
 def painel():
+    """Zero loading (29/09): responde na hora só com filtros, abas e o esqueleto; o conteúdo (resumo do analisador,
+    por categoria e status no Technitium, que levava 25-50 s em "Todos os clientes") vem de painel_conteudo."""
     ctx = _ctx()
-    s, porcat, st = None, [], {}
+    return render_template("admin/analise/painel.html", grp=_grp_ctx(ctx["tenants"]), aba="painel", **ctx)
+
+
+@analise_bp.get("/painel/conteudo")
+def painel_conteudo():
+    ctx = _ctx()
+    s, porcat, st, erro = None, [], {}, None
     if ctx["tid"] is not None:
         try:
             s = api.get(f"/tenants/{ctx['tid']}/summary", days=ctx["dias"])
         except AnalyzerError as e:
-            flash(f"Falha ao carregar o painel: {e}", "erro")
+            erro = str(e)
         if s:
             porcat = _por_categoria(ctx["tid"], ctx["dias"], ctx["tenant"])
             nomes = [d["name"] for k in ("top_nonwork", "top_risk", "top_domains") for d in s.get(k, [])]
             st = _status(nomes, ctx["tenant"])
-    return render_template("admin/analise/painel.html", s=s, porcat=porcat, st=st,
-                           scats=_site_cats(), grp=_grp_ctx(ctx["tenants"]), aba="painel", **ctx)
+    html = render_template("admin/analise/_painel_conteudo.html", s=s, porcat=porcat, st=st, erro=erro,
+                           scats=_site_cats(), aba="painel", **ctx)
+    # avisos do Technitium (flash) iriam para a próxima página: mostra junto do conteúdo
+    avisos = "".join(f'<div class="flash {escape(c)}">{escape(m)}</div>'
+                     for c, m in get_flashed_messages(with_categories=True))
+    return avisos + html
 
 
 # ------------------------------------------------------------------ fila de decisão

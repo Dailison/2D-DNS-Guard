@@ -64,6 +64,15 @@ NAO_IDENT = "nao_identificado"
 NENHUMA = "nenhuma"
 FONTE_LOCAL = "local"
 FONTE_CATALOGO = "catalogo"   # lista fixa do catálogo (`lista:` em data/catalog.yaml): sem IA
+# fase 6 (investigacao.py): só grava com alta certeza e, como a IA online, é resposta final — mas a classificação e a
+# categoria dela ficam no próprio domínio (não em online_resp)
+FONTE_INVESTIGACAO = "investigacao"
+
+
+def _final(r: dict) -> bool:
+    """Resposta final (IA online ou investigação profunda): vale com as travas, sem voltar às fases 2-4."""
+    f = r.get("lista_fonte") or ""
+    return f.startswith("online") or f == FONTE_INVESTIGACAO
 # destino de quem é liberado: uma whitelist por categoria ("wl:financas"); todo site vai p/ alguma fila
 WL = {f"wl:{k}": v for k, v in whitelist.DESCRICOES.items()}
 
@@ -323,6 +332,8 @@ def origem(r: dict) -> str:
     """Quem deu a resposta de lista em uso (p/ a coluna "Decisão" do IA ao vivo)."""
     if (r.get("lista_fonte") or "").startswith("online"):
         return "f4:online"
+    if r.get("lista_fonte") == FONTE_INVESTIGACAO:
+        return "f6:investigacao"
     return f"f{r['lista_fase']}:local" if r.get("lista_fase") else "local"
 
 
@@ -401,7 +412,8 @@ def _dois_nenhuma(r: dict) -> bool:
 def _fonte(r: dict) -> str:
     f = r.get("lista_fonte") or ""
     conf = f" {r['lista_conf'] * 100:.0f}%" if r.get("lista_conf") is not None else ""
-    return ("IA online" + conf if f.startswith("online") else "IA local" + conf if f == FONTE_LOCAL else f)
+    return ("IA online" + conf if f.startswith("online") else "IA local" + conf if f == FONTE_LOCAL
+            else "investigação profunda" + conf if f == FONTE_INVESTIGACAO else f)
 
 
 def _suspeito(r: dict) -> str | None:
@@ -482,7 +494,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) SELECT %s, %s, %s, false "
                       "WHERE NOT EXISTS (SELECT 1 FROM whitelist_domains WHERE domain = %s)", (wl, r["name"], listas.SEM_DESTINO_BY, r["name"]))
             return
-        por = "IA online" if on else f"IA local (fase {r['lista_fase']})" if r["lista_fase"] else "IA local"
+        por = ("IA online" if on else "Investigação profunda (fase 6)" if r["lista_fonte"] == FONTE_INVESTIGACAO
+               else f"IA local (fase {r['lista_fase']})" if r["lista_fase"] else "IA local")
         ja = c.execute("SELECT category, added_by FROM whitelist_domains WHERE domain = %s", (r["name"],)).fetchone()
         if ja and trava:
             return
@@ -510,9 +523,10 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         da_ia = {k for k, v in em.items() if v.startswith((AUTO_BY, "bloqueio automático"))}   # postas pela IA
         moveis = {PARA_REVISAR, OUTROS} | da_ia | ({INFRA} if em.get(INFRA, "").startswith("migração") else set())
         fixas = set(em) - moveis                                                 # pessoa/migração/Sistema
-        online = (r["lista_fonte"] or "").startswith("online")
+        online = _final(r)   # IA online ou investigação profunda (fase 6): resposta final
         certo = (r["lista_conf"] or 0) >= (cfg.online_confianca_min if online else cfg.lista_confianca_min)
-        cls = r["cls_online"] if online and r["cls_online"] else r["classification"]
+        cls = (r["cls_online"] if (r["lista_fonte"] or "").startswith("online") and r["cls_online"]
+               else r["classification"])
         humano_contra = bool(cat) and cat in aplicadas and (r["g_allowed"] or r["t_allowed"] or r["locked"])
 
         if humano_contra:   # uma pessoa decidiu "manter liberado": vale a pessoa (a IA não desfaz a correção humana)

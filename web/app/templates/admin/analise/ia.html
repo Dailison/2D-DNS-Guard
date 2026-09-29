@@ -259,8 +259,9 @@ document.addEventListener('alpine:init', function () {
   var URL_EV = "{{ url_for('analise.ia_eventos') }}";
   var URL_DOM = "{{ url_for('analise.dominio', nome='__N__', t=tid) }}";
   var LROT = {{ LISTAS_ROT|tojson }}, WROT = {{ WL_ROT|tojson }};
-  var LOCAL = {llm_done: 1, whois_done: 1, search_done: 1, rules_final: 1, lista_local: 1, llm_start: 1, whois_start: 1, search_start: 1};
-  var INICIO = {llm_start: 1, whois_start: 1, search_start: 1};
+  var LOCAL = {llm_done: 1, whois_done: 1, search_done: 1, rules_final: 1, lista_local: 1, llm_start: 1, whois_start: 1, search_start: 1,
+               investigacao_start: 1, investigacao_done: 1};   // fase 6 (investigação profunda) usa a IA local
+  var INICIO = {llm_start: 1, whois_start: 1, search_start: 1, investigacao_start: 1};
   var DEC = {lista_add: 1, aprovado: 1};
   var COR = {TRABALHO: '#22c55e', NAO_TRABALHO: '#f59e0b', SUSPEITO: '#fb923c', MALICIOSO: '#ef4444', DESCONHECIDO: '#94a3b8'};
   var MAX = 150, SEGURA = 3200;   // linhas por etapa; ms que o resultado fica no cartão antes de ir p/ a tabela
@@ -281,8 +282,9 @@ document.addEventListener('alpine:init', function () {
     if (ev.risk != null) r.risco = ev.risk;
     if (ev.work != null) r.trab = ev.work;
     if (INICIO[ev.kind]) {
-      if (ev.kind === 'llm_start' && !r.run)   // nova análise do mesmo domínio: o resultado anterior não vale mais
+      if ((ev.kind === 'llm_start' || ev.kind === 'investigacao_start') && !r.run)   // nova análise: o resultado anterior não vale mais
         ['lista', 'conf', 'risco', 'trab', 'estado', 'veredito', 'proximo', 'motivo', 'seg', 'modelo'].forEach(function (k) { r[k] = null; }), r._segLista = false;
+      if (ev.kind === 'investigacao_start') { r.aplicado = false; r.entrada = 'investigacao'; }
       if (ev.kind === 'llm_start') {
         r.aplicado = false;
         var en = / · (novo|reavaliação|reanálise pedida)[^·]*$/.exec(d);
@@ -303,6 +305,11 @@ document.addEventListener('alpine:init', function () {
         : /decisão humana/.test(t) ? 'hm' : /fase 4|IA online/.test(t) ? 'on' : '';
       r.proximo = (t.match(/· (confiança[^·]*|lista atual mantida|decisão humana[^·]*)(?: · desconhecido: vai p\/ a fase 4 \(IA online\))?$/) || [])[1] || '';
       if (/vai p\/ a fase 4 \(IA online\)$/.test(t) && !/confiança[^·]*vai p\/ a fase 4/.test(t)) r.proximo = (r.proximo ? r.proximo + ' · ' : '') + 'desconhecido: vai p/ a IA online';
+    } else if (ev.kind === 'investigacao_done') {   // "fase 6 · aplicou wl:x (90%) · serviço · motivo" | "fase 6 · sem certeza: … · …"
+      var iq = d.split(' · ');
+      if ((m = /^aplicou (\S+) \((\d+)%\)/.exec(iq[1] || ''))) { r.lista = m[1]; r.conf = +m[2]; r.estado = 'ok'; r.veredito = 'investigação profunda'; }
+      else { r.estado = ''; r.proximo = 'investigação: ' + (iq[1] || 'sem certeza'); }
+      r.servico = iq[2] || r.servico; r.motivo = iq.slice(3).join(' · ') || r.motivo;
     } else if (ev.kind === 'online_done') {
       if ((m = /fase 4 · ([^·]+) · lista (\S+) \((\d+)%\)/.exec(d))) { r.modelo = m[1].trim(); r.lista = m[2]; r.conf = +m[3]; }
       var q = d.split(' · ');
@@ -325,7 +332,7 @@ document.addEventListener('alpine:init', function () {
       kpis: [{v: '–', l: 'na fila local', s: ''}, {v: '–', l: 'na fila online', s: ''},
              {v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
       rows: {e1: [], e2: []}, lane: {e1: [], e2: []},
-      ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida'},
+      ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: 'Investigação'},
             e2: {novo: '1ª vez', reavaliacao: 'Revalidação', pedida: 'Reanálise pedida'}},
       paused: false, upd: '', agora: Date.now(), carregado: false, sel: null,
 

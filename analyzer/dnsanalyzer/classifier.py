@@ -603,6 +603,18 @@ def _busca_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
     _fase_worker(stop, passo, "worker da busca na web")
 
 
+def _investigacao_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
+    """Fase 6 (29/09): investigação profunda de DESCONHECIDOS/SUSPEITOS, 1 por vez, só com a fila da fase 1 vazia —
+    na GPU do reforço se no ar, senão na VM (bem mais devagar)."""
+    from . import investigacao
+
+    def passo():
+        with db.conn() as c:
+            scats = site_categories(c)
+        return investigacao.fase(reforco.cliente(), cats, scats)
+    _fase_worker(stop, passo, "worker da investigação profunda")
+
+
 def _fase_worker(stop, passo, nome: str) -> None:
     backoff = 0
     while not stop():
@@ -722,7 +734,7 @@ def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
     db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
-                    + cfg.whois_workers)
+                    + cfg.whois_workers + (1 if cfg.investigacao_enabled else 0))
     liberar_reservas_orfas()
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
@@ -756,6 +768,11 @@ def run_forever(stop=lambda: False) -> None:
         log.info("fase 3 (busca na web) em paralelo")
     for i in range(cfg.online_workers):
         threading.Thread(target=_online_worker, args=(stop,), daemon=True, name=f"online-{i}").start()
+    if cfg.llm_enabled and cfg.investigacao_enabled:
+        threading.Thread(target=_investigacao_worker, args=(stop, cats, reforco), daemon=True,
+                         name="investigacao").start()
+        log.info("fase 6 (investigação profunda): com a fila da IA vazia, até %d dias entre reavaliações, aplica com "
+                 "confiança >= %.2f", cfg.investigacao_dias, cfg.investigacao_confianca_min)
     log.info("fase 4 (IA online): %s", " | ".join(",".join(f"{m} {r}/min {d}/dia" for m, r, d in n) for n in online.niveis())
              if online.habilitado() else "desligada (sem GEMINI_API_KEY)")
     while not stop():

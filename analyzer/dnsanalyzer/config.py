@@ -113,6 +113,9 @@ class Settings:
     lista_confianca_min: float
     online_confianca_min: float
     online_enabled: bool
+    investigacao_enabled: bool         # fase 6: investigação profunda com a fila da IA vazia
+    investigacao_dias: int             # reinvestiga depois de N dias (ou quando o domínio é reanalisado)
+    investigacao_confianca_min: float  # aplica classificação/lista só com esta confiança (e serviço reconhecido)
     online_workers: int
     gemini_api_key: str
     gemini_api_keys_extra: list
@@ -236,6 +239,10 @@ def load_settings() -> Settings:
         # a IA online responde 0,9 quando sabe e 0,8 p/ "provável" (bem calibrada p/ lista); a local exige 0,9
         online_confianca_min=float(os.environ.get("ONLINE_CONFIANCA_MIN") or 0.8),
         online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 4 (só com GEMINI_API_KEY)
+        # fase 6 (29/09): DESCONHECIDO/SUSPEITO investigados a fundo quando a fila da IA esvazia (até ~10 min cada)
+        investigacao_enabled=_bool(os.environ.get("INVESTIGACAO_ENABLED"), False),
+        investigacao_dias=_int("INVESTIGACAO_DIAS", 14),
+        investigacao_confianca_min=float(os.environ.get("INVESTIGACAO_CONFIANCA_MIN") or 0.85),
         online_workers=max(_int("ONLINE_WORKERS", 6), 1),   # consultas simultâneas (Gemma é lento; a cota é por modelo)
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
         # chaves de outros projetos (cada uma com a própria cota por modelo), usadas depois da principal

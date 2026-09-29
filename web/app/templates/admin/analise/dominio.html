@@ -30,6 +30,34 @@
   </p>
 </div>
 
+{% set inv = dm.investigacao %}
+{% if inv %}{% set v = inv.veredito or {} %}
+<div class="card">
+  <h2>Investigação profunda <span class="mut" style="font-size:.8rem;font-weight:400">· fase 6 · {{ inv.at|dt_sp }} · {{ (inv.segundos or 0)|round|int }} s
+    {%- for r in inv.rodadas or [] %}{% if loop.last %} · {{ r.modelo }}{{ ' (GPU)' if r.gpu }}{% endif %}{% endfor %}</span></h2>
+  <p style="margin:.2rem 0 .6rem">
+    {% if inv.aplicado %}<span class="stt ok">✓ aplicado</span>{% else %}<span class="stt" style="color:var(--mut)">só dossiê</span>
+      <span class="mut" style="font-size:.85rem">— {{ inv.sem_aplicar }}</span>{% endif %}
+  </p>
+  <p style="margin:0 0 .6rem"><b>{{ v.service or 'serviço não identificado' }}</b>
+    {% if v.classification %} · {{ m.badge(v.classification) }}{% endif %}
+    {% if v.category %} · {{ m.cat(v.category) }}{% endif %}
+    {% if v.lista %} · lista <code>{{ v.lista }}</code>{% endif %}
+    · confiança {{ ((v.confidence or 0) * 100)|round|int }}%</p>
+  {% if v.motivo %}<p style="margin:0 0 .6rem">{{ v.motivo }}{% if v.evidencias %} <span class="mut">({{ v.evidencias|join(', ') }})</span>{% endif %}</p>{% endif %}
+  {% if inv.antes and inv.aplicado %}<p class="hint" style="margin:0 0 .6rem">Antes: {{ inv.antes.classification or '—' }} · {{ inv.antes.category or '—' }} · lista {{ inv.antes.lista_ia or inv.antes.lista_wl or '—' }}</p>{% endif %}
+  <details>
+    <summary class="mut" style="cursor:pointer">Evidências novas desta investigação ({{ (inv.evidencias or [])|length }})</summary>
+    <table style="margin-top:.4rem"><tbody>
+      {% for e in inv.evidencias or [] %}
+        <tr><td style="width:3rem"><code>{{ e.id }}</code></td><td><span class="tag">{{ e.kind }}</span> {{ e.text }}</td></tr>
+      {% endfor %}
+    </tbody></table>
+    {% if inv.plano and inv.plano.hipotese %}<p class="hint">Hipótese da 1ª rodada: {{ inv.plano.hipotese }}</p>{% endif %}
+  </details>
+</div>
+{% endif %}
+
 <div class="two">
   <div class="card">
     <h2>Por que essa classificação?</h2>
@@ -38,7 +66,7 @@
       <tbody>
       {% for r in dm.reasons %}
         <tr><td>{% if r.evidence_id %}<code>{{ r.evidence_id }}</code>{% endif %}</td><td>{{ r.text }}</td>
-            <td class="mut">{{ {'ia':'IA','regras':'regras','sistema':'sistema'}.get(r.by, r.by) }}</td></tr>
+            <td class="mut">{{ {'ia':'IA','regras':'regras','sistema':'sistema','investigacao':'investigação profunda'}.get(r.by, r.by) }}</td></tr>
       {% else %}<tr><td colspan="3" class="mut">Sem justificativas registradas.</td></tr>{% endfor %}
       </tbody>
     </table>

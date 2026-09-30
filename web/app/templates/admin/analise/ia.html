@@ -165,6 +165,21 @@
   }
   @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin,.fila .spin{animation:none}}
 
+  /* menu do Pausar */
+  .pz{position:relative}
+  .pz-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:230px;padding:6px;display:flex;flex-direction:column;gap:2px}
+  html[data-theme="dark"] .pz-menu{background:#0c1322}
+  .pz-menu button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;font:inherit;font-size:.82rem;color:var(--tx);
+                  background:none;border:0;border-radius:8px;padding:7px 9px;cursor:pointer}
+  .pz-menu button:hover:not(:disabled){background:var(--hov)}
+  .pz-menu button:disabled{cursor:not-allowed;opacity:.55}
+  .pz-menu small{margin-left:auto;color:var(--r-md);font-weight:700}
+  .pz-ck{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--mu);flex:0 0 auto;position:relative}
+  .pz-ck.on{background:var(--am);border-color:var(--am)}
+  .pz-ck.on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+  .pz-menu hr{border:0;border-top:1px solid var(--ln);margin:4px 2px}
+  .pz-err{margin:4px 8px;color:var(--rd);font-size:.78rem}
+
   /* modal da fila */
   dialog.dlg.fila{max-width:780px;padding:0;background:var(--th);color:var(--tx);border:1px solid var(--ln);display:none;flex-direction:column}
   html[data-theme="dark"] dialog.dlg.fila{background:#0c1322}
@@ -210,7 +225,27 @@
     <span class="sp"></span>
     <small x-text="upd"></small>
     <button type="button" class="ghost" @click="abrirFila()">☰ Fila</button>
-    <button type="button" class="ghost" :class="{off: paused}" @click="pausar()" x-text="paused ? '▶ Continuar' : '⏸ Pausar'"></button>
+    <div class="pz" @click.outside="pz.aberto = false" @keydown.escape="pz.aberto = false">
+      <button type="button" class="ghost" :class="{off: pausados().length}" @click="pz.aberto = !pz.aberto"
+              :aria-expanded="pz.aberto" aria-haspopup="menu"
+              x-text="pausados().length ? '⏸ Pausado: ' + pausados().join(', ') : '⏸ Pausar'"></button>
+      <div class="pz-menu glass" role="menu" x-show="pz.aberto" x-transition.opacity>
+        <template x-for="k in PAUSAS" :key="k.k">
+          <button type="button" role="menuitemcheckbox" :aria-checked="!!(ctrl[k.k] && ctrl[k.k].pausado)"
+                  :disabled="!SUPER || pz.enviando" @click="alternar(k.k)"
+                  :title="ctrl[k.k] && ctrl[k.k].pausado && ctrl[k.k].por ? 'pausado por ' + ctrl[k.k].por + ' às ' + hora(ctrl[k.k].em) : k.dica">
+            <span class="pz-ck" :class="{on: ctrl[k.k] && ctrl[k.k].pausado}"></span>
+            <span x-text="k.l"></span>
+            <small x-text="ctrl[k.k] && ctrl[k.k].pausado ? (k.k === 'reforco' ? 'pausado' : 'pausada') : ''"></small>
+          </button>
+        </template>
+        <hr>
+        <button type="button" role="menuitemcheckbox" :aria-checked="paused" @click="pausar()" title="só esta tela: para de buscar eventos novos">
+          <span class="pz-ck" :class="{on: paused}"></span><span>Atualização da tela</span>
+        </button>
+        <p class="pz-err" x-show="pz.erro" x-text="pz.erro"></p>
+      </div>
+    </div>
   </section>
 
   <dialog class="dlg fila" x-ref="fila" @close="fila.aberta = false" @click.self="$refs.fila.close()">
@@ -332,6 +367,8 @@
 document.addEventListener('alpine:init', function () {
   var URL_EV = "{{ url_for('analise.ia_eventos') }}";
   var URL_FILA = "{{ url_for('analise.ia_fila') }}";
+  var URL_CTRL = "{{ url_for('analise.ia_controle', chave='__K__') }}";
+  var SUPER = {{ 'true' if adm and adm.is_super else 'false' }};
   var URL_DOM = "{{ url_for('analise.dominio', nome='__N__', t=tid) }}";
   var LROT = {{ LISTAS_ROT|tojson }}, WROT = {{ WL_ROT|tojson }};
   var LOCAL = {llm_done: 1, whois_done: 1, search_done: 1, rules_final: 1, lista_local: 1, llm_start: 1, whois_start: 1, search_start: 1,
@@ -416,6 +453,10 @@ document.addEventListener('alpine:init', function () {
       FENT: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: '2ª opinião',
              infra: 'Infraestrutura', decisoes: 'Decisões', duvida: 'Dúvida de lista'},
       fila: {aberta: false, aba: 'e1', d: {}, upd: '', erro: '', carregando: false},
+      SUPER: SUPER, ctrl: {}, pz: {aberto: false, enviando: false, erro: ''},
+      PAUSAS: [{k: 'local', l: 'Fila local', c: 'local', dica: 'IA local: fase 1, WHOIS, busca na web, listas e investigação (as regras seguem)'},
+               {k: 'online', l: 'Fila online', c: 'online', dica: 'IA online (fase 4)'},
+               {k: 'reforco', l: 'Reforço (GPU)', c: 'reforço', dica: 'os PCs com GPU param; a IA local segue só na VM'}],
 
       init() {
         // no desktop a página cabe na janela: a altura disponível começa onde o painel começa
@@ -588,6 +629,7 @@ document.addEventListener('alpine:init', function () {
           {v: d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–', l: 'por domínio', s: 'tempo médio da IA local'},
           {v: m ? '~' + (m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2)) : '–', l: 'p/ zerar a fila',
            s: 'pelo ritmo da última hora'}];
+        if (d.controle) this.ctrl = d.controle;
         this.sincroniza(d);
       },
 
@@ -607,6 +649,21 @@ document.addEventListener('alpine:init', function () {
           .catch((e) => { this.upd = 'falha (' + e.message + ')'; });
       },
       pausar() { this.paused = !this.paused; if (!this.paused) this.poll(); },
+      pausados() {
+        var p = this.PAUSAS.filter((k) => this.ctrl[k.k] && this.ctrl[k.k].pausado).map((k) => k.c);
+        return this.paused ? p.concat(['tela']) : p;
+      },
+      alternar(k) {
+        var novo = !(this.ctrl[k] && this.ctrl[k].pausado);
+        this.pz.enviando = true; this.pz.erro = '';
+        fetch(URL_CTRL.replace('__K__', k), {method: 'POST', credentials: 'same-origin',
+                                              headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+                                              body: JSON.stringify({pausado: novo})})
+          .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j; }); })
+          .then((j) => { this.ctrl = j; })
+          .catch((e) => { this.pz.erro = e.message; })
+          .finally(() => { this.pz.enviando = false; });
+      },
       abrirFila() {
         this.fila.aberta = true; this.$refs.fila.showModal(); this.carregaFila();
         var auto = setInterval(() => { if (!this.fila.aberta) return clearInterval(auto); this.carregaFila(); }, 15000);

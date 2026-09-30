@@ -49,3 +49,17 @@ def test_rota_da_fila_com_analisador_fora(cli, monkeypatch):
     monkeypatch.setattr(api, "get", falha)
     r = cli.c.get("/analise/ia/fila")
     assert r.status_code == 502 and "fora do ar" in r.get_json()["error"]
+
+
+def test_pausar_tem_as_tres_filas_e_so_super_altera(cli, monkeypatch):
+    from app import analyzer_client as api
+    html = cli.c.get("/analise/ia").get_data(as_text=True)
+    assert "Fila local" in html and "Fila online" in html and "Reforço (GPU)" in html and "Atualização da tela" in html
+    enviados = []
+    monkeypatch.setattr(api, "put", lambda path, body: enviados.append((path, body)) or {"online": {"pausado": True}})
+    r = cli.c.post("/analise/ia/controle/online", json={"pausado": True})
+    assert r.status_code == 403 and not enviados                     # operador comum
+    monkeypatch.setattr("app.auth.admin_atual", lambda: SimpleNamespace(email="chefe@2d", is_super=True, ativo=True))
+    monkeypatch.setattr("app.analise.admin_atual", lambda: SimpleNamespace(email="chefe@2d", is_super=True, ativo=True))
+    r = cli.c.post("/analise/ia/controle/online", json={"pausado": True})
+    assert r.status_code == 200 and enviados == [("/ai/controle/online", {"pausado": True, "by": "chefe@2d"})]

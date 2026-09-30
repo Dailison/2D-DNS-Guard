@@ -790,6 +790,21 @@ def ia_eventos():
         return jsonify({"error": str(e)}), 502
 
 
+@analise_bp.post("/ia/controle/<chave>")
+def ia_controle(chave):
+    """Botão Pausar: pausa/retoma a fila local, a fila online ou o reforço no classificador (só super)."""
+    adm = admin_atual()
+    if not adm or not adm.is_super:
+        return jsonify({"error": "Só usuários super podem pausar as filas."}), 403
+    d = request.get_json(silent=True) or {}
+    try:
+        r = api.put(f"/ai/controle/{quote(chave, safe='')}", {"pausado": bool(d.get("pausado")), "by": _quem()})
+    except AnalyzerError as e:
+        return jsonify({"error": str(e)}), 502
+    current_app.logger.info("IA ao vivo: %s %s %s", _quem(), "pausou" if d.get("pausado") else "retomou", chave)
+    return jsonify(r)
+
+
 @analise_bp.get("/ia/fila")
 def ia_fila():
     """Botão "Fila": o que espera em cada etapa, na ordem em que o classificador pega."""

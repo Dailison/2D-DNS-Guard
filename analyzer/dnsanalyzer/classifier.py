@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, db, enrich, listas, listas_ia, online, ti, webintel, whitelist, whois
+from . import catalog, controle, db, enrich, listas, listas_ia, online, ti, webintel, whitelist, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -584,6 +584,8 @@ class _Reforco:
         return ok
 
     def cliente(self) -> OllamaClient:
+        if controle.pausado("reforco"):   # botão Pausar: só a VM
+            return self.vm
         for i in range(len(self.extras)):
             x = self.extras[(self.vez + i) % len(self.extras)]
             if self._no_ar(x):
@@ -626,6 +628,9 @@ def _fase_worker(stop, passo, nome: str) -> None:
     backoff = 0
     while not stop():
         try:
+            if controle.pausado("local"):   # botão Pausar (30/09): WHOIS, busca na web e investigação também param
+                time.sleep(controle.ESPERA_S)
+                continue
             st = passo()
             if st == "idle":
                 time.sleep(30)
@@ -643,6 +648,9 @@ def _online_worker(stop) -> None:
     """Fase 4: IA online (Gemini/Gemma) — ONLINE_WORKERS em paralelo; a cota (RPM/RPD) é por modelo."""
     while not stop():
         try:
+            if controle.pausado("online"):   # botão Pausar (30/09)
+                time.sleep(controle.ESPERA_S)
+                continue
             with db.conn() as c:
                 scats = [r["code"] for r in site_categories(c)]
             st = online.fase(scats)
@@ -695,6 +703,9 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
     backoff, no_ar = 0, None
     while not stop():
         try:
+            if controle.pausado("local") or (client.extra and controle.pausado("reforco")):   # botão Pausar (30/09)
+                time.sleep(controle.ESPERA_S)
+                continue
             if client.extra:
                 ok, motivo = client.available()
                 if ok != no_ar and wid % 100 == 0:   # 1 aviso por servidor, não por worker
@@ -812,6 +823,9 @@ def run_forever(stop=lambda: False) -> None:
                 last_stale = time.monotonic()
             if not cfg.llm_enabled:
                 time.sleep(30)
+                continue
+            if controle.pausado("local"):   # botão Pausar (30/09): regras e manutenção seguem, a IA local para
+                time.sleep(controle.ESPERA_S)
                 continue
             # IA da VM (só CPU) como reserva: com o reforço (GPU) no ar, o laço principal também usa a GPU
             status = phase_b(cliente_etapa2() if cfg.llm_vm_reserva else client, cats)

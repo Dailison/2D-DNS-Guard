@@ -489,3 +489,17 @@ def test_charts_ia_novos_por_dia(api):
     j = api.get("/charts/ia-novos", params={"dias": 7}, headers=H).json()["dias"]
     assert len(j) == 7 and j[-1]["novos"] == 2 and j[-2]["novos"] == 1 and sum(d["novos"] for d in j) == 3
     assert j[0]["dia"] < j[-1]["dia"]
+
+
+def test_controle_pausa_as_filas(api):
+    """30/09: botão Pausar do IA ao vivo pausa a fila local, a online ou o reforço de verdade (controle.py)."""
+    from dnsanalyzer import controle
+    est = api.get("/ai/controle", headers=H).json()
+    assert set(est) == {"local", "online", "reforco"} and not any(v["pausado"] for v in est.values())
+    r = api.put("/ai/controle/online", json={"pausado": True, "by": "ti@2d"}, headers=H).json()
+    assert r["online"]["pausado"] and r["online"]["por"] == "ti@2d" and not r["local"]["pausado"]
+    assert controle.pausado("online") and not controle.pausado("reforco")
+    assert api.get("/ai/events", headers=H).json()["controle"]["online"]["pausado"]
+    assert api.put("/ai/controle/tudo", json={"pausado": True}, headers=H).status_code == 400
+    api.put("/ai/controle/online", json={"pausado": False, "by": "ti@2d"}, headers=H)
+    assert not controle.estado(fresco=True)["online"]["pausado"]

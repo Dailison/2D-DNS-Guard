@@ -757,6 +757,26 @@ def source_update(sid: int, body: SourcePatch):
         return c.execute("SELECT * FROM ti_sources WHERE id=%s", (sid,)).fetchone()
 
 
+class ControleIn(BaseModel):
+    pausado: bool
+    by: str | None = None
+
+
+@app.get("/ai/controle", dependencies=[Depends(auth)])
+def ai_controle():
+    """Pausas do botão Pausar do IA ao vivo: fila local, fila online e reforço (controle.py)."""
+    from . import controle
+    return controle.estado(fresco=True)
+
+
+@app.put("/ai/controle/{chave}", dependencies=[Depends(auth)])
+def ai_controle_definir(chave: str, body: ControleIn):
+    from . import controle
+    if chave not in controle.CHAVES:
+        raise HTTPException(400, f"chave inválida: {chave}")
+    return controle.definir(chave, body.pausado, (body.by or "")[:120] or None)
+
+
 @app.get("/ai/fila", dependencies=[Depends(auth)])
 def ai_fila(limit: int = Query(100, ge=1, le=300)):
     """Botão "Fila" do IA ao vivo (30/09): o que espera em cada etapa, na ORDEM em que o classificador pega
@@ -871,8 +891,9 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
     eta = None
     if hour["done"] and queue["ia"]:   # pelo ritmo real (várias análises simultâneas / reforço com GPU)
         eta = int(queue["ia"] * 3600 / hour["done"])
+    from . import controle
     return {"events": events, "current": cur, "em_analise": em_analise, "queue": queue, "last_hour": hour, "eta_seconds": eta,
-            "llm": {"ok": ok, "detail": msg, "model": settings().ollama_model}}
+            "llm": {"ok": ok, "detail": msg, "model": settings().ollama_model}, "controle": controle.estado()}
 
 
 @app.get("/runs", dependencies=[Depends(auth)])

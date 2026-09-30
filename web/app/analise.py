@@ -790,6 +790,15 @@ def ia_eventos():
         return jsonify({"error": str(e)}), 502
 
 
+@analise_bp.get("/ia/fila")
+def ia_fila():
+    """Botão "Fila": o que espera em cada etapa, na ordem em que o classificador pega."""
+    try:
+        return jsonify(api.get("/ai/fila", limit=request.args.get("limit", 150, type=int)))
+    except AnalyzerError as e:
+        return jsonify({"error": str(e)}), 502
+
+
 # ------------------------------------------------------------------ gráficos de análise (IA)
 _DIAS_SEMANA = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 

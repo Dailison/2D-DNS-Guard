@@ -757,6 +757,53 @@ def source_update(sid: int, body: SourcePatch):
         return c.execute("SELECT * FROM ti_sources WHERE id=%s", (sid,)).fetchone()
 
 
+@app.get("/ai/fila", dependencies=[Depends(auth)])
+def ai_fila(limit: int = Query(100, ge=1, le=300)):
+    """Botão "Fila" do IA ao vivo (30/09): o que espera em cada etapa, na ORDEM em que o classificador pega
+    (mesmos filtros e ordenação das reservas). Etapa 1 = IA local (fase 1), investigação (fase 6) e etapa 2 = IA online."""
+    from . import investigacao, online
+    with db.conn() as c:
+        f1 = ("llm_pending AND NOT locked AND (NOT dominio_decidido(id) OR reanalise_pedida)")
+        ja_ia = "EXISTS (SELECT 1 FROM classification_history h WHERE h.domain_id = d.id AND h.source IN ('llm', 'online'))"
+        e1 = c.execute(
+            "SELECT name, total_queries, classification, aguarda_recorrencia AS pouco_acesso, "
+            " CASE WHEN reanalise_pedida THEN 'pedida' WHEN " + ja_ia + " THEN 'reavaliacao' ELSE 'novo' END AS entrada, "
+            " COALESCE(claimed_at BETWEEN now() - interval '5 minutes' AND now(), false) AS analisando, "
+            " extract(epoch from now() - first_seen)::int AS desde_s "
+            "FROM domains d WHERE " + f1 + " ORDER BY (claimed_at BETWEEN now() - interval '5 minutes' AND now()) DESC, "
+            " " + ja_ia + " ASC, aguarda_recorrencia ASC, (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC, "
+            " total_queries DESC LIMIT %s", (limit,)).fetchall()
+        n1 = c.execute("SELECT count(*) AS n FROM domains d WHERE " + f1).fetchone()["n"]
+        fila_on = online._FILA.replace(online._RESERVA, "")
+        pedido = "(d.online_pedido_at IS NOT NULL AND (d.online_at IS NULL OR d.online_at < d.online_pedido_at))"
+        e2 = c.execute(
+            "SELECT d.name, d.total_queries, d.classification, d.lista_ia, "
+            " CASE WHEN " + pedido + " THEN 'investigacao' WHEN " + online._EM_INFRA.format(t="d") + " THEN 'infra' "
+            "      WHEN " + online._EM_DECISOES + " THEN 'decisoes' WHEN d.lista_duvida THEN 'duvida' "
+            "      WHEN d.online_resp IS NOT NULL THEN 'reavaliacao' ELSE 'novo' END AS entrada, "
+            " COALESCE(d.online_claimed_at > now() - interval '10 minutes' AND d.online_falhas = 0, false) AS analisando, "
+            " COALESCE(d.online_claimed_at > now() - interval '10 minutes' AND d.online_falhas > 0, false) AS aguardando "
+            "FROM domains d WHERE " + fila_on + " ORDER BY (d.online_claimed_at > now() - interval '10 minutes' "
+            " AND d.online_falhas = 0) DESC, " + online._EM_INFRA.format(t="d") + " DESC, " + online._EM_DECISOES + " DESC, "
+            " d.lista_duvida DESC, d.total_queries DESC LIMIT %s", (limit,)).fetchall()
+        n2 = c.execute("SELECT count(*) AS n FROM domains d WHERE " + fila_on).fetchone()["n"]
+        f6 = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') AND NOT locked AND NOT llm_pending "
+              "AND NOT dominio_decidido(id) AND (investigado_at IS NULL OR investigado_at < now() - make_interval(days => %(dias)s) "
+              " OR investigado_at < analyzed_at)")
+        par = {"dias": settings().investigacao_dias, "n": limit}
+        e6 = c.execute(
+            "SELECT name, total_queries, classification, "
+            " CASE WHEN investigado_at IS NULL THEN 'novo' ELSE 'reavaliacao' END AS entrada, "
+            " COALESCE(investigacao_claimed_at > now() - interval '30 minutes', false) AS analisando "
+            "FROM domains WHERE " + f6 + " ORDER BY (investigacao_claimed_at > now() - interval '30 minutes') DESC NULLS LAST, "
+            " (investigado_at IS NULL) DESC, total_queries DESC LIMIT %(n)s", par).fetchall()
+        n6 = c.execute("SELECT count(*) AS n FROM domains WHERE " + f6, par).fetchone()["n"]
+        fila1_vazia = not c.execute(investigacao._FILA_FASE1).fetchone()
+    return {"e1": {"total": n1, "itens": e1}, "e2": {"total": n2, "itens": e2, "habilitado": online.habilitado()},
+            "investigacao": {"total": n6, "itens": e6, "habilitado": settings().investigacao_enabled,
+                             "espera_etapa1": not fila1_vazia}}
+
+
 @app.get("/ai/events", dependencies=[Depends(auth)])
 def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
     """Feed "IA ao vivo": eventos novos (id > after_id), o que está em análise agora e o ritmo."""

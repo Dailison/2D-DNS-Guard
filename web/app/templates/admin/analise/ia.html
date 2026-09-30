@@ -163,7 +163,40 @@
     .eh{flex-wrap:wrap}.lane{flex-basis:100%;order:1}
     .tb .rk,.tb .tp{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
   }
-  @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin{animation:none}}
+  @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin,.fila .spin{animation:none}}
+
+  /* modal da fila */
+  dialog.dlg.fila{max-width:780px;padding:0;background:var(--th);color:var(--tx);border:1px solid var(--ln);display:none;flex-direction:column}
+  html[data-theme="dark"] dialog.dlg.fila{background:#0c1322}
+  dialog.dlg.fila[open]{display:flex;max-height:min(82vh,760px)}
+  .fila .fh{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
+  .fila .fh h3{margin:0;font-size:1rem;flex:1}
+  .fila .ftabs{display:flex;gap:6px;padding:0 16px 10px;border-bottom:1px solid var(--ln);flex-wrap:wrap}
+  .fila .ftabs button{font:inherit;font-size:.8rem;font-weight:600;color:var(--tx2);background:none;border:1px solid var(--ln);
+                      border-radius:999px;padding:4px 12px;cursor:pointer}
+  .fila .ftabs button b{font-variant-numeric:tabular-nums;color:var(--tx);margin-left:2px}
+  .fila .ftabs button.on{border-color:var(--ac);color:var(--ac);background:color-mix(in srgb,var(--ac) 9%,transparent)}
+  .fila .ftabs button.on b{color:var(--ac)}
+  .fila .fwrap{overflow:auto;padding:4px 16px 14px;min-height:120px}
+  .fila .ftb{width:100%;border-collapse:collapse;font-size:.84rem}
+  .fila .ftb th{position:sticky;top:0;background:var(--th);text-align:left;font-size:.72rem;font-weight:700;color:var(--mu);
+                text-transform:uppercase;letter-spacing:.04em;padding:8px 8px 6px;border-bottom:1px solid var(--ln)}
+  html[data-theme="dark"] .fila .ftb th{background:#0c1322}
+  .fila .ftb td{padding:6px 8px;border-bottom:1px solid var(--ln2);vertical-align:middle}
+  .fila .ftb .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx2)}
+  .fila .ftb td.dm{max-width:22rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fila .ftb td.dm a{color:var(--dom);font-weight:600;text-decoration:none}
+  .fila .ftb td.dm a:hover{text-decoration:underline}
+  .fila .ftb tr.an td{background:color-mix(in srgb,var(--ac) 6%,transparent)}
+  .fila .ftb .pill{font-size:.74rem;padding:2px 8px}
+  .fila .spin{display:inline-block;vertical-align:-1px;margin-right:6px;width:10px;height:10px;border-radius:50%;
+              border:2px solid color-mix(in srgb,var(--ac) 25%,transparent);border-top-color:var(--ac);animation:sp .8s linear infinite}
+  .eb.investigacao{color:var(--e-ped);border-color:var(--e-ped-bd);background:var(--e-ped-bg)}
+  .eb.infra,.eb.decisoes,.eb.duvida{color:var(--e-rea);border-color:var(--e-rea-bd);background:var(--e-rea-bg)}
+  .fila .fvazia,.fila .ferr{margin:14px 16px;color:var(--mu)}
+  .fila .ferr{color:var(--rd)}
+  .fila .fmais{display:block;margin-top:8px}
+  @media (max-width:640px){.fila .ftb th:nth-child(4),.fila .ftb td:nth-child(4){display:none}}
 </style>
 
 <div class="iav" x-data="iav" x-cloak>
@@ -176,8 +209,49 @@
     </template>
     <span class="sp"></span>
     <small x-text="upd"></small>
+    <button type="button" class="ghost" @click="abrirFila()">☰ Fila</button>
     <button type="button" class="ghost" :class="{off: paused}" @click="pausar()" x-text="paused ? '▶ Continuar' : '⏸ Pausar'"></button>
   </section>
+
+  <dialog class="dlg fila" x-ref="fila" @close="fila.aberta = false" @click.self="$refs.fila.close()">
+    <div class="fh">
+      <h3>Fila</h3>
+      <small x-text="fila.upd"></small>
+      <button type="button" class="ghost" @click="carregaFila()" :disabled="fila.carregando" title="Atualizar">↻</button>
+      <button type="button" class="ghost" @click="$refs.fila.close()" aria-label="Fechar">✕</button>
+    </div>
+    <div class="ftabs" role="tablist">
+      <template x-for="t in FILAS" :key="t.k">
+        <button type="button" role="tab" :aria-selected="fila.aba === t.k" :class="{on: fila.aba === t.k}" @click="fila.aba = t.k"
+                :title="t.dica"><span x-text="t.l"></span> <b x-text="fila.d[t.k] ? fila.d[t.k].total : '…'"></b></button>
+      </template>
+    </div>
+    <p class="ferr" x-show="fila.erro" x-text="fila.erro"></p>
+    <template x-if="fila.d[fila.aba]">
+      <div class="fwrap">
+        <p class="fvazia" x-show="!fila.d[fila.aba].itens.length">Fila vazia.</p>
+        <table class="ftb" x-show="fila.d[fila.aba].itens.length">
+          <thead><tr><th class="num">#</th><th>Domínio</th><th>Entrada</th><th class="num">Consultas</th><th>Hoje</th></tr></thead>
+          <tbody>
+            <template x-for="(r, i) in fila.d[fila.aba].itens" :key="r.name">
+              <tr :class="{an: r.analisando}">
+                <td class="num" x-text="r.analisando ? '' : i + 1"></td>
+                <td class="dm"><span class="spin" x-show="r.analisando" title="em análise agora"></span>
+                  <a :href="urlDom(r.name)" x-text="r.name"></a></td>
+                <td><span class="eb" :class="r.entrada" x-text="FENT[r.entrada] || r.entrada"></span>
+                  <small x-show="r.pouco_acesso" title="pouco acesso: no fim da fila"> · pouco acesso</small>
+                  <small x-show="r.aguardando" title="resposta inválida da IA online: tenta de novo em 10 min"> · aguardando</small></td>
+                <td class="num" x-text="(r.total_queries || 0).toLocaleString('pt-BR')"></td>
+                <td><span class="pill" :class="clsK(r.classification)" x-text="LBL[r.classification] || r.classification || '—'"></span></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <small class="fmais" x-show="fila.d[fila.aba].total > fila.d[fila.aba].itens.length"
+               x-text="'+ ' + (fila.d[fila.aba].total - fila.d[fila.aba].itens.length).toLocaleString('pt-BR') + ' na fila'"></small>
+      </div>
+    </template>
+  </dialog>
 
   {% for et, ico, tit, dsc in [("e1", "🧠", "Etapa 1 · IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
                                ("e2", "🌐", "Etapa 2 · IA online", "o que a IA local não decidiu com confiança")] %}
@@ -257,6 +331,7 @@
 <script>
 document.addEventListener('alpine:init', function () {
   var URL_EV = "{{ url_for('analise.ia_eventos') }}";
+  var URL_FILA = "{{ url_for('analise.ia_fila') }}";
   var URL_DOM = "{{ url_for('analise.dominio', nome='__N__', t=tid) }}";
   var LROT = {{ LISTAS_ROT|tojson }}, WROT = {{ WL_ROT|tojson }};
   var LOCAL = {llm_done: 1, whois_done: 1, search_done: 1, rules_final: 1, lista_local: 1, llm_start: 1, whois_start: 1, search_start: 1,
@@ -335,6 +410,12 @@ document.addEventListener('alpine:init', function () {
       ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: 'Investigação'},
             e2: {novo: '1ª vez', reavaliacao: 'Revalidação', pedida: 'Reanálise pedida'}},
       paused: false, upd: '', agora: Date.now(), carregado: false, sel: null,
+      FILAS: [{k: 'e1', l: 'Etapa 1 · IA local', dica: 'fase 1: na ordem em que a IA local pega'},
+              {k: 'investigacao', l: 'Investigação', dica: 'desconhecidos/suspeitos: só com a fila da etapa 1 vazia e a GPU no ar'},
+              {k: 'e2', l: 'Etapa 2 · IA online', dica: 'na ordem em que a IA online pega'}],
+      FENT: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: '2ª opinião',
+             infra: 'Infraestrutura', decisoes: 'Decisões', duvida: 'Dúvida de lista'},
+      fila: {aberta: false, aba: 'e1', d: {}, upd: '', erro: '', carregando: false},
 
       init() {
         // no desktop a página cabe na janela: a altura disponível começa onde o painel começa
@@ -346,6 +427,7 @@ document.addEventListener('alpine:init', function () {
 
       // ------------------------------------------------------------ formatação
       urlDom(n) { return URL_DOM.replace('__N__', encodeURIComponent(n)); },
+      clsK(c) { return c || 'PENDENTE'; },
       hora(iso) { return iso ? new Date(iso).toLocaleTimeString('pt-BR', {timeZone: 'America/Sao_Paulo'}) : ''; },
       dur(s) { s = Math.max(0, Math.round(s)); var m = Math.floor(s / 60); return m ? m + 'min ' + (s % 60) + 's' : s + 's'; },
       fr(v) { return v == null ? '' : v >= 70 ? 'r-hi' : v >= 40 ? 'r-md' : 'r-lo'; },
@@ -525,6 +607,23 @@ document.addEventListener('alpine:init', function () {
           .catch((e) => { this.upd = 'falha (' + e.message + ')'; });
       },
       pausar() { this.paused = !this.paused; if (!this.paused) this.poll(); },
+      abrirFila() {
+        this.fila.aberta = true; this.$refs.fila.showModal(); this.carregaFila();
+        var auto = setInterval(() => { if (!this.fila.aberta) return clearInterval(auto); this.carregaFila(); }, 15000);
+      },
+      carregaFila() {
+        if (this.fila.carregando) return;
+        this.fila.carregando = true;
+        fetch(URL_FILA, {credentials: 'same-origin'})
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then((d) => {
+            if (d.error) throw new Error(d.error);
+            this.fila.d = d; this.fila.erro = '';
+            this.fila.upd = 'atualizado ' + new Date().toLocaleTimeString('pt-BR');
+          })
+          .catch((e) => { this.fila.erro = 'Falha ao carregar a fila (' + e.message + ')'; })
+          .finally(() => { this.fila.carregando = false; });
+      },
     };
   });
 });

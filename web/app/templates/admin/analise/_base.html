@@ -59,7 +59,7 @@
 {% else %}
 <div class="an-top">
   <h1>Análise DNS <span class="mut" style="font-size:.8rem;font-weight:400">· IA local + IA online + Threat Intelligence</span></h1>
-  {% if aba != 'ia' %}{# IA ao vivo é global: sem filtro de cliente/período #}
+  {% if aba not in ('ia', 'graficos') %}{# IA ao vivo e gráficos da IA são globais: sem filtro de cliente/período #}
   <form method="get">
     <select name="t" onchange="this.form.submit()" title="Cliente">
       <option value="0" {{ 'selected' if tid == 0 }}>🌐 Todos os clientes</option>
@@ -81,6 +81,7 @@
   <a href="{{ url_for('analise.computadores', t=tid) }}" class="{{ 'on' if aba=='computadores' }}">Computadores</a>
   <a href="{{ url_for('analise.alertas', t=tid) }}" class="{{ 'on' if aba=='alertas' }}">Alertas</a>
   <a href="{{ url_for('analise.ia_ao_vivo', t=tid) }}" class="{{ 'on' if aba=='ia' }}">IA ao vivo</a>
+  <a href="{{ url_for('analise.graficos', t=tid) }}" class="{{ 'on' if aba=='graficos' }}">Gráficos</a>
 </nav>
 {% endif %}
 {% block an %}{% endblock %}

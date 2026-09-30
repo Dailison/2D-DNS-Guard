@@ -1,0 +1,95 @@
+{% extends "admin/analise/_base.html" %}
+{% block an %}
+<style>
+  .gr-card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem;position:relative}
+  .gr-card h2{margin:0;font-size:1rem}
+  .gr-top{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;flex-wrap:wrap;margin-bottom:.4rem}
+  .gr-total{font-size:.85rem;color:var(--mut)}
+  .gr-total b{color:var(--txt);font-size:1rem}
+  .gr svg{width:100%;height:auto;display:block;overflow:visible}
+  .gr .grade{stroke:var(--bd);stroke-width:1}
+  .gr .eixo-v{fill:var(--mut);font-size:11px}
+  .gr .eixo-d{fill:var(--mut);font-size:11.5px}
+  .gr .eixo-d.hoje{fill:var(--txt);font-weight:700}
+  .gr .barra{fill:#0f72bc}
+  html[data-theme="dark"] .gr .barra{fill:#3b9ae1}
+  .gr .valor{fill:var(--txt);font-size:12px;font-weight:700}
+  .gr .alvo{fill:transparent;cursor:default;outline:none}
+  .gr .alvo:hover + .barra,.gr .alvo:focus + .barra{opacity:.82}
+  .gr-tt{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--bd);border-radius:8px;
+         padding:.35rem .6rem;font-size:.82rem;box-shadow:0 6px 18px rgba(15,23,42,.14);white-space:nowrap;display:none;z-index:5}
+  .gr-tt b{font-size:.95rem}
+  .gr details{margin-top:.5rem;font-size:.85rem}
+  .gr details table{margin-top:.4rem;max-width:360px}
+  .gr details td.num,.gr details th.num{text-align:right}
+</style>
+
+{% set g = g_novos %}
+<section class="gr-card gr" id="grNovos">
+  <div class="gr-top">
+    <h2>Domínios novos analisados pela IA · últimos 7 dias</h2>
+    <span class="gr-total">total <b>{{ '{:,}'.format(g.total).replace(',', '.') }}</b></span>
+  </div>
+  {% if g.barras %}
+  <svg viewBox="0 0 {{ g.larg }} {{ g.alt }}" role="img" aria-label="Domínios novos analisados pela IA por dia, últimos 7 dias">
+    {% for l in g.linhas %}
+    <line class="grade" x1="{{ g.esq }}" x2="{{ g.fim_x }}" y1="{{ l.y|round(1) }}" y2="{{ l.y|round(1) }}"></line>
+    <text class="eixo-v" x="{{ g.esq - 8 }}" y="{{ (l.y + 4)|round(1) }}" text-anchor="end">{{ '{:,}'.format(l.v).replace(',', '.') }}</text>
+    {% endfor %}
+    {% for b in g.barras %}
+    <rect class="alvo" x="{{ b.slot_x|round(1) }}" y="0" width="{{ b.slot_w|round(1) }}" height="{{ g.base_y }}" tabindex="0"
+          data-dia="{{ b.dia.strftime('%d/%m/%Y') }}" data-v="{{ b.v }}" data-cx="{{ b.cx|round(1) }}" data-y="{{ b.y|round(1) }}"
+          aria-label="{{ b.rotulo }}: {{ b.v }} domínios novos"></rect>
+    {% if b.h > 0 %}
+      {% set r = [4, b.h, b.w / 2]|min %}
+      <path class="barra" d="M{{ b.x|round(1) }},{{ g.base_y }} V{{ (b.y + r)|round(1) }} a{{ r|round(1) }},{{ r|round(1) }} 0 0 1 {{ r|round(1) }},-{{ r|round(1) }} h{{ (b.w - 2 * r)|round(1) }} a{{ r|round(1) }},{{ r|round(1) }} 0 0 1 {{ r|round(1) }},{{ r|round(1) }} V{{ g.base_y }} Z"></path>
+    {% else %}
+      <rect class="barra" x="{{ b.x|round(1) }}" y="{{ g.base_y - 1 }}" width="{{ b.w|round(1) }}" height="1" opacity=".35"></rect>
+    {% endif %}
+    {% if b.mostrar_valor %}
+    <text class="valor" x="{{ b.cx|round(1) }}" y="{{ (b.y - 6)|round(1) }}" text-anchor="middle">{{ '{:,}'.format(b.v).replace(',', '.') }}</text>
+    {% endif %}
+    <text class="eixo-d{{ ' hoje' if loop.last }}" x="{{ b.cx|round(1) }}" y="{{ g.base_y + 20 }}" text-anchor="middle">{{ b.rotulo }}</text>
+    {% endfor %}
+  </svg>
+  <div class="gr-tt" role="status"></div>
+  <details>
+    <summary>Ver tabela</summary>
+    <table>
+      <thead><tr><th>Dia</th><th class="num">Domínios novos</th></tr></thead>
+      <tbody>
+      {% for b in g.barras %}<tr><td>{{ b.rotulo }}</td><td class="num">{{ '{:,}'.format(b.v).replace(',', '.') }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <p class="mut">Sem dados.</p>
+  {% endif %}
+</section>
+
+<script>
+(function () {
+  document.querySelectorAll(".gr").forEach(function (card) {
+    var tt = card.querySelector(".gr-tt"), svg = card.querySelector("svg");
+    if (!tt || !svg) return;
+    var fmt = new Intl.NumberFormat("pt-BR");
+    function mostra(alvo) {
+      var box = svg.getBoundingClientRect(), cbox = card.getBoundingClientRect(), esc = box.width / svg.viewBox.baseVal.width;
+      tt.textContent = "";
+      var d = document.createElement("div"); d.textContent = alvo.dataset.dia; tt.appendChild(d);
+      var v = document.createElement("b"); v.textContent = fmt.format(+alvo.dataset.v) + " domínios novos"; tt.appendChild(v);
+      tt.style.display = "block";
+      var x = box.left - cbox.left + (+alvo.dataset.cx) * esc - tt.offsetWidth / 2;
+      var y = box.top - cbox.top + (+alvo.dataset.y) * esc - tt.offsetHeight - 10;
+      tt.style.left = Math.max(4, Math.min(x, cbox.width - tt.offsetWidth - 4)) + "px";
+      tt.style.top = Math.max(4, y) + "px";
+    }
+    function esconde() { tt.style.display = "none"; }
+    svg.querySelectorAll(".alvo").forEach(function (a) {
+      ["mouseenter", "focus"].forEach(function (ev) { a.addEventListener(ev, function () { mostra(a); }); });
+      ["mouseleave", "blur"].forEach(function (ev) { a.addEventListener(ev, esconde); });
+    });
+  });
+})();
+</script>
+{% endblock %}

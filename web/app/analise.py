@@ -790,6 +790,54 @@ def ia_eventos():
         return jsonify({"error": str(e)}), 502
 
 
+# ------------------------------------------------------------------ gráficos de análise (IA)
+_DIAS_SEMANA = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+
+def _escala(maior: int) -> int:
+    """Topo "redondo" do eixo (1, 1,2 … 8 × 10^k) ≥ maior, com a metade também redonda."""
+    if maior <= 0:
+        return 10
+    import math
+    base = 10 ** math.floor(math.log10(maior))
+    return next(m * base for m in (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10) if m * base >= maior)
+
+
+def _barras(dados: list[dict], campo: str, larg: int = 720, alt: int = 260) -> dict:
+    """Geometria de um gráfico de barras (SVG) de uma série: barras, eixo y com 3 linhas e rótulos só no maior e no
+    último (hoje) — o resto no tooltip e na tabela."""
+    from datetime import date
+    esq, dir_, topo, base = 48, 12, 24, 36
+    area_w, area_h = larg - esq - dir_, alt - topo - base
+    topo_eixo = _escala(max((d[campo] for d in dados), default=0))
+    slot = area_w / max(len(dados), 1)
+    bw = min(slot * 0.62, 72)
+    maior = max(range(len(dados)), key=lambda i: dados[i][campo]) if dados else -1
+    barras = []
+    for i, d in enumerate(dados):
+        v = d[campo]
+        h = area_h * v / topo_eixo
+        dia = date.fromisoformat(d["dia"])
+        barras.append({"x": esq + i * slot + (slot - bw) / 2, "w": bw, "y": topo + area_h - h, "h": h, "v": v,
+                       "cx": esq + i * slot + slot / 2, "slot_x": esq + i * slot, "slot_w": slot,
+                       "rotulo": ("hoje" if i == len(dados) - 1 else _DIAS_SEMANA[dia.weekday()]) + f" {dia:%d/%m}",
+                       "dia": dia, "mostrar_valor": i in (maior, len(dados) - 1) and v > 0})
+    linhas = [{"y": topo + area_h - area_h * f, "v": round(topo_eixo * f)} for f in (0, 0.5, 1)]
+    return {"larg": larg, "alt": alt, "esq": esq, "base_y": topo + area_h, "fim_x": larg - dir_, "barras": barras,
+            "linhas": linhas, "total": sum(d[campo] for d in dados)}
+
+
+@analise_bp.get("/graficos")
+def graficos():
+    """Gráficos de análise da IA (globais, como a IA ao vivo)."""
+    try:
+        novos = api.get("/charts/ia-novos", dias=7).get("dias", [])
+    except AnalyzerError as e:
+        flash(f"Falha ao carregar os gráficos: {e}", "erro")
+        novos = []
+    return render_template("admin/analise/graficos.html", aba="graficos", g_novos=_barras(novos, "novos"), **_ctx())
+
+
 # ------------------------------------------------------------------ fontes de ameaça (Threat Intelligence)
 @analise_bp.get("/fontes")
 def fontes():

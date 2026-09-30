@@ -1106,6 +1106,22 @@ def logs_classificar(body: ClassificarIn):
     return out
 
 
+@app.get("/charts/ia-novos", dependencies=[Depends(auth)])
+def charts_ia_novos(dias: int = Query(7, ge=1, le=90)):
+    """Gráficos de análise: domínios NOVOS analisados pela IA local por dia (dia de São Paulo) — a primeira análise da
+    IA de cada domínio (a "entrada: novo" da IA ao vivo; reanálises não contam). Dias sem análise vêm com 0."""
+    with db.conn() as c:
+        rows = c.execute(
+            "WITH primeira AS (SELECT domain_id, min(created_at) AS t FROM classification_history "
+            "                  WHERE source = 'llm' GROUP BY domain_id), "
+            " dias AS (SELECT generate_series((now() AT TIME ZONE 'America/Sao_Paulo')::date - (%(d)s - 1), "
+            "                                 (now() AT TIME ZONE 'America/Sao_Paulo')::date, interval '1 day')::date AS dia) "
+            "SELECT dias.dia, count(p.domain_id) AS novos FROM dias "
+            "LEFT JOIN primeira p ON (p.t AT TIME ZONE 'America/Sao_Paulo')::date = dias.dia "
+            "GROUP BY dias.dia ORDER BY dias.dia", {"d": dias}).fetchall()
+    return {"dias": [{"dia": r["dia"].isoformat(), "novos": r["novos"]} for r in rows]}
+
+
 @app.get("/charts", dependencies=[Depends(auth)])
 def charts(start: datetime, end: datetime, tid: int = 0, cls: list[str] = Query(default=[]),
            categoria: Optional[str] = None, resposta: Optional[str] = None, top: int = Query(15, le=50),

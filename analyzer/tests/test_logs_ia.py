@@ -470,3 +470,21 @@ def test_reserva_vence_em_5_min_e_quem_trabalha_renova(api, monkeypatch):
                       "WHERE name = 'adiada.com'").fetchone()
         assert a["futuro"], "adiamento do WHOIS não é renovado"
         c.execute("UPDATE domains SET claimed_at = NULL")
+
+
+def test_charts_ia_novos_por_dia(api):
+    """Gráfico: domínios novos analisados pela IA por dia (1ª análise 'llm'); reanálise não conta; dia vazio = 0."""
+    from dnsanalyzer import db
+    with db.conn() as c:
+        c.execute("DELETE FROM classification_history")
+        ids = [c.execute("INSERT INTO domains (name, tld) VALUES (%s, 'com') RETURNING id", (f"novo-graf{i}.com",)).fetchone()["id"]
+               for i in range(3)]
+        # hoje: 2 novos; um deles reanalisado hoje (não conta de novo); ontem: 1 novo; 'online' não conta
+        agora = "now()"
+        c.execute(f"INSERT INTO classification_history (domain_id, classification, source, created_at) VALUES "
+                  f"(%s, 'TRABALHO', 'llm', {agora}), (%s, 'TRABALHO', 'llm', {agora}), (%s, 'TRABALHO', 'llm', {agora} + interval '1 minute'), "
+                  f"(%s, 'TRABALHO', 'llm', {agora} - interval '1 day'), (%s, 'TRABALHO', 'online', {agora} - interval '3 days')",
+                  (ids[0], ids[1], ids[1], ids[2], ids[2]))
+    j = api.get("/charts/ia-novos", params={"dias": 7}, headers=H).json()["dias"]
+    assert len(j) == 7 and j[-1]["novos"] == 2 and j[-2]["novos"] == 1 and sum(d["novos"] for d in j) == 3
+    assert j[0]["dia"] < j[-1]["dia"]

@@ -27,7 +27,9 @@ import logging
 import re
 import shutil
 import socket
+import ssl
 import subprocess
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -129,7 +131,7 @@ def _abrir(url: str, cliente: httpx.Client, n: int = 1500) -> dict | None:
     html = r.text[:400_000]
     t = _TITULO.search(html)
     return {"url": str(r.url)[:200], "titulo": _texto(t.group(1), 120) if t else "", "texto": _texto(html, n),
-            "_html": html}
+            "_html": html, "_headers": r.headers}
 
 
 def _dig(tipo: str, nome: str) -> list[str]:
@@ -144,6 +146,43 @@ def _dig(tipo: str, nome: str) -> list[str]:
 
 
 # ------------------------------------------------------------------ fontes
+class _Ritmo:
+    """Limite de uma fonte externa gratuita, SEM esperar: estourou (ou a fonte está fora e foi pausada), ela fica de
+    fora desta vez. A coleta roda também antes da IA online (6 consultas em paralelo, ~2 mil domínios/dia)."""
+
+    def __init__(self, por_hora: int, intervalo: float = 0.0, por_dia: int = 0):
+        self.por_hora, self.intervalo, self.por_dia = por_hora, intervalo, por_dia
+        self.lock, self.hora, self.dia, self.ultimo, self.pausa_ate = threading.Lock(), [], [], 0.0, 0.0
+
+    def pode(self) -> bool:
+        with self.lock:
+            agora = time.time()
+            if agora < self.pausa_ate or agora - self.ultimo < self.intervalo:
+                return False
+            self.hora = [t for t in self.hora if agora - t < 3600]
+            self.dia = [t for t in self.dia if agora - t < 86400]
+            if len(self.hora) >= self.por_hora or (self.por_dia and len(self.dia) >= self.por_dia):
+                return False
+            self.ultimo = agora
+            self.hora.append(agora)
+            if self.por_dia:
+                self.dia.append(agora)
+            return True
+
+    def pausar(self, segundos: float) -> None:
+        self.pausa_ate = max(self.pausa_ate, time.time() + segundos)
+
+
+RITMO = {"certificados": _Ritmo(90), "crtsh": _Ritmo(20), "wayback": _Ritmo(240), "urlscan": _Ritmo(150),
+         "otx": _Ritmo(300), "virustotal": _Ritmo(60, intervalo=16, por_dia=480),   # VirusTotal grátis: 4/min, 500/dia
+         "urlscan_chave": _Ritmo(35, por_dia=900)}                                   # URLScan com chave: 1.000 buscas/dia
+
+
+def _com_ritmo(fonte: str, fn):
+    """Chama a fonte se o ritmo deixa (None = ficou de fora)."""
+    return fn() if RITMO[fonte].pode() else None
+
+
 def registros_dns(nome: str) -> dict:
     out = {"mx": _dig("MX", nome)[:6], "txt": [t[:160] for t in _dig("TXT", nome)][:15], "ns": _dig("NS", nome)[:6],
            "cname_www": _dig("CNAME", f"www.{nome}")[:2], "a": _dig("A", nome)[:3]}
@@ -157,19 +196,35 @@ def registros_dns(nome: str) -> dict:
     return out
 
 
-def certificados(nome: str, cliente: httpx.Client) -> dict | None:
-    try:
-        r = cliente.get("https://api.certspotter.com/v1/issuances",
-                        params=[("domain", nome), ("include_subdomains", "true"), ("expand", "dns_names"),
-                                ("expand", "issuer")], timeout=40)
-        if r.status_code != 200:
-            return None
-        itens = r.json()
-    except (httpx.HTTPError, ValueError):
+def certificados(nome: str, cliente: httpx.Client, reserva: bool = False) -> dict | None:
+    """Certificados públicos (CertSpotter; com `reserva`, o crt.sh quando o CertSpotter recusa — ele é lento, ~25 s)."""
+    itens = None
+    if RITMO["certificados"].pode():
+        try:
+            r = cliente.get("https://api.certspotter.com/v1/issuances",
+                            params=[("domain", nome), ("include_subdomains", "true"), ("expand", "dns_names"),
+                                    ("expand", "issuer")], timeout=40)
+            if r.status_code == 429:
+                RITMO["certificados"].pausar(1800)
+            elif r.status_code == 200:
+                itens = r.json()
+        except (httpx.HTTPError, ValueError):
+            pass
+    if itens is None and reserva and RITMO["crtsh"].pode():
+        try:
+            r = cliente.get("https://crt.sh/", params={"q": nome, "output": "json"}, timeout=45)
+            itens = [{"dns_names": (x.get("name_value") or "").split("\n"),
+                      "issuer": {"friendly_name": re.sub(r".*O=([^,]+).*", r"\1", x.get("issuer_name") or "")},
+                      "not_before": x.get("not_before")} for x in (r.json() if r.status_code == 200 else [])][:500]
+            if r.status_code != 200:
+                itens = None
+        except (httpx.HTTPError, ValueError):
+            RITMO["crtsh"].pausar(900)
+    if itens is None:
         return None
     nomes, emissores, datas = set(), set(), []
     for c in itens:
-        nomes.update(c.get("dns_names") or [])
+        nomes.update(n for n in c.get("dns_names") or [] if n)
         emissores.add(((c.get("issuer") or {}).get("friendly_name") or "")[:60])
         if c.get("not_before"):
             datas.append(c["not_before"][:10])
@@ -193,6 +248,21 @@ def wayback(nome: str, cliente: httpx.Client) -> dict | None:
         out = {"primeira": prim[:8], "ultima": (captura("-1") or prim)[:8]}
     except (httpx.HTTPError, ValueError):
         return None
+    try:   # o que foi arquivado: /wp-content = WordPress, /api/v2, /login, /checkout...
+        r = cliente.get("https://web.archive.org/cdx/search/cdx", timeout=25, params={
+            "url": nome, "matchType": "domain", "output": "json", "fl": "original", "collapse": "urlkey",
+            "filter": "statuscode:200", "limit": "400"})
+        urls = [x[0] for x in (r.json()[1:] if r.status_code == 200 and r.text.strip() else [])]
+        conta: dict[str, int] = {}
+        for u in urls:
+            p = urllib.parse.urlsplit(u if "://" in u else "http://" + u)
+            seg = (p.path.strip("/").split("/") or [""])[0][:40]
+            chave = f"{p.hostname or ''}/{seg}" if seg else (p.hostname or "")
+            conta[chave] = conta.get(chave, 0) + 1
+        out["enderecos"] = len(urls)
+        out["caminhos"] = [f"{k} ({v})" for k, v in sorted(conta.items(), key=lambda kv: -kv[1])[:15]]
+    except (httpx.HTTPError, ValueError):
+        pass
     for k in ("primeira", "ultima"):   # título do site em cada época
         try:
             h = cliente.get(f"https://web.archive.org/web/{out[k]}id_/http://{nome}/", timeout=20).text[:200_000]
@@ -201,6 +271,53 @@ def wayback(nome: str, cliente: httpx.Client) -> dict | None:
         except httpx.HTTPError:
             pass
     return out
+
+
+def _publico(p: dict) -> dict:
+    """Página sem os campos internos (_html, _headers): o que vai p/ o dossiê gravado."""
+    return {k: v for k, v in p.items() if not k.startswith("_")}
+
+
+_SCRIPT_SRC = re.compile(r"""<script[^>]+src\s*=\s*["']([^"']+)["']""", re.I)
+_GERADOR = re.compile(r"""<meta[^>]+name\s*=\s*["']generator["'][^>]*content\s*=\s*["']([^"']{1,80})["']""", re.I)
+_CSP_HOST = re.compile(r"(?:https?://)?(?:\*\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)", re.I)
+
+
+def _registravel(host: str) -> str | None:
+    return analyze_name((host or "").lower().lstrip("*.").rstrip("."), []).registrable
+
+
+def ecossistema(nome: str, html: str, base: str, cab) -> dict:
+    """Com quem o site se relaciona: servidor/tecnologia (cabeçalhos, gerador), nomes dos cookies, domínios da
+    política de segurança (CSP), scripts de terceiros carregados e para onde os links apontam. Um portal que carrega
+    o script e aponta para o domínio da empresa-mãe revela o dono; o gerador revela a plataforma (WordPress, Wix)."""
+    def contar(hosts):
+        conta: dict[str, int] = {}
+        for h in hosts:
+            reg = _registravel(h)
+            if reg and reg != nome:
+                conta[reg] = conta.get(reg, 0) + 1
+        return [k for k, _ in sorted(conta.items(), key=lambda kv: -kv[1])][:10]
+
+    out: dict = {}
+    if cab is not None:
+        tec = {k: cab.get(k) for k in ("server", "x-powered-by", "x-generator", "via", "x-served-by") if cab.get(k)}
+        if tec:
+            out["tecnologia"] = {k: v[:60] for k, v in tec.items()}
+        cookies = sorted({c.split("=", 1)[0].strip()[:40] for c in cab.get_list("set-cookie") if "=" in c})
+        if cookies:
+            out["cookies"] = cookies[:10]
+        csp = cab.get("content-security-policy") or ""
+        if csp:
+            out["csp"] = contar(_CSP_HOST.findall(csp))
+    g = _GERADOR.search(html or "")
+    if g:
+        out["gerador"] = g.group(1)
+    out["scripts"] = contar(urllib.parse.urlsplit(urllib.parse.urljoin(base, u)).hostname or ""
+                            for u in _SCRIPT_SRC.findall(html or ""))
+    out["links"] = contar(urllib.parse.urlsplit(urllib.parse.urljoin(base, u)).hostname or ""
+                          for u in _LINK.findall(html or "") if u.startswith(("http", "//")))
+    return {k: v for k, v in out.items() if v}
 
 
 def paginas_do_site(nome: str, cliente: httpx.Client) -> dict | None:
@@ -215,17 +332,41 @@ def paginas_do_site(nome: str, cliente: httpx.Client) -> dict | None:
         h = urllib.parse.urlsplit(u).hostname or ""
         if (h == host or h.endswith("." + nome)) and _PAGINAS.search(urllib.parse.urlsplit(u).path) and u not in links:
             links.append(u)
-    paginas = [{k: v for k, v in ini.items() if k != "_html"} | {"texto": ini["texto"][:800]}]
+    paginas = [_publico(ini) | {"texto": ini["texto"][:800]}]
     htmls = [ini["_html"]]
-    for u in links[:4]:
+    for u in links[:6]:
         p = _abrir(u, cliente)
         if p:
             htmls.append(p["_html"])
-            paginas.append({k: v for k, v in p.items() if k != "_html"} | {"texto": p["texto"][:800]})
+            paginas.append(_publico(p) | {"texto": p["texto"][:800]})
     tudo = " ".join(p["texto"] for p in paginas)
     apps = sorted({m.group(0)[:120] for h in htmls for m in _APP.finditer(h)})[:4]
     return {"paginas": paginas, "cnpjs": sorted(set(_CNPJ.findall(tudo)))[:5],
-            "emails": sorted(set(e.lower() for e in _EMAIL.findall(tudo)))[:8], "apps": apps}
+            "emails": sorted(set(e.lower() for e in _EMAIL.findall(tudo)))[:8], "apps": apps,
+            "ecossistema": ecossistema(nome, ini["_html"], base, ini.get("_headers"))}
+
+
+def tls_site(nome: str) -> dict | None:
+    """Certificado que o site apresenta AGORA: em certificado de empresa (OV/EV) o campo Organização traz a razão
+    social; os nomes alternativos mostram os outros domínios do mesmo dono. Só com certificado válido (sem validar,
+    o Python não entrega os campos)."""
+    if not _endereco_publico(f"https://{nome}/"):
+        return None
+    ctx = ssl.create_default_context()
+    try:
+        with socket.create_connection((nome, 443), timeout=8) as sock, ctx.wrap_socket(sock, server_hostname=nome) as t:
+            cert = t.getpeercert() or {}
+    except ssl.SSLCertVerificationError as e:
+        return {"valido": False, "erro": (e.verify_message or str(e))[:80]}
+    except (OSError, ValueError):
+        return None
+    campos = lambda chave: {k: v for x in cert.get(chave) or () for k, v in x}   # noqa: E731
+    suj, emi = campos("subject"), campos("issuer")
+    nomes = [v for k, v in cert.get("subjectAltName") or () if k == "DNS"]
+    outros = sorted({r for r in (_registravel(n) for n in nomes) if r and r != nome})
+    return {"valido": True, "organizacao": suj.get("organizationName"), "cn": suj.get("commonName"),
+            "pais": suj.get("countryName"), "emissor": emi.get("organizationName"), "outros_dominios": outros[:12],
+            "nomes": len(nomes)}
 
 
 _APP = re.compile(r"https?://(?:play\.google\.com/store/apps/details\?id=[\w.]+|apps\.apple\.com/[\w/-]+/id\d+)")
@@ -233,6 +374,8 @@ _APP = re.compile(r"https?://(?:play\.google\.com/store/apps/details\?id=[\w.]+|
 
 def urlscan(nome: str, cliente: httpx.Client) -> dict | None:
     """Varreduras públicas do URLScan.io (sem chave): título, servidor, redirecionamento, idade do domínio."""
+    if not RITMO["urlscan"].pode():
+        return None
     try:
         r = cliente.get("https://urlscan.io/api/v1/search/", params={"q": f"domain:{nome}", "size": 5}, timeout=20)
         if r.status_code != 200:
@@ -247,6 +390,57 @@ def urlscan(nome: str, cliente: httpx.Client) -> dict | None:
                        "servidor": p.get("server"), "asn": p.get("asnname"), "pais": p.get("country"),
                        "idade_dominio_dias": p.get("apexDomainAgeDays"), "quando": ((x.get("task") or {}).get("time") or "")[:10]})
     return {"varreduras": len(res), "vistos": vistos}
+
+
+def otx(nome: str, cliente: httpx.Client) -> dict | None:
+    """AlienVault OTX (grátis, sem chave): alertas de ameaça (pulses) que citam o domínio, a marcação de domínio
+    conhecido (validation), o DNS passivo (nomes e IPs já vistos, desde quando) e endereços já observados."""
+    base = f"https://otx.alienvault.com/api/v1/indicators/domain/{nome}"
+    try:
+        g = cliente.get(base + "/general", timeout=15)
+        if g.status_code >= 500 or g.status_code == 429:
+            RITMO["otx"].pausar(1800)   # instável (504/timeout): deixa de lado por 30 min
+            return None
+        if g.status_code != 200:
+            return None
+        j = g.json()
+    except (httpx.HTTPError, ValueError):
+        RITMO["otx"].pausar(1800)
+        return None
+    pi = j.get("pulse_info") or {}
+    pulses = pi.get("pulses") or []
+    out = {"alertas": pi.get("count") or 0,
+           "nomes_alertas": [(p.get("name") or "")[:80] for p in pulses[:4]],
+           "tags": sorted({t for p in pulses[:10] for t in (p.get("tags") or [])})[:10],
+           "validacao": [(v.get("name") or v.get("source") or "")[:60] for v in j.get("validation") or []][:4]}
+    try:
+        pd = cliente.get(base + "/passive_dns", timeout=15)
+        reg = (pd.json().get("passive_dns") or []) if pd.status_code == 200 else []
+        out["dns_passivo"] = {"registros": len(reg), "nomes": sorted({x.get("hostname") for x in reg if x.get("hostname")})[:15],
+                              "asns": sorted({(x.get("asn") or "")[:50] for x in reg if x.get("asn")})[:6],
+                              "desde": min((x.get("first") or "")[:10] for x in reg) if reg else None}
+        ul = cliente.get(base + "/url_list", params={"limit": 15}, timeout=15)
+        out["urls"] = [(x.get("url") or "")[:120] for x in ((ul.json().get("url_list") or []) if ul.status_code == 200 else [])][:10]
+    except (httpx.HTTPError, ValueError):
+        pass
+    return out
+
+
+def perfil_acesso(c, did: int) -> dict:
+    """Quem acessa e quando (logs agregados, 14 dias): quantas empresas e computadores, e o horário — só em
+    expediente (uso humano de trabalho), madrugada/fim de semana (serviço em segundo plano, atualização, telemetria)."""
+    emp = c.execute("SELECT count(*) AS empresas, COALESCE(sum(clients_count), 0) AS computadores "
+                    "FROM tenant_domains WHERE domain_id = %s", (did,)).fetchone()
+    hs = c.execute("SELECT extract(hour FROM bucket AT TIME ZONE 'America/Sao_Paulo')::int AS h, "
+                   " extract(isodow FROM bucket AT TIME ZONE 'America/Sao_Paulo')::int AS dow, sum(queries) AS q "
+                   "FROM query_agg WHERE domain_id = %s AND bucket > now() - interval '14 days' GROUP BY 1, 2",
+                   (did,)).fetchall()
+    total = sum(r["q"] for r in hs) or 0
+    pct = lambda f: round(100 * sum(r["q"] for r in hs if f(r)) / total) if total else 0   # noqa: E731
+    return {"empresas": emp["empresas"], "computadores": int(emp["computadores"]), "consultas_14d": int(total),
+            "horas_ativas": len({r["h"] for r in hs}),
+            "expediente_pct": pct(lambda r: r["dow"] <= 5 and 8 <= r["h"] < 18),
+            "madrugada_pct": pct(lambda r: r["h"] < 6), "fim_de_semana_pct": pct(lambda r: r["dow"] >= 6)}
 
 
 _GHOSTERY_URL = "https://github.com/ghostery/trackerdb/releases/latest/download/trackerdb.json"
@@ -318,6 +512,8 @@ def urlscan_detalhe(nome: str, cliente: httpx.Client, chave: str) -> dict | None
     """Com chave: em cada varredura pública, QUAL script da página chamou o domínio (initiator) e o que esse
     script diz (nomes de fornecedores, cabeçalho). É o que identifica um SDK de antifraude/rastreamento."""
     h = {"API-Key": chave}
+    if not RITMO["urlscan_chave"].pode():
+        return None
     try:
         r = cliente.get("https://urlscan.io/api/v1/search/", params={"q": f"domain:{nome}", "size": 3}, headers=h,
                         timeout=20)
@@ -371,8 +567,12 @@ def urlscan_detalhe(nome: str, cliente: httpx.Client, chave: str) -> dict | None
 def virustotal(nome: str, cliente: httpx.Client, chave: str) -> dict | None:
     """Relatório de domínio do VirusTotal (chave gratuita: 4/min, 500/dia): categoria dada por ~10 fornecedores de
     segurança, detecções, ranking de popularidade, tags e data do registro."""
+    if not RITMO["virustotal"].pode():
+        return None
     try:
         r = cliente.get(f"https://www.virustotal.com/api/v3/domains/{nome}", headers={"x-apikey": chave}, timeout=30)
+        if r.status_code == 429:
+            RITMO["virustotal"].pausar(3600)
         if r.status_code != 200:
             return None
         a = (r.json().get("data") or {}).get("attributes") or {}
@@ -501,11 +701,10 @@ def bem_conhecidos(nome: str, cliente: httpx.Client) -> dict:
 def subdominios(nomes: list[str], cliente: httpx.Client) -> list[dict]:
     """Página inicial de subdomínios (dos certificados e dos logs): portal.x.com, cielo.x.com..."""
     out = []
-    for n in nomes[:5]:
+    for n in nomes[:8]:
         p = _abrir(f"https://{n}/", cliente, 500)
         if p:
-            p.pop("_html", None)
-            out.append(p | {"subdominio": n})
+            out.append(_publico(p) | {"subdominio": n})
     return out
 
 
@@ -523,7 +722,7 @@ def cnpjs(c, numeros: list[str]) -> list[dict]:
 
 
 def coocorrencia(c, nome: str, fqdns: list[str], suffixes: list[str]) -> dict | None:
-    """O que o MESMO computador consultou ±2 s de cada acesso ao domínio (logs brutos do Technitium, últimos dias)."""
+    """O que o MESMO computador consultou ±2 s de cada acesso ao domínio (logs brutos do Technitium, 7 dias)."""
     from .technitium import TechnitiumClient, fmt_ts, parse_ts
     try:
         tc = TechnitiumClient(timeout=30)
@@ -532,9 +731,9 @@ def coocorrencia(c, nome: str, fqdns: list[str], suffixes: list[str]) -> dict | 
     fim = datetime.now(timezone.utc)
     amostras, vistos = [], set()
     try:
-        for fq in fqdns[:3]:
-            r = tc._get("logs/query", {"name": tc.app, "classPath": tc.cls, "start": fmt_ts(fim - timedelta(days=3)),
-                                       "end": fmt_ts(fim), "pageNumber": 1, "entriesPerPage": 8,
+        for fq in fqdns[:4]:
+            r = tc._get("logs/query", {"name": tc.app, "classPath": tc.cls, "start": fmt_ts(fim - timedelta(days=7)),
+                                       "end": fmt_ts(fim), "pageNumber": 1, "entriesPerPage": 10,
                                        "descendingOrder": "true", "qname": fq})
             for e in r.get("entries") or []:
                 chave = (e.get("clientIpAddress"), (e.get("timestamp") or "")[:16])   # 1 por PC por minuto
@@ -542,7 +741,7 @@ def coocorrencia(c, nome: str, fqdns: list[str], suffixes: list[str]) -> dict | 
                     vistos.add(chave)
                     amostras.append((e["clientIpAddress"], parse_ts(e["timestamp"])))
         conta: dict[str, int] = {}
-        for ip, ts in amostras[:12]:
+        for ip, ts in amostras[:16]:
             r = tc._get("logs/query", {"name": tc.app, "classPath": tc.cls, "start": fmt_ts(ts - timedelta(seconds=2)),
                                        "end": fmt_ts(ts + timedelta(seconds=2)), "pageNumber": 1,
                                        "entriesPerPage": 200, "descendingOrder": "false", "clientIpAddress": ip})
@@ -558,7 +757,7 @@ def coocorrencia(c, nome: str, fqdns: list[str], suffixes: list[str]) -> dict | 
         return None
     finally:
         tc.close()
-    n = len(amostras[:12])
+    n = len(amostras[:16])
     if not n:
         return {"amostras": 0, "juntos": []}
     top = sorted(conta.items(), key=lambda kv: -kv[1])[:10]
@@ -581,8 +780,80 @@ def buscas(consultas: list[str], nome: str) -> list[dict]:
         except Exception as e:  # noqa: BLE001
             log.info("busca extra %r: %s", q, e)
             continue
-        out.append({"consulta": q, "resultados": res[:5]})
+        out.append({"consulta": q, "resultados": res[:8]})
     return out
+
+
+# ------------------------------------------------------------------ coleta ampla (sem IA)
+COLETA = "coleta"          # lookup_cache.kind: fontes de rede já coletadas (a investigação reaproveita)
+COLETA_VALIDADE_H = 72
+
+
+def _tarefas_rede(nome: str, http: httpx.Client, abre_site: bool, completa: bool) -> dict:
+    """Fontes de rede que não dependem da IA. `completa` (investigação): crt.sh como reserva dos certificados."""
+    t = {"dns": lambda: registros_dns(nome), "certificados": lambda: certificados(nome, http, reserva=completa),
+         "wayback": lambda: _com_ritmo("wayback", lambda: wayback(nome, http)), "urlscan": lambda: urlscan(nome, http),
+         "rastreadores": lambda: rastreadores(nome, http), "otx": lambda: _com_ritmo("otx", lambda: otx(nome, http))}
+    if abre_site:   # como as outras fases: o site só é aberto sem sinal de ameaça
+        t |= {"site": lambda: paginas_do_site(nome, http), "bem_conhecidos": lambda: bem_conhecidos(nome, http),
+              "tls": lambda: tls_site(nome)}
+    return t
+
+
+def _rodar(tarefas: dict, limite_s: float, nome: str) -> dict:
+    """As fontes em paralelo, até `limite_s`: a que atrasa fica de fora (sem esperar por ela)."""
+    from concurrent.futures import ThreadPoolExecutor
+    t0, out = time.monotonic(), {}
+    pool = ThreadPoolExecutor(max(len(tarefas), 1))
+    try:
+        fut = {k: pool.submit(f) for k, f in tarefas.items()}
+        for k, f in fut.items():
+            try:
+                out[k] = f.result(timeout=max(1.0, limite_s - (time.monotonic() - t0)))
+            except Exception as e:  # noqa: BLE001 — fonte que falha/atrasa fica de fora
+                log.info("coleta %s: fonte %s falhou: %s", nome, k, e.__class__.__name__)
+                out[k] = None
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return out
+
+
+def coleta_em_cache(nome: str) -> dict | None:
+    with db.conn() as c:
+        r = c.execute("SELECT value FROM lookup_cache WHERE kind = %s AND key = %s "
+                      "AND fetched_at > now() - make_interval(hours => %s)", (COLETA, nome, COLETA_VALIDADE_H)).fetchone()
+    return r["value"] if r else None
+
+
+def _guardar_coleta(c, nome: str, fontes: dict) -> None:
+    c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, %s) ON CONFLICT (kind, key) "
+              "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (COLETA, nome, Jsonb(fontes)))
+
+
+def coleta(did: int, limite_s: float = 45) -> dict | None:
+    """Coleta ampla SEM IA local, antes da IA online (pedido do usuário 30/09: contexto mais robusto): DNS,
+    certificados, Wayback, URLScan, rastreadores, OTX, site (páginas, certificado, tecnologia), CNPJ e o perfil de
+    acesso. Fica em cache p/ a investigação (fase 6) não repetir."""
+    from .classifier import build_dossier
+    with db.conn() as c:
+        row = c.execute("SELECT * FROM domains WHERE id = %s", (did,)).fetchone()
+        if not row or row["kind"] != "public":
+            return None
+        nome = row["name"]
+        feita = coleta_em_cache(nome)
+        if feita is not None:
+            return feita
+        dossie = build_dossier(c, row)   # só o cache (fases 1-3): sinais de ameaça e o WHOIS
+    abre_site = not dossie.get("ti_hits") and not dossie.get("abused_tld")
+    with httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": webintel.UA}) as http:
+        fontes = _rodar(_tarefas_rede(nome, http, abre_site, False), limite_s, nome)
+    with db.conn() as c:
+        fontes["perfil"] = perfil_acesso(c, did)
+        tit = (dossie.get("whois") or {}).get("titular") or {}
+        fontes["cnpjs"] = cnpjs(c, list((fontes.get("site") or {}).get("cnpjs") or [])
+                                + ([tit["doc"]] if tit.get("tipo") == "cnpj" and tit.get("doc") else []))
+        _guardar_coleta(c, nome, fontes)
+    return fontes
 
 
 # ------------------------------------------------------------------ evidências p/ a IA
@@ -590,7 +861,7 @@ def novas_evidencias(inicio: int, f: dict) -> list[dict]:
     ev = []
 
     def add(kind, text):
-        ev.append({"id": f"E{inicio + len(ev)}", "kind": kind, "text": text[:600], "risk": False, "data": {}})
+        ev.append({"id": f"E{inicio + len(ev)}", "kind": kind, "text": text[:700], "risk": False, "data": {}})
 
     d = f.get("dns") if f.get("dns") is not None else {}
     if d.get("mx"):
@@ -615,6 +886,17 @@ def novas_evidencias(inicio: int, f: dict) -> list[dict]:
         add("wayback", "nunca arquivado no Wayback Machine" if not wb.get("primeira") else
             f"Wayback Machine: primeira captura {wb['primeira']} (título '{wb.get('titulo_primeira') or ''}'), "
             f"última {wb.get('ultima')} (título '{wb.get('titulo_ultima') or ''}')")
+        if wb.get("caminhos"):
+            add("wayback", f"Wayback Machine: {wb.get('enderecos')} endereços arquivados; mais comuns: "
+                           + ", ".join(wb["caminhos"]))
+    tl = f.get("tls")
+    if tl:
+        add("tls", f"certificado apresentado pelo site agora: INVÁLIDO ({tl.get('erro')})" if not tl.get("valido") else
+            f"certificado apresentado pelo site agora: emitido por {tl.get('emissor') or '?'} para "
+            f"{tl.get('cn') or '?'}" + (f"; ORGANIZAÇÃO (dona, validada pela autoridade certificadora): {tl['organizacao']}"
+                                        + (f" ({tl['pais']})" if tl.get("pais") else "") if tl.get("organizacao") else
+                                        "; sem organização (certificado só de domínio)")
+            + (f"; também vale para {', '.join(tl['outros_dominios'])}" if tl.get("outros_dominios") else ""))
     si = f.get("site")
     if si:
         for p in si["paginas"]:
@@ -623,6 +905,15 @@ def novas_evidencias(inicio: int, f: dict) -> list[dict]:
             add("site", f"no site: CNPJ {', '.join(si.get('cnpjs') or []) or '—'}; e-mails {', '.join(si.get('emails') or []) or '—'}")
         if si.get("apps"):
             add("site", "o site aponta para app(s) nas lojas: " + ", ".join(si["apps"]))
+        ec = si.get("ecossistema") or {}
+        if ec:
+            add("site", "tecnologia e relações do site: " + "; ".join(x for x in (
+                ", ".join(f"{k} {v}" for k, v in (ec.get("tecnologia") or {}).items()),
+                f"gerador {ec['gerador']}" if ec.get("gerador") else "",
+                f"cookies {', '.join(ec['cookies'])}" if ec.get("cookies") else "",
+                f"carrega scripts de {', '.join(ec['scripts'])}" if ec.get("scripts") else "",
+                f"links para {', '.join(ec['links'])}" if ec.get("links") else "",
+                f"política de segurança libera {', '.join(ec['csp'])}" if ec.get("csp") else "") if x))
     for x in f.get("cnpjs") or []:
         add("cnpj", f"CNPJ {x['cnpj']} na Receita Federal: {x.get('razao_social') or '?'}"
                     + (f" (fantasia {x['nome_fantasia']})" if x.get("nome_fantasia") else "")
@@ -657,6 +948,23 @@ def novas_evidencias(inicio: int, f: dict) -> list[dict]:
             add("rastreador", f"DuckDuckGo Tracker Radar: dono {d2.get('empresa') or '?'} ({d2.get('site') or ''}), "
                               f"categorias {', '.join(d2.get('categorias') or []) or '?'}, presente em "
                               f"{d2.get('sites_que_carregam') or '?'} sites")
+    ox = f.get("otx")
+    if ox:
+        pd = ox.get("dns_passivo") or {}
+        add("otx", f"AlienVault OTX: {ox['alertas']} alerta(s) de ameaça citam o domínio"
+                   + (f" ({'; '.join(ox['nomes_alertas'])})" if ox.get("nomes_alertas") else "")
+                   + (f"; tags {', '.join(ox['tags'])}" if ox.get("tags") else "")
+                   + (f"; marcado como conhecido/legítimo por {', '.join(ox['validacao'])}" if ox.get("validacao") else "")
+                   + (f"; DNS passivo: {pd['registros']} registros desde {pd.get('desde') or '?'}, nomes "
+                      f"{', '.join(pd.get('nomes') or [])}, redes {', '.join(pd.get('asns') or [])}" if pd.get("registros") else "")
+                   + (f"; endereços vistos: {', '.join(ox['urls'][:6])}" if ox.get("urls") else ""))
+    pa = f.get("perfil")
+    if pa and pa.get("consultas_14d"):
+        add("perfil", f"acesso nas empresas clientes (14 dias): {pa['empresas']} empresa(s), {pa['computadores']} "
+                      f"computador(es), {pa['consultas_14d']} consultas em {pa['horas_ativas']} horas diferentes do dia; "
+                      f"{pa['expediente_pct']}% em horário de expediente, {pa['madrugada_pct']}% de madrugada, "
+                      f"{pa['fim_de_semana_pct']}% no fim de semana (madrugada/fim de semana alto = serviço automático "
+                      "em segundo plano, não uso humano)")
     vt = f.get("virustotal")
     if vt:
         susp = f" ({vt['suspeitos']} suspeito)" if vt.get("suspeitos") else ""
@@ -712,7 +1020,9 @@ Como raciocinar:
   domínio, QUAIS PÁGINAS o carregam e QUAL SCRIPT o chama — um SDK de antifraude/analytics se identifica no script);
   bases de rastreadores (Ghostery, Tracker Radar: fonte curada, confiável) e categorias do VirusTotal; apps nas lojas;
   o que o mesmo computador consulta junto nos logs: um domínio técnico que sempre aparece junto de um serviço
-  conhecido é parte dele).
+  conhecido é parte dele; a ORGANIZAÇÃO no certificado que o site apresenta (validada pela autoridade certificadora:
+  prova forte do dono); tecnologia, scripts e links do site; endereços arquivados no Wayback; alertas e DNS passivo
+  do AlienVault OTX; o horário de acesso: madrugada/fim de semana = serviço automático, não uso humano).
 - Domínio técnico carregado por sites de terceiros (bancos, lojas) sem dono identificado: classifique pelo PAPEL
   (antifraude/telemetria = infraestrutura de trabalho; anúncios = publicidade), com confiança compatível.
 - Desconfie de homônimos: resultado de busca sobre outra empresa com nome parecido não identifica o domínio.
@@ -731,11 +1041,20 @@ Como raciocinar:
 MAX_DOSSIE = 7_500
 
 
+_LONGAS = {"websearch", "pagina", "subdominio", "site"}   # muitas e longas: cortadas antes das fontes curtas
+
+
 def _dossie_texto(nome: str, ev: list[dict], atual: dict) -> str:
     linhas = "\n".join(f"{e['id']}: {e['text']}" for e in ev)
     if len(linhas) > MAX_DOSSIE:   # corta o texto das evidências mais longas, nunca a lista delas
-        corte = max(200, MAX_DOSSIE // max(len(ev), 1))
-        linhas = "\n".join(f"{e['id']}: {e['text'][:corte]}" for e in ev)
+        longas = sum(1 for e in ev if e.get("kind") in _LONGAS)
+        fixo = sum(min(len(e["text"]), 400) + 6 for e in ev if e.get("kind") not in _LONGAS)
+        corte_longas = (MAX_DOSSIE - fixo) // max(longas, 1)
+        if corte_longas >= 150:   # fontes curtas até 400 caracteres; buscas/páginas dividem o resto
+            cortes = {True: corte_longas, False: 400}
+        else:                     # nem assim cabe: corte igual p/ todas
+            cortes = dict.fromkeys((True, False), max(120, MAX_DOSSIE // max(len(ev), 1)))
+        linhas = "\n".join(f"{e['id']}: {e['text'][:cortes[e.get('kind') in _LONGAS]]}" for e in ev)
     return (f"Domínio: {nome}\nHoje: {atual.get('classification') or '?'} / categoria {atual.get('category') or '?'} "
             f"/ lista {atual.get('lista_ia') or atual.get('lista_wl') or '—'} ({atual.get('lista_fonte') or 'sem fonte'})"
             f"\n\nEvidências:\n{linhas}")
@@ -764,7 +1083,7 @@ def _proximo_passo(client, texto: str, rodada: int, restante: int, feitas: list[
     schema = {"type": "object", "properties": {
         "hipotese": {"type": "string", "maxLength": 200}, "confianca": {"type": "number", "minimum": 0, "maximum": 1},
         "pronto": {"type": "boolean"},
-        "buscas": {"type": "array", "maxItems": 3, "items": {"type": "string", "maxLength": 80}},
+        "buscas": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 80}},
         "paginas": {"type": "array", "maxItems": 3, "items": {"type": "string", "maxLength": 200}},
         "subdominios": {"type": "array", "maxItems": 3, "items": {"type": "string", "maxLength": 100}},
         "cnpjs": {"type": "array", "maxItems": 2, "items": {"type": "string", "maxLength": 20}}},
@@ -789,8 +1108,14 @@ def _revisar(client, texto: str, v: dict) -> tuple[dict, dict]:
               "lista incoerente com o serviço, e confiança alta demais para as pistas. sustentado=true só se você "
               "aplicaria esse veredito sem hesitar; em \"problema\" diga o que está errado (ou vazio).\n\nVeredito:\n"
               + json.dumps(v, ensure_ascii=False))
-    return _chat(client, [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}],
-                 schema, bool(client.extra), 1500 if client.extra else 300)
+    msgs = [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}]
+    r, meta = _chat(client, msgs, schema, bool(client.extra), 1500 if client.extra else 300)
+    if client.extra and "sustentado" not in r:
+        # (30/09) o raciocínio gastava os tokens e a resposta vinha vazia = "revisor discordou: sem motivo" (34 de
+        # 426): pergunta de novo sem raciocínio
+        r, meta2 = _chat(client, msgs, schema, False, 300)
+        meta = meta2 | {"segundos": round(meta["segundos"] + meta2["segundos"], 1), "sem_raciocinio": True}
+    return r, meta
 
 
 def _veredito(client, texto: str, cats: list[dict], scats: list[dict]) -> tuple[dict, dict]:
@@ -872,12 +1197,12 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
         return "unavailable"
 
 
+SEGUNDA_OPINIAO_MIN = 0.6   # hipótese da investigação a partir daqui (e abaixo do mínimo p/ aplicar) vai p/ a IA online
 MAX_RODADAS = 8          # (limitadas pelo prazo: cada uma só começa se sobra tempo p/ ela, o veredito e o revisor)
-PAGINAS_POR_RODADA = 3   # páginas de terceiros abertas a partir das buscas
+PAGINAS_POR_RODADA = 5   # páginas de terceiros abertas a partir das buscas
 
 
 def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: dict) -> str:
-    from concurrent.futures import ThreadPoolExecutor
     from .classifier import event
     from .rules import build_evidence
     cfg = settings()
@@ -898,24 +1223,20 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
         def cooc():
             with db.conn() as c:
                 return coocorrencia(c, nome, fqdns, cfg.internal_suffixes)
-        tarefas = {"dns": lambda: registros_dns(nome), "certificados": lambda: certificados(nome, http),
-                   "wayback": lambda: wayback(nome, http), "urlscan": lambda: urlscan(nome, http),
-                   "rastreadores": lambda: rastreadores(nome, http),
-                   "coocorrencia": cooc, "buscas": lambda: buscas([f'"{marca}"'] if len(marca) >= 4 else [], nome)}
+        # o que a coleta antes da IA online já trouxe (cache) não é buscado de novo
+        feita = {k: v for k, v in (coleta_em_cache(nome) or {}).items() if v is not None}
+        consultas = ([f'"{marca}"'] if len(marca) >= 4 else []) + [f'"{nome}"'] + (
+            [f'"{marca}" cnpj'] if nome.endswith(".br") and len(marca) >= 4 else [])
+        tarefas = {k: f for k, f in _tarefas_rede(nome, http, abre_site, True).items() if k not in feita}
+        tarefas |= {"coocorrencia": cooc, "buscas": lambda: buscas(consultas, nome)}
         if cfg.urlscan_api_key:   # com chave: qual script chama o domínio e o que ele diz
             tarefas["urlscan_detalhe"] = lambda: urlscan_detalhe(nome, http, cfg.urlscan_api_key)
         if cfg.virustotal_api_key:
             tarefas["virustotal"] = lambda: virustotal(nome, http, cfg.virustotal_api_key)
-        if abre_site:
-            tarefas |= {"site": lambda: paginas_do_site(nome, http), "bem_conhecidos": lambda: bem_conhecidos(nome, http)}
-        with ThreadPoolExecutor(len(tarefas)) as pool:   # as fontes em paralelo: o tempo é o da mais lenta
-            fut = {k: pool.submit(f) for k, f in tarefas.items()}
-            for k, f in fut.items():
-                try:
-                    fontes[k] = f.result(timeout=max(30, resta() - reserva))
-                except Exception as e:  # noqa: BLE001 — fonte que falha/atrasa fica de fora
-                    log.info("investigação %s: fonte %s falhou: %s", nome, k, e)
-                    fontes[k] = None
+        fontes |= {k: v for k, v in feita.items() if k not in ("perfil", "cnpjs")}
+        fontes |= _rodar(tarefas, max(30, resta() - reserva), nome)
+        with db.conn() as c:
+            fontes["perfil"] = perfil_acesso(c, did)
         fontes["buscas"] = fontes.get("buscas") or []
         etapas.append({"etapa": "fontes", "segundos": round(time.monotonic() - t0, 1)})
         # o modelo OLHA o site (pedido do usuário 29/09): captura de tela pública, og:image, logotipo, ícone
@@ -940,7 +1261,8 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
                 if s.endswith("." + nome) and not s.startswith(("*.", "www."))]
         fontes["subdominios"] = subdominios(subs, http) if abre_site else []
         # domínios-irmãos no mesmo certificado costumam revelar a empresa dona (ex.: dnofd.com + gasfps.com)
-        irmaos = ((fontes.get("certificados") or {}).get("outros_dominios") or [])[:2]
+        irmaos = list(dict.fromkeys(((fontes.get("certificados") or {}).get("outros_dominios") or [])
+                                    + ((fontes.get("tls") or {}).get("outros_dominios") or [])))[:3]
         fontes["buscas"] += buscas([f'"{x}"' for x in irmaos], nome) if irmaos else []
         # a resposta costuma estar DENTRO das páginas que a busca achou (fórum, documentação), não no resumo
         abertas: set[str] = set()
@@ -972,8 +1294,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             for u in pags:
                 p = _abrir(u if u.startswith("http") else f"https://{u}", http)
                 if p:
-                    p.pop("_html", None)
-                    fontes["paginas_extras"].append(p)
+                    fontes["paginas_extras"].append(_publico(p))
             fontes["subdominios"] += subdominios(sds, http) if abre_site else []
             with db.conn() as c:
                 fontes["cnpjs"] += cnpjs(c, cns)
@@ -994,21 +1315,29 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             if not revisao.get("sustentado"):
                 motivo_nao = "revisor discordou: " + (revisao.get("problema") or "sem motivo")[:200]
     segundos = round(time.monotonic() - t0, 1)
+    from . import online
+    # hipótese sem certeza suficiente: a IA online dá a 2ª opinião lendo este dossiê (pedido do usuário 30/09)
+    segunda = (motivo_nao is not None and not ti_forte and bool(v.get("recognized"))
+               and v.get("classification") != "DESCONHECIDO" and (v.get("confidence") or 0) >= SEGUNDA_OPINIAO_MIN
+               and online.habilitado())
     resumo = {"at": datetime.now(timezone.utc).isoformat(), "segundos": segundos, "aplicado": motivo_nao is None,
+              "segunda_opiniao": segunda,
               "sem_aplicar": motivo_nao, "veredito": v, "revisao": revisao, "plano": passo, "etapas": etapas,
               "rodadas": rodadas + [meta_v] + ([meta_r] if meta_r else []),
               "evidencias": ev[len(base):], "antes": {k: d.get(k) for k in ("classification", "category", "lista_ia",
                                                                           "lista_wl", "lista_fonte")}}
     with db.conn() as c:
-        c.execute("UPDATE domains SET investigado_at = now(), investigacao_claimed_at = NULL, investigacao = %s "
-                  "WHERE id = %s", (Jsonb(resumo), did))
+        c.execute("UPDATE domains SET investigado_at = now(), investigacao_claimed_at = NULL, investigacao = %s, "
+                  "online_pedido_at = CASE WHEN %s THEN now() ELSE online_pedido_at END WHERE id = %s",
+                  (Jsonb(resumo), segunda, did))
         if motivo_nao is None:
             _aplicar(c, d, v, ev, meta_v["modelo"])
     cls = v.get("classification") if motivo_nao is None else d.get("classification")
     event("investigacao_done", nome, did, cls, d.get("risk_score"), d.get("work_score"), segundos,
           detail=" · ".join(x for x in (
               "fase 6", f"aplicou {v.get('lista')} ({(v.get('lista_confianca') or 0) * 100:.0f}%)" if motivo_nao is None
-              else f"sem certeza: {motivo_nao}", (v.get("service") or "")[:80], (v.get("motivo") or "")[:200]) if x))
+              else f"sem certeza: {motivo_nao}", "vai p/ a IA online (2ª opinião com o dossiê)" if segunda else "",
+              (v.get("service") or "")[:80], (v.get("motivo") or "")[:200]) if x))
     log.info("investigação %s: %s em %.0fs (%s)", nome, "aplicou" if motivo_nao is None else "só dossiê", segundos,
              motivo_nao or v.get("lista"))
     return "done"

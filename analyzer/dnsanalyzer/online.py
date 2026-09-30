@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import db, webintel
+from . import db, investigacao, webintel
 from .config import settings
 from . import listas_ia
 from .listas_ia import LISTAS_IA, NENHUMA, WL, _contexto, e_wl, salvar
@@ -217,6 +217,8 @@ def _evento(d: dict, cls: str, lista: str, conf: float, servico: str, meta: dict
                       "('online_done', %s, %s, %s, %s, %s)",
                       (d["id"], d["name"], cls, meta.get("seconds"),
                        f"fase 4 · {meta.get('model')} · lista {lista} ({conf * 100:.0f}%){val}"
+                       + (" · 2ª opinião da investigação" if d.get("pedido") else
+                          f" · com {meta['contexto']}" if meta.get("contexto") in ("investigação", "coleta") else "")
                        + (f" · {servico}" if servico else "")))
     except Exception as e:  # noqa: BLE001
         log.debug("falha ao gravar evento: %s", e)
@@ -230,12 +232,40 @@ _FASE = {"llm": "fase 1 (IA local)", "web": "fase 3 (busca na web + IA local)", 
          "catalog": "catálogo", "rules": "regras", "internal": "interno", "manual": "manual"}
 
 
-def contexto_completo(d: dict, limite: int = 8000) -> str:
-    """Tudo o que as fases 1-3 juntaram do domínio (p/ a IA online decidir melhor): resultado atual da IA
-    local, razões, TODAS as evidências (WHOIS, busca na web, página, catálogo, popularidade…) e o histórico."""
+MAX_DOSSIE_ONLINE = 12_000   # caracteres do dossiê da investigação/coleta dentro do contexto
+
+
+def _secao_investigacao(inv: dict | None, coleta: dict | None) -> list[str]:
+    """Dossiê da investigação profunda (fase 6) — ou, sem ela, a coleta ampla feita agora (sem IA local)."""
+    from . import investigacao
+    if inv and inv.get("evidencias"):
+        v, rv = inv.get("veredito") or {}, inv.get("revisao") or {}
+        L = [f"Investigação profunda (fase 6, IA local maior, {str(inv.get('at') or '')[:10]}) — fontes extras; a "
+             "hipótese dela é de um modelo local e NÃO foi aplicada por falta de certeza: confira contra as evidências.",
+             f"Hipótese da investigação: {v.get('service') or '—'} · {v.get('classification') or '—'} · lista "
+             f"{v.get('lista') or '—'} · confiança {v.get('confidence')} — {v.get('motivo') or ''}"
+             + (f" | não aplicada: {inv['sem_aplicar']}" if inv.get("sem_aplicar") else "")
+             + (f" | revisor: {rv['problema']}" if rv.get("problema") else "")]
+        ev = inv["evidencias"]
+    elif coleta:
+        L = ["Coleta ampla feita agora (DNS, certificados, Wayback, URLScan, rastreadores, AlienVault OTX, site, CNPJ, "
+             "acesso nas empresas):"]
+        ev = investigacao.novas_evidencias(0, coleta)
+    else:
+        return []
+    corte = max(200, MAX_DOSSIE_ONLINE // max(len(ev), 1))
+    return L + [f"- {e.get('kind')}: {(e.get('text') or '')[:corte]}" for e in ev if e.get("text")]
+
+
+def contexto_completo(d: dict, limite: int = 24_000) -> str:
+    """Tudo o que já se sabe do domínio (p/ a IA online decidir melhor): resultado atual da IA local, razões, TODAS
+    as evidências das fases 1-3 (WHOIS, busca na web, página, catálogo, popularidade…), o dossiê da investigação
+    profunda ou a coleta ampla (30/09: contexto mais robusto — antes eram só 8 mil caracteres das fases 1-3) e o
+    histórico. Só nomes de domínio e o que as fontes públicas dizem deles (nada de IP, computador ou empresa cliente)."""
     with db.conn() as c:
         r = c.execute("SELECT name, classification, category, topic, confidence, corp_action, corp_reason, classified_by, "
-                      "reasons, evidence, popularity_rank, whois_at, web_search_at FROM domains WHERE id = %s", (d["id"],)).fetchone()
+                      "reasons, evidence, popularity_rank, whois_at, web_search_at, investigacao FROM domains WHERE id = %s",
+                      (d["id"],)).fetchone()
         hist = c.execute("SELECT source, classification, topic, confidence, created_at FROM classification_history "
                          "WHERE domain_id = %s ORDER BY created_at DESC LIMIT 6", (d["id"],)).fetchall()
         web = (c.execute("SELECT value FROM lookup_cache WHERE kind = 'web' AND key = %s", (r["name"],)).fetchone()
@@ -254,7 +284,7 @@ def contexto_completo(d: dict, limite: int = 8000) -> str:
     ev = [e for e in (r["evidence"] or []) if e.get("kind") not in ("identity", "negative") and e.get("text")]
     if ev:
         L.append("Evidências coletadas (fases 1 a 3):")
-        L += [f"- {_KIND.get(e['kind'], e['kind'])}: {e['text'][:900]}" for e in ev]
+        L += [f"- {_KIND.get(e['kind'], e['kind'])}: {e['text'][:1500]}" for e in ev]
     site = (web or {}).get("site") or {}
     if not any(e.get("kind") == "site" for e in ev) and any(site.get(k) for k in ("title", "description", "site_name", "texto", "sinais")):
         # página aberta depois da última análise local (27/09: reaberta quando tinha vindo vazia)
@@ -268,6 +298,7 @@ def contexto_completo(d: dict, limite: int = 8000) -> str:
         proprio = lambda h: h == r["name"] or h.endswith("." + r["name"])   # noqa: E731
         L += [f"- {x.get('title') or ''} — {x.get('snippet') or ''} ({x.get('host') or ''}"
               + (", PRÓPRIO domínio)" if proprio(x.get("host") or "") else ")") for x in busca[:6]]
+    L += _secao_investigacao(r["investigacao"], d.get("_coleta"))
     if hist:
         L.append("Histórico de classificações (mais recente primeiro):")
         L += [f"- {h['created_at']:%d/%m %H:%M} {_FASE.get(h['source'], h['source'] or '?')}: {h['classification'] or '—'}"
@@ -377,7 +408,9 @@ _EM_DECISOES = "EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'para_
 _FILA = ("d.kind = 'public' AND (NOT d.llm_pending OR (dominio_decidido(d.id) AND NOT d.reanalise_pedida)) AND (d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') "
          "AND ((d.lista_duvida AND (d.online_at IS NULL OR d.online_at < d.lista_at)) "
          " OR (d.classification = 'DESCONHECIDO' AND (d.online_at IS NULL OR d.online_at < d.analyzed_at) "
-         "     AND ((d.web_search_at IS NOT NULL AND (NOT dominio_decidido(d.id) OR d.reanalise_pedida)) OR " + _NAS_LISTAS_REVISAO + ")))")
+         "     AND ((d.web_search_at IS NOT NULL AND (NOT dominio_decidido(d.id) OR d.reanalise_pedida)) OR " + _NAS_LISTAS_REVISAO + "))"
+         # 2ª opinião pedida pela investigação (fase 6) sem certeza p/ aplicar
+         " OR (d.online_pedido_at IS NOT NULL AND (d.online_at IS NULL OR d.online_at < d.online_pedido_at)))")
 
 
 _EM_INFRA = ("EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'infra_bloqueio' AND l.domain = {t}.name "
@@ -400,7 +433,8 @@ def _reservar(c) -> dict | None:
         " ORDER BY " + _EM_INFRA.format(t="d") + " DESC, " + _EM_DECISOES + " DESC, d.lista_duvida DESC, d.total_queries DESC "
         "LIMIT 1 FOR UPDATE SKIP LOCKED) "
         "RETURNING id, name, topic, classification, category, corp_reason, reasons, evidence, lista_ia, lista_wl, lista_conf, lista_motivo, "
-        "online_resp, " + _EM_INFRA.format(t="domains") + " AS em_infra").fetchone()
+        "online_resp, investigado_at, (online_pedido_at IS NOT NULL AND (online_at IS NULL OR online_at < online_pedido_at)) AS pedido, "
+        + _EM_INFRA.format(t="domains") + " AS em_infra").fetchone()
 
 
 def _certo(obj: dict) -> bool:
@@ -490,9 +524,15 @@ def fase(categorias: list[str]) -> str:
                 d["_busca"] = webintel.search(c, d["name"], fetch=True, wait=True)
         except Exception as e:  # noqa: BLE001 — sem busca a IA online segue com o que tem
             log.info("busca da fase 4 indisponível p/ %s: %s", d["name"], e)
-    # já respondida antes (pergunta de novo): a sugestão original da IA local foi sobrescrita, então não dá
-    # p/ ver discordância — a segunda opinião (modelo maior) é obrigatória
-    revalidar = bool(d.get("online_resp")) and not (d.get("online_resp") or {}).get("erro")
+    if d["classification"] in ("DESCONHECIDO", "SUSPEITO") and not d.get("investigado_at"):
+        # contexto mais robusto (30/09): as fontes da investigação, sem IA local (~20-45 s; cache p/ a fase 6)
+        try:
+            d["_coleta"] = investigacao.coleta(d["id"])
+        except Exception as e:  # noqa: BLE001 — sem a coleta a IA online segue com o que tem
+            log.info("coleta da fase 4 indisponível p/ %s: %s", d["name"], e)
+    # já respondida antes (pergunta de novo) ou 2ª opinião da investigação: a sugestão original da IA local foi
+    # sobrescrita, então não dá p/ ver discordância — a segunda opinião (modelo maior) é obrigatória
+    revalidar = (bool(d.get("online_resp")) and not (d.get("online_resp") or {}).get("erro")) or bool(d.get("pedido"))
     vol, reforco, busca = niveis()
     obj = meta = None
     invalidas: list[str] = []
@@ -523,6 +563,7 @@ def fase(categorias: list[str]) -> str:
         if d.get("em_infra") and _libera(obj) and not meta.get("nivel_reforco") and reforco:
             log.info("IA online: %s sem a 2ª opinião (Infraestrutura); tenta de novo em 10 min", d["name"])
             return "done"   # fica reservado (online_claimed_at): a fila o pega de novo em 10 min
+        meta["contexto"] = ("investigação" if d.get("investigado_at") else "coleta" if d.get("_coleta") else "fases 1-3")
         gravar(c, d, obj, meta, categorias)
         listas_ia.aplicar(c, ids=[d["id"]])   # na hora: resposta com certeza vai direto p/ a lista (sem esperar o ciclo)
     return "done"

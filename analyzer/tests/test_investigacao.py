@@ -122,7 +122,9 @@ def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600):
     monkeypatch.setattr(inv, "settings", lambda: SimpleNamespace(**{**vars(cfg), "investigacao_tempo_max": tempo_max,
                                                                     "investigacao_confianca_min": 0.85}))
     for f, r in {"registros_dns": {"mx": ["1 aspmx.l.google.com."]}, "certificados": None, "wayback": None,
-                 "urlscan": None, "paginas_do_site": None, "bem_conhecidos": {}, "coocorrencia": None}.items():
+                 "urlscan": None, "paginas_do_site": None, "bem_conhecidos": {}, "coocorrencia": None,
+                 "rastreadores": None, "otx": None, "tls_site": None, "urlscan_detalhe": None, "virustotal": None,
+                 "coleta_em_cache": None, "perfil_acesso": {}}.items():
         monkeypatch.setattr(inv, f, lambda *a, _r=r, **k: _r)
     buscas_feitas = []
     monkeypatch.setattr(inv, "buscas", lambda qs, nome: buscas_feitas.extend(qs) or [{"consulta": q, "resultados": []} for q in qs])
@@ -340,3 +342,79 @@ def test_fase6_so_na_gpu(monkeypatch):
     reforco = SimpleNamespace(cliente=lambda: SimpleNamespace(extra=False))
     classifier._investigacao_worker(lambda: False, [], reforco)
     assert passos[0]() == "idle" and not chamadas
+
+
+def test_evidencias_das_fontes_novas():
+    ev = inv.novas_evidencias(0, {
+        "tls": {"valido": True, "organizacao": "X Sistemas Ltda", "pais": "BR", "cn": "x.com", "emissor": "DigiCert",
+                "outros_dominios": ["x.com.br"]},
+        "wayback": {"primeira": "20150101", "ultima": "20260901", "enderecos": 120, "caminhos": ["x.com/wp-content (80)"]},
+        "otx": {"alertas": 0, "nomes_alertas": [], "tags": [], "validacao": ["Majestic"],
+                "dns_passivo": {"registros": 4, "desde": "2019-01-01", "nomes": ["api.x.com"], "asns": ["AS1 Y"]}, "urls": []},
+        "perfil": {"empresas": 3, "computadores": 12, "consultas_14d": 900, "horas_ativas": 10, "expediente_pct": 95,
+                   "madrugada_pct": 0, "fim_de_semana_pct": 1},
+        "site": {"paginas": [], "cnpjs": [], "emails": [], "apps": [],
+                 "ecossistema": {"tecnologia": {"server": "nginx"}, "gerador": "WordPress 6.5", "scripts": ["google.com"]}},
+    })
+    txt = " | ".join(e["text"] for e in ev)
+    assert "ORGANIZAÇÃO" in txt and "X Sistemas Ltda" in txt and "x.com.br" in txt
+    assert "wp-content" in txt and "Majestic" in txt and "api.x.com" in txt
+    assert "3 empresa(s)" in txt and "95% em horário de expediente" in txt and "WordPress 6.5" in txt
+
+
+def test_ecossistema_do_site():
+    import httpx
+    cab = httpx.Headers([("server", "cloudflare"), ("set-cookie", "PHPSESSID=1; path=/"), ("set-cookie", "_ga=2"),
+                         ("content-security-policy", "script-src 'self' https://*.omie.com.br cdn.x.com")])
+    html = ('<meta name="generator" content="Wix.com"><script src="https://static.omie.com.br/a.js"></script>'
+            '<a href="https://www.omie.com.br/sobre">x</a><a href="/local">y</a>')
+    ec = inv.ecossistema("x.com", html, "https://x.com/", cab)
+    assert ec["tecnologia"] == {"server": "cloudflare"} and ec["cookies"] == ["PHPSESSID", "_ga"]
+    assert ec["gerador"] == "Wix.com" and ec["scripts"] == ["omie.com.br"] and ec["links"] == ["omie.com.br"]
+    assert "omie.com.br" in ec["csp"] and "x.com" not in ec["csp"]
+
+
+def test_ritmo_nao_espera_e_respeita_limites():
+    r = inv._Ritmo(2)
+    assert r.pode() and r.pode() and not r.pode()          # 2 por hora
+    r2 = inv._Ritmo(100, intervalo=60)
+    assert r2.pode() and not r2.pode()                     # intervalo mínimo
+    r3 = inv._Ritmo(100)
+    r3.pausar(60)
+    assert not r3.pode()                                   # fonte fora: pausada
+
+
+def test_dossie_corta_primeiro_buscas_e_paginas():
+    ev = ([{"id": "E0", "kind": "tls", "text": "ORGANIZAÇÃO X " + "a" * 350}]
+          + [{"id": f"E{i}", "kind": "websearch", "text": "b" * 3000} for i in range(1, 12)])
+    t = inv._dossie_texto("a.com", ev, {})
+    assert "ORGANIZAÇÃO X " + "a" * 350 in t and len(t) < inv.MAX_DOSSIE + 500
+    assert all(f"E{i}:" in t for i in range(12))
+
+
+def test_revisor_vazio_pergunta_de_novo_sem_raciocinio(monkeypatch):
+    respostas = iter([({}, {"segundos": 5}), ({"sustentado": True, "problema": ""}, {"segundos": 2})])
+    pensou = []
+    monkeypatch.setattr(inv, "_chat", lambda cli, msgs, schema, pensar, n: pensou.append(pensar) or next(respostas))
+    r, meta = inv._revisar(_Cli(), "dossiê", {"service": "X"})
+    assert r["sustentado"] and pensou == [True, False] and meta["sem_raciocinio"] and meta["segundos"] == 7
+
+
+def test_sem_certeza_pede_segunda_opiniao_da_ia_online(monkeypatch):
+    from dnsanalyzer import online
+    monkeypatch.setattr(online, "habilitado", lambda: True)
+    g, aplicou, _ = _simula(monkeypatch, revisor_ok=False)
+    assert not aplicou and g["segunda_opiniao"]
+
+
+def test_ia_online_recebe_o_dossie_da_investigacao():
+    from dnsanalyzer import online
+    inv_ = {"at": "2026-09-30T10:00:00", "veredito": {"service": "X ERP", "classification": "TRABALHO", "lista": "wl:sistemas",
+                                                      "confidence": 0.7, "motivo": "certificado"},
+            "sem_aplicar": "confiança 0.7/0.7 abaixo de 0.85", "evidencias": [{"kind": "tls", "text": "ORGANIZAÇÃO: X Ltda"}]}
+    L = online._secao_investigacao(inv_, None)
+    assert "X ERP" in L[1] and "não aplicada" in L[1] and any("X Ltda" in x for x in L)
+    L2 = online._secao_investigacao(None, {"perfil": {"empresas": 1, "computadores": 2, "consultas_14d": 10, "horas_ativas": 3,
+                                                      "expediente_pct": 0, "madrugada_pct": 80, "fim_de_semana_pct": 30}})
+    assert L2[0].startswith("Coleta ampla") and "madrugada" in L2[1]
+    assert online._secao_investigacao(None, None) == []

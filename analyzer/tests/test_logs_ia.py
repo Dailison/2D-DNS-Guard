@@ -298,7 +298,8 @@ def test_listas_curadas_so_manual_com_sugestoes(api):
 
 def test_politicas(api):
     pol = {p["scope"]: p for p in api.get("/policies", headers=H).json()}
-    assert pol["default"]["lists"] == ["ameaca", "vpn_proxy", "adulto", "apostas", "jogos"]
+    # (068) Blacklist vale onde Ameaças vale
+    assert pol["default"]["lists"] == ["ameaca", "vpn_proxy", "adulto", "apostas", "jogos", "blacklist"]
     assert api.put("/policies/tenant:7", json={"lists": ["jogos", "redes_sociais", "jogos"], "services": ["instagram"], "by": "op"},
                    headers=H).status_code == 200
     assert api.put("/policies/unit:7:Matriz", json={"lists": ["outros_bloqueios"]}, headers=H).status_code == 200

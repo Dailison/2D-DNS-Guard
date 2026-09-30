@@ -1336,3 +1336,63 @@ def test_ia_chat_repassa_ao_ollama_local(env, monkeypatch):
         raise httpx.ReadTimeout("lento")
     monkeypatch.setattr(httpx, "post", lento)
     assert env.post("/ia/chat", json={"messages": msgs}, headers=H).status_code == 504
+
+
+def test_infra_de_terceiros_verificada_antes_da_whitelist(env, monkeypatch):
+    """30/09: infraestrutura que hospeda apps de terceiros (Cloud Run, Azure, S3…) passa por listas de ameaça,
+    VirusTotal e URLScan antes da whitelist do catálogo: limpo -> whitelist; malicioso -> Blacklist (SUSPEITO);
+    suspeito -> IA online; fonte no limite -> adia (sem IA local, sem lista)."""
+    from dnsanalyzer import catalog, config, db, investigacao, listas, listas_ia
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    assert catalog.match("app-x.run.app")["verificar"] and catalog.match("x.blob.core.windows.net")["verificar"]
+    assert not catalog.match("windows.net").get("verificar") and catalog.match("windows.net")["protected"]
+    assert catalog.match("da-frwiki-wiki.translate.goog") is None and catalog.match("nel.goog")["lista"] == "wl:infraestrutura"
+    estados = {"limpo-x.run.app": {"estado": "limpo", "resumo": "sem listas de ameaça; VirusTotal: 0 de 94"},
+               "golpe-x.run.app": {"estado": "malicioso", "resumo": "VirusTotal: 7 de 94 marcam como malicioso"},
+               "meio-x.run.app": {"estado": "suspeito", "resumo": "VirusTotal: 1 de 94 marcam como malicioso"},
+               "espera-x.run.app": {"estado": "adiar", "resumo": "VirusTotal no limite"}}
+    monkeypatch.setattr(investigacao, "verificar_infra", lambda did, nome: estados[nome])
+    with db.conn() as c:
+        ids = {n: c.execute("INSERT INTO domains (name, classification, category, classified_by, analyzed_at, total_queries) "
+                            "VALUES (%s, 'TRABALHO', 'infraestrutura', 'catalog', now(), 2) RETURNING id", (n,)).fetchone()["id"]
+               for n in estados}
+    for n in estados:
+        assert listas_ia.sugerir(None, ids[n]) == "done", n   # client=None: nunca pergunta à IA local
+    with db.conn() as c:
+        wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain = ANY(%s)", (list(ids),))}
+        bl = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain = ANY(%s)", (list(ids),))}
+        d = {r["name"]: r for r in c.execute("SELECT name, classification, lista_ia, lista_wl, lista_duvida, lista_at, lista_motivo, reasons "
+                                             "FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
+    assert wl == {"limpo-x.run.app"} and "verificado" in d["limpo-x.run.app"]["lista_motivo"]
+    assert bl == {(listas.BLACKLIST, "golpe-x.run.app")}
+    assert d["golpe-x.run.app"]["classification"] == "SUSPEITO" and d["golpe-x.run.app"]["lista_ia"] == "blacklist"
+    assert d["meio-x.run.app"]["lista_duvida"] and not d["meio-x.run.app"]["lista_wl"]
+    assert d["meio-x.run.app"]["reasons"][0]["by"] == "verificação"
+    assert d["espera-x.run.app"]["lista_at"] is None, "adiado: nada gravado, a fila de listas tenta de novo"
+
+
+def test_camuflagem_e_traducao_do_google_sem_ia(env, monkeypatch):
+    """30/09: camuflagem (regras) -> Ameaças sem IA; x.translate.goog -> a lista já aplicada ao site original."""
+    from dnsanalyzer import config, db, listas_ia
+    from dnsanalyzer.rules import CAMUFLAGEM_TOPIC
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        cam = c.execute("INSERT INTO domains (name, classification, topic, classified_by, analyzed_at) VALUES "
+                        "('h3gu39r4.com', 'SUSPEITO', %s, 'rules', now()) RETURNING id", (CAMUFLAGEM_TOPIC,)).fetchone()["id"]
+        c.execute("INSERT INTO domains (name, classification, lista_ia, lista_at, lista_aplicada_at, analyzed_at) VALUES "
+                  "('cassino-x.com', 'NAO_TRABALHO', 'apostas', now(), now(), now())")
+        tr = c.execute("INSERT INTO domains (name, classification, analyzed_at) VALUES "
+                       "('www-cassino--x-com.translate.goog', 'NAO_TRABALHO', now()) RETURNING id").fetchone()["id"]
+        nada = c.execute("INSERT INTO domains (name, classification, analyzed_at) VALUES "
+                         "('novo-site-com.translate.goog', 'NAO_TRABALHO', now()) RETURNING id").fetchone()["id"]
+    assert listas_ia._traduzido("www-cassino--x-com.translate.goog") == "cassino-x.com"
+    assert listas_ia.lista_do_catalogo({"id": cam, "name": "h3gu39r4.com", "classification": "SUSPEITO", "topic": CAMUFLAGEM_TOPIC})
+    assert listas_ia.lista_do_catalogo({"id": tr, "name": "www-cassino--x-com.translate.goog", "classification": "NAO_TRABALHO"})
+    assert not listas_ia.lista_do_catalogo({"id": nada, "name": "novo-site-com.translate.goog", "classification": "NAO_TRABALHO"}), \
+        "site original sem lista decidida: segue p/ a IA"
+    with db.conn() as c:
+        em = {(r["category"], r["domain"]) for r in c.execute(
+            "SELECT category, domain FROM category_lists WHERE domain IN ('h3gu39r4.com', 'www-cassino--x-com.translate.goog')")}
+        wl = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'h3gu39r4.com'").fetchone()
+    assert em == {("ameaca", "h3gu39r4.com"), ("apostas", "www-cassino--x-com.translate.goog")}, em
+    assert not wl, "camuflagem nunca vai p/ a whitelist"

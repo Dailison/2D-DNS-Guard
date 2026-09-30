@@ -2,7 +2,14 @@
 #
 # Casamento: o domínio registrável é igual ao `suffix` ou termina em ".suffix".
 # Com `exact: true`, só casa se for exatamente igual (use p/ plataformas onde
-# terceiros hospedam conteúdo).
+# terceiros hospedam conteúdo). Com `ignorar: true`, o nome fica FORA do catálogo (volta p/ a IA) mesmo que um
+# sufixo menor case — ex.: translate.goog (páginas de terceiros traduzidas) dentro de .goog.
+# Mesmo sufixo em duas entradas: a com `exact` (antes no arquivo) vale p/ o próprio nome e a outra p/ os subdomínios
+# que a lista pública de sufixos separa (x.servicebus.windows.net).
+#
+# lista: "wl:..." -> grava e aplica essa lista sem perguntar à IA (listas_ia.lista_do_catalogo).
+# verificar: true -> infraestrutura que hospeda apps de TERCEIROS: antes da whitelist passa por listas de ameaça,
+# VirusTotal e URLScan (30/09); detectado vai p/ a lista Blacklist ou p/ a IA online (investigacao.verificar_infra).
 #
 # protected: true -> infraestrutura crítica de trabalho. Listas de ameaça NÃO
 # conseguem, sozinhas, marcá-lo como SUSPEITO/MALICIOSO (o acerto vira evidência
@@ -28,7 +35,10 @@ entries:
   - {suffix: live.com,             classification: TRABALHO, topic: "Conta Microsoft", work: 70, protected: true}
   - {suffix: windows.com,          classification: TRABALHO, topic: "Windows", work: 85, protected: true}
   - {suffix: windowsupdate.com,    classification: TRABALHO, topic: "Windows Update", work: 90, protected: true}
-  - {suffix: windows.net,          classification: TRABALHO, topic: "Azure (Microsoft)", work: 75, protected: true, exact: true}
+  - {suffix: windows.net,          classification: TRABALHO, topic: "Azure (Microsoft)", work: 75, protected: true, exact: true, category: infraestrutura, lista: "wl:infraestrutura"}
+  # subdomínios do Azure (x.blob.core.windows.net, x.servicebus.windows.net — pedido do usuário 30/09): como a AWS,
+  # whitelist Infraestrutura sem IA e NÃO protegidos (conteúdo de terceiro em feed de ameaça de alta vira MALICIOSO)
+  - {suffix: windows.net,          classification: TRABALHO, topic: "Azure (Microsoft)", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
   - {suffix: microsoft.net,        classification: TRABALHO, topic: "Microsoft", work: 80, protected: true}
   - {suffix: msftauth.net,         classification: TRABALHO, topic: "Microsoft 365 / login", work: 95, protected: true}
   - {suffix: msauth.net,           classification: TRABALHO, topic: "Microsoft 365 / login", work: 95, protected: true}
@@ -42,7 +52,8 @@ entries:
   - {suffix: skype.com,            classification: TRABALHO, topic: "Comunicação", work: 70, protected: true}
   - {suffix: lync.com,             classification: TRABALHO, topic: "Comunicação", work: 80, protected: true}
   - {suffix: azure.com,            classification: TRABALHO, topic: "Azure (Microsoft)", work: 75, protected: true, exact: true}
-  - {suffix: trafficmanager.net,   classification: TRABALHO, topic: "Azure (infraestrutura)", work: 70, protected: true, exact: true}
+  - {suffix: trafficmanager.net,   classification: TRABALHO, topic: "Azure (infraestrutura)", work: 70, protected: true, exact: true, category: infraestrutura, lista: "wl:infraestrutura"}
+  - {suffix: trafficmanager.net,   classification: TRABALHO, topic: "Azure Traffic Manager", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
 
   # ---------------- Google / Apple (base de sistema; serviços pessoais ficam p/ IA)
   - {suffix: google.com,           classification: TRABALHO, topic: "Google", work: 75, protected: true}
@@ -79,12 +90,20 @@ entries:
   - {suffix: ntp.org,              classification: TRABALHO, topic: "Hora (NTP)", work: 70, protected: true}
   # AWS e CloudFront (pedido do usuário 28/09): sem IA, direto na whitelist Infraestrutura (`lista`). NÃO protegidos:
   # bucket/distribuição de terceiros em feed de ameaça (alta) continua virando MALICIOSO e não é liberado
-  - {suffix: amazonaws.com,        classification: TRABALHO, topic: "Amazon Web Services (AWS)", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
-  - {suffix: amazonaws.com.cn,     classification: TRABALHO, topic: "Amazon Web Services (AWS China)", work: 60, category: infraestrutura, lista: "wl:infraestrutura"}
-  - {suffix: cloudfront.net,       classification: TRABALHO, topic: "Amazon CloudFront (CDN)", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
+  - {suffix: amazonaws.com,        classification: TRABALHO, topic: "Amazon Web Services (AWS)", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
+  - {suffix: amazonaws.com.cn,     classification: TRABALHO, topic: "Amazon Web Services (AWS China)", work: 60, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
+  - {suffix: cloudfront.net,       classification: TRABALHO, topic: "Amazon CloudFront (CDN)", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
   # Google Cloud Functions (pedido do usuário 29/09): o mesmo tratamento da AWS — sem IA, whitelist Infraestrutura, NÃO
   # protegido (função de terceiro em feed de ameaça de alta confiança vira MALICIOSO; quem está numa lista de bloqueio fica)
-  - {suffix: cloudfunctions.net,   classification: TRABALHO, topic: "Google Cloud Functions", work: 70, category: infraestrutura, lista: "wl:infraestrutura"}
+  - {suffix: cloudfunctions.net,   classification: TRABALHO, topic: "Google Cloud Functions", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
+  # 30/09 (pedido do usuário, a partir dos desconhecidos da etapa 1): mesmo tratamento — sem IA, whitelist Infraestrutura
+  - {suffix: run.app,              classification: TRABALHO, topic: "Google Cloud Run", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
+  - {suffix: awsglobalaccelerator.com, classification: TRABALHO, topic: "AWS Global Accelerator", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
+  - {suffix: cdn77.org,            classification: TRABALHO, topic: "CDN77 (CDN)", work: 60, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
+  # .goog: TLD da própria Google (nel.goog, telephony.goog, usercontent.goog…); translate.goog são páginas de TERCEIROS
+  # traduzidas pelo Google: ficam fora (a lista copia a do site original — listas_ia.lista_do_catalogo)
+  - {suffix: goog,                 classification: TRABALHO, topic: "Google (infraestrutura)", work: 70, category: infraestrutura, lista: "wl:infraestrutura", verificar: true}
+  - {suffix: translate.goog,       classification: TRABALHO, topic: "Google Tradutor (página de terceiro)", ignorar: true}
 
   # ---------------- Governo e bancos (Brasil)
   - {suffix: gov.br,               classification: TRABALHO, topic: "Governo", work: 90, protected: true}

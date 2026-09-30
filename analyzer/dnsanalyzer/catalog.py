@@ -19,6 +19,7 @@ def load_catalog(path: str = str(CATALOG_PATH)) -> list[dict]:
         e["suffix"] = e["suffix"].strip().lower().strip(".")
         e.setdefault("protected", False)
         e.setdefault("exact", False)
+        e.setdefault("ignorar", False)
         entries.append(e)
     # mais específico primeiro (office365.com antes de com...)
     entries.sort(key=lambda x: len(x["suffix"]), reverse=True)
@@ -30,5 +31,5 @@ def match(registrable: str, entries: list[dict] | None = None) -> dict | None:
     for e in entries if entries is not None else load_catalog():
         s = e["suffix"]
         if name == s or (not e["exact"] and name.endswith("." + s)):
-            return e
+            return None if e["ignorar"] else e
     return None

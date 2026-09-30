@@ -451,7 +451,10 @@ def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2
     fin = combine(rule, res, ev)
     with db.conn() as c:
         save(c, drow, dossier, rule, fin, False, meta["model"], meta)
-    if unica and listas_ia.lista_valida(res.lista):   # a lista veio na mesma resposta (etapa única)
+    if listas_ia._traduzido(name) and listas_ia.lista_do_catalogo(
+            {**drow, "classification": fin.classification, "topic": fin.topic}, 2 if etapa3 else 3 if etapa2 else 1):
+        pass   # (30/09) página traduzida pelo Google: a lista do site original, já decidida, vale sem a sugestão da IA
+    elif unica and listas_ia.lista_valida(res.lista):   # a lista veio na mesma resposta (etapa única)
         try:
             listas_ia.gravar_local({**drow, "classification": fin.classification}, res.lista, res.lista_confianca,
                                    res.lista_motivo, res.service, 1, meta["model"], meta.get("seconds"))

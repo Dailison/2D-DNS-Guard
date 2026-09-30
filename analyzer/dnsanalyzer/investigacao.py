@@ -573,6 +573,9 @@ def virustotal(nome: str, cliente: httpx.Client, chave: str) -> dict | None:
         r = cliente.get(f"https://www.virustotal.com/api/v3/domains/{nome}", headers={"x-apikey": chave}, timeout=30)
         if r.status_code == 429:
             RITMO["virustotal"].pausar(3600)
+        if r.status_code == 404:   # nunca analisado (comum em subdomínio de nuvem): sem detecção, não "indisponível"
+            return {"nao_visto": True, "categorias": {}, "maliciosos": 0, "suspeitos": 0, "total_fornecedores": 0,
+                    "reputacao": None, "tags": [], "registrador": None, "criado": None, "ranks": {}}
         if r.status_code != 200:
             return None
         a = (r.json().get("data") or {}).get("attributes") or {}
@@ -784,6 +787,63 @@ def buscas(consultas: list[str], nome: str) -> list[dict]:
     return out
 
 
+def urlscan_malicioso(nome: str, cliente: httpx.Client, chave: str) -> int | None:
+    """Varreduras do URLScan em que o domínio (ou página dele) teve veredito MALICIOSO. None = indisponível/limite."""
+    if not RITMO["urlscan_chave"].pode():
+        return None
+    try:
+        r = cliente.get("https://urlscan.io/api/v1/search/", headers={"API-Key": chave}, timeout=20, params={
+            "q": f"(domain:{nome} OR page.domain:{nome}) AND verdicts.malicious:true", "size": 1})
+        if r.status_code == 429:
+            RITMO["urlscan_chave"].pausar(3600)
+        return int(r.json().get("total") or 0) if r.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+VERIFICACAO = "verif_infra"   # lookup_cache.kind: resultado da verificação (vale 30 dias)
+
+
+def verificar_infra(did: int, nome: str) -> dict:
+    """Antes da whitelist do catálogo p/ infraestrutura que hospeda apps de TERCEIROS (bucket S3, CloudFront, Cloud Run,
+    Azure, …; pedido do usuário 30/09): listas de ameaça, VirusTotal e URLScan. estado: limpo | suspeito (1-2
+    detecções, alguma lista de ameaça) | malicioso (VirusTotal >= 3 ou veredito malicioso no URLScan) | adiar (a
+    fonte está no limite do plano grátis: tenta de novo depois)."""
+    from . import ti
+    cfg = settings()
+    with db.conn() as c:
+        r = c.execute("SELECT value FROM lookup_cache WHERE kind = %s AND key = %s AND fetched_at > now() - interval '30 days'",
+                      (VERIFICACAO, nome)).fetchone()
+        if r:
+            return r["value"]
+        hits = ti.hits_for_domain(c, did)
+    vt = us = None
+    with httpx.Client(timeout=30, follow_redirects=True, headers={"User-Agent": webintel.UA}) as http:
+        if cfg.virustotal_api_key:
+            vt = virustotal(nome, http, cfg.virustotal_api_key)
+            if vt is None:
+                return {"estado": "adiar", "resumo": "VirusTotal indisponível ou no limite do plano grátis"}
+        if cfg.urlscan_api_key:
+            us = urlscan_malicioso(nome, http, cfg.urlscan_api_key)
+            if us is None:
+                return {"estado": "adiar", "resumo": "URLScan indisponível ou no limite do plano grátis"}
+    mal, sus = (vt or {}).get("maliciosos") or 0, (vt or {}).get("suspeitos") or 0
+    estado = "malicioso" if mal >= 3 or (us or 0) > 0 else "suspeito" if (mal or sus or hits) else "limpo"
+    partes = [("listas de ameaça: " + ", ".join(f"{h.get('label') or h['source']} ({h.get('confidence')})" for h in hits[:4]))
+              if hits else "sem listas de ameaça"]
+    if vt is not None:
+        partes.append("VirusTotal: nunca analisado" if vt.get("nao_visto") else
+                      f"VirusTotal: {mal} de {vt.get('total_fornecedores') or '?'} marcam como malicioso"
+                      + (f" ({sus} suspeito)" if sus else ""))
+    if us is not None:
+        partes.append(f"URLScan: {us} varredura(s) com veredito malicioso" if us else "URLScan: sem veredito malicioso")
+    out = {"estado": estado, "resumo": "; ".join(partes)}
+    with db.conn() as c:
+        c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, %s) ON CONFLICT (kind, key) "
+                  "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (VERIFICACAO, nome, Jsonb(out)))
+    return out
+
+
 # ------------------------------------------------------------------ coleta ampla (sem IA)
 COLETA = "coleta"          # lookup_cache.kind: fontes de rede já coletadas (a investigação reaproveita)
 COLETA_VALIDADE_H = 72
@@ -966,7 +1026,9 @@ def novas_evidencias(inicio: int, f: dict) -> list[dict]:
                       f"{pa['fim_de_semana_pct']}% no fim de semana (madrugada/fim de semana alto = serviço automático "
                       "em segundo plano, não uso humano)")
     vt = f.get("virustotal")
-    if vt:
+    if vt and vt.get("nao_visto"):
+        add("virustotal", "VirusTotal: domínio nunca analisado por lá (sem detecções)")
+    elif vt:
         susp = f" ({vt['suspeitos']} suspeito)" if vt.get("suspeitos") else ""
         add("virustotal", f"VirusTotal: {vt['maliciosos']} de {vt['total_fornecedores']} fornecedores marcam como malicioso"
                           f"{susp}; categorias: "

@@ -14,6 +14,18 @@ from datetime import date, datetime, timezone
 
 from .whois import evidencia as whois_evidencia
 
+CAMUFLAGEM_TOPIC = "Página com camuflagem (imita erro do navegador)"
+
+
+def camuflagem(d: dict) -> bool:
+    """A página responde, mas imita a tela de erro do navegador (webintel: SINAL de camuflagem) — de quem não é o
+    público-alvo do golpe/cassino. Até 30/09 os 190 casos viraram "ameaça" na IA online (nenhum no Tranco, páginas
+    curtas); fora do Tranco e com página curta (artigo que ENSINA a corrigir o erro é longo) não precisa de IA."""
+    site = (d.get("web") or {}).get("site") or {}
+    return (any("camuflagem" in s for s in site.get("sinais") or []) and not d.get("popularity_rank")
+            and len(site.get("texto") or "") < 1500)
+
+
 THREAT_TOPIC = {"malware": "Malware", "c2": "Comando e controle (C2)", "phishing": "Phishing",
                 "threat": "Ameaça (feed agregado)", "badware": "Hospedagem de badware",
                 "dyndns": "DNS dinâmico", "bypass": "VPN/Proxy/DoH (contorno de filtro)"}
@@ -292,6 +304,12 @@ def evaluate(d: dict) -> RuleResult:
         threats = [e.data.get("threat") for e in ti if e.data.get("confidence") == "high"]
         topic = THREAT_TOPIC.get(threats[0], "Ameaça") if threats else "Ameaça"
         return RuleResult("MALICIOSO", max(risk, 85), 2, topic, 0.9, True, False, "BLOCK_CANDIDATE",
+                          reasons, flags, ev, _hash(d), category="ameaca")
+
+    if camuflagem(d) and not protected:   # (30/09) decisão sem IA: SUSPEITO e lista Ameaça (listas_ia.lista_do_catalogo)
+        e = by_kind["site"][0]
+        reason(e, "a página imita a tela de erro do navegador, mas o site responde: camuflagem típica de golpe")
+        return RuleResult("SUSPEITO", max(risk, 70), 5, CAMUFLAGEM_TOPIC, 0.9, True, False, "BLOCK_CANDIDATE",
                           reasons, flags, ev, _hash(d), category="ameaca")
 
     # dica de categoria quando a única lista que casou é a de VPN/proxy/DoH

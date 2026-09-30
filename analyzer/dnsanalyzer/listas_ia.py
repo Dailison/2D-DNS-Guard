@@ -15,6 +15,7 @@ import re
 import time
 
 import httpx
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, ValidationError
 
 from . import catalog, corporate, db, eventos, listas, whitelist
@@ -216,22 +217,96 @@ def fase(client: OllamaClient) -> str:
     return "done" if lista_do_catalogo(d) else _sugerir(client, d)
 
 
-def lista_do_catalogo(d: dict, fase_n: int = 1) -> bool:
-    """Catálogo com lista fixa (amazonaws.com, cloudfront.net, cloudfunctions.net -> wl:infraestrutura): grava e aplica
-    sem perguntar à IA.
-    Segue o fluxo normal: ameaça (SUSPEITO/MALICIOSO) e quem já está numa lista de bloqueio (bucket/distribuição que a
-    IA ou uma pessoa identificou como apostas, adulto, ameaça… — não desbloqueia)."""
+def _traduzido(nome: str) -> str | None:
+    """x-y-com.translate.goog = página de x.y.com traduzida pelo Google ("-" = ".", "--" = "-")."""
+    if not nome.endswith(".translate.goog"):
+        return None
+    rot = nome[: -len(".translate.goog")].split(".")[-1]
+    orig = rot.replace("--", "\0").replace("-", ".").replace("\0", "-")
+    from .features import analyze_name
+    return analyze_name(orig, []).registrable
+
+
+def _lista_sem_ia(c, d: dict) -> tuple[str, str] | None:
+    """(lista, motivo) decidida sem IA, ou None:
+    - catálogo com lista fixa (amazonaws.com, cloudfront.net, run.app, .goog… -> wl:infraestrutura), fora ameaça;
+    - camuflagem (regras: SUSPEITO, "imita erro do navegador") -> ameaca (30/09);
+    - página traduzida pelo Google (x.translate.goog) -> a lista já aplicada ao site original (30/09)."""
+    from .rules import CAMUFLAGEM_TOPIC
+    if d.get("classification") == "SUSPEITO" and d.get("topic") == CAMUFLAGEM_TOPIC:
+        return "ameaca", "regras: " + CAMUFLAGEM_TOPIC.lower()
+    orig = _traduzido(d["name"])
+    if orig:
+        o = c.execute("SELECT lista_ia, lista_wl FROM domains WHERE name = %s AND lista_aplicada_at IS NOT NULL",
+                      (orig,)).fetchone()
+        lista = o and (o["lista_ia"] or (f"wl:{o['lista_wl']}" if o["lista_wl"] else None))
+        if lista and lista not in (NAO_IDENT, PARA_REVISAR):
+            return lista, f"tradução do Google de {orig}: mesma lista do site original"
+        return None
     e = catalog.match(d["name"])
     if not e or not e.get("lista") or d.get("classification") in ("SUSPEITO", "MALICIOSO"):
-        return False
+        return None
+    return e["lista"], f"catálogo: {e.get('topic')}"
+
+
+VERIFICADO_POR = "verificação: listas de ameaça, VirusTotal e URLScan"
+
+
+def _verificado(c, d: dict, e: dict, verif: dict, fase_n: int) -> None:
+    """Infraestrutura de terceiros que NÃO passou na verificação (`investigacao.verificar_infra`) não vai p/ a whitelist:
+    malicioso -> lista Blacklist (e SUSPEITO); suspeito (1-2 detecções, lista de ameaça fraca) -> a IA online decide."""
+    motivo = f"verificação antes da whitelist ({e.get('topic')}): {verif['resumo']}"
+    razao = [{"evidence_id": None, "text": motivo[:400], "by": "verificação"}]
+    if verif["estado"] == "malicioso":
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                  (listas.BLACKLIST, d["name"], VERIFICADO_POR))
+        salvar(c, d["id"], listas.BLACKLIST, 1.0, motivo, e.get("topic") or "", FONTE_CATALOGO, fase_n)
+        c.execute("UPDATE domains SET lista_aplicada_at = lista_at, lista_duvida = false, classification = 'SUSPEITO', "
+                  " risk_score = greatest(coalesce(risk_score, 0), 70), reasons = %s || coalesce(reasons, '[]'::jsonb) "
+                  "WHERE id = %s", (Jsonb(razao), d["id"]))
+        eventos.lista("lista_add", d["name"], listas.BLACKLIST, f"Blacklist · {verif['resumo']}", d["id"], None, "SUSPEITO")
+        return
+    salvar(c, d["id"], NENHUMA, 0.5, motivo, e.get("topic") or "", FONTE_CATALOGO, fase_n)
+    c.execute("UPDATE domains SET lista_aplicada_at = lista_at, lista_duvida = true, "
+              " reasons = %s || coalesce(reasons, '[]'::jsonb) WHERE id = %s", (Jsonb(razao), d["id"]))
+    eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), None,
+                      detail=f"{fase_n}|lista nenhuma 50% · {e.get('topic')} — {verif['resumo']} · vai p/ a fase 4 (IA online)")
+
+
+def lista_do_catalogo(d: dict, fase_n: int = 1) -> bool:
+    """Lista decidida sem perguntar à IA (`_lista_sem_ia`): grava e aplica. True = tratado (sem IA).
+    Segue o fluxo normal quem já está numa lista de bloqueio (bucket/distribuição que a IA ou uma pessoa identificou
+    como apostas, adulto, ameaça… — o catálogo não desbloqueia). Infraestrutura de TERCEIROS (`verificar: true` no
+    catálogo) passa antes pela verificação (30/09): limpo -> whitelist; senão Blacklist ou IA online; fonte no limite
+    do plano grátis -> fica reservado e a fila de listas tenta de novo em 10 min."""
     with db.conn() as c:
+        r = _lista_sem_ia(c, d)
+        if not r:
+            return False
+        lista, motivo = r
         if c.execute("SELECT 1 FROM category_lists WHERE domain = %s AND category NOT IN (%s, %s)",   # (Não identificados
                      (d["name"], PARA_REVISAR, NAO_IDENT)).fetchone():                                  #  não é identificação)
             return False
-        salvar(c, d["id"], e["lista"], 1.0, f"catálogo: {e.get('topic')}", e.get("topic") or "", FONTE_CATALOGO, fase_n)
+    e = catalog.match(d["name"]) if motivo.startswith("catálogo") else None
+    verif = None
+    if e and e.get("verificar") and e_wl(lista):
+        from . import investigacao
+        verif = investigacao.verificar_infra(d["id"], d["name"])
+        if verif["estado"] == "adiar":
+            log.info("lista de %s adiada: %s", d["name"], verif["resumo"])
+            return True   # lista_claimed_at continua: a fila de listas pega de novo em 10 min
+        if verif["estado"] != "limpo":
+            with db.conn() as c:
+                _verificado(c, d, e, verif, fase_n)
+            return True
+        motivo += f" · verificado: {verif['resumo']}"
+    servico = motivo.split(": ", 1)[-1].split(" · verificado")[0]
+    with db.conn() as c:
+        salvar(c, d["id"], lista, 1.0, motivo, servico, FONTE_CATALOGO, fase_n)
         aplicar(c, ids=[d["id"]])
     eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), None,
-                      detail=f"{fase_n}|lista {e['lista']} 100% · {e.get('topic')} — catálogo (sem IA)")
+                      detail=f"{fase_n}|lista {lista} 100% · {servico} — {motivo.split(':')[0]} (sem IA)"
+                             + (" · verificado" if verif else ""))
     return True
 
 
@@ -296,7 +371,11 @@ def regras_lista() -> str:
     s = online.SYSTEM
     regra = s[s.index('- "lista":'):s.index('- "confianca":')].replace("{{", "{").replace("}}", "}")
     return ("ALÉM da classificação, diga para onde o site vai (campos lista, lista_confianca, lista_motivo). "
-            "lista_confianca 1.0 só com certeza; 0.7 provável; 0.4 ou menos se está chutando.\n" + regra
+            "lista_confianca 1.0 só com certeza; 0.7 provável; 0.4 ou menos se está chutando. A página inicial do PRÓPRIO "
+            "domínio que mostra com clareza o tipo de site, coerente com o nome (loja com produtos e preços, cassino/apostas, "
+            "portal de notícias, conteúdo adulto, pirataria), basta para a LISTA DE BLOQUEIO desse tipo (lista_confianca até "
+            "0.9); para uma WHITELIST, a página sozinha vale no máximo 0.8 — só seu conhecimento, WHOIS com CNPJ, "
+            "certificado ou busca na web confirmam a whitelist.\n" + regra
             + "\nListas de bloqueio:\n" + "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
             + "\n\nWhitelists (sites liberados):\n" + "\n".join(f"- {k}: {v}" for k, v in WL.items()))
 
@@ -526,6 +605,9 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         moveis = {PARA_REVISAR, OUTROS} | da_ia | ({INFRA} if em.get(INFRA, "").startswith("migração") else set())
         fixas = set(em) - moveis                                                 # pessoa/migração/Sistema
         online = _final(r)   # IA online ou investigação profunda (fase 6): resposta final
+        # decisão fixa sem IA (catálogo; camuflagem -> ameaça; tradução do Google -> lista do original): sem as travas de
+        # coerência, que existem p/ o palpite da IA (ameaça exige MALICIOSO)
+        fixa = r["lista_fonte"] == FONTE_CATALOGO
         certo = (r["lista_conf"] or 0) >= (cfg.online_confianca_min if online else cfg.lista_confianca_min)
         cls = (r["cls_online"] if (r["lista_fonte"] or "").startswith("online") and r["cls_online"]
                else r["classification"])
@@ -560,7 +642,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             trava = None
             if certo:
                 trava = ("tirar da Infraestrutura" if tira_infra else
-                         (_incoerencia(cat, cls, r["category"]) or guardado(r, cat)) if cat else _suspeito(r))
+                         ((None if fixa else _incoerencia(cat, cls, r["category"])) or guardado(r, cat)) if cat else _suspeito(r))
                 if not decide_sozinho(r["lista_modelo"]) and r["lista_fonte"] != FONTE_CATALOGO:
                     trava = trava or f"modelo {r['lista_modelo'] or 'antigo'} não decide sozinho"
                 if cat == NAO_IDENT:
@@ -617,7 +699,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                 liberar(r, cls)
             continue
         # lista de bloqueio. A lista diz O QUE O SITE É; p/ a IA online, "ameaça" só com classificação suspeita/maliciosa
-        coerente = (cat != "ameaca" or cls in ("MALICIOSO", "SUSPEITO")) if online else _coerente(cat, cls, r["category"])
+        coerente = (fixa or (cat != "ameaca" or cls in ("MALICIOSO", "SUSPEITO")) if online
+                    else fixa or _coerente(cat, cls, r["category"]))
         trava = None if cat in em else (guardado(r, cat) if coerente else f"{cat} com classificação {cls}")
         if trava:   # a IA não bloqueia sozinha: fica como está; sem lista de bloqueio, vai p/ a whitelist (nada muda no DNS)
             out["travados"].append((r["name"], cat, trava))

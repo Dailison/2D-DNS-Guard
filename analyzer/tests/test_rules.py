@@ -88,3 +88,17 @@ def test_bet_br_e_tlds_de_apostas_pelo_catalogo():
                       "logs": {}, "catalog": __import__("dnsanalyzer.catalog", fromlist=["x"]).match(reg)})
         assert r.final and r.classification == "NAO_TRABALHO" and r.category == "apostas", (nome, reg, r.category)
     assert __import__("dnsanalyzer.catalog", fromlist=["x"]).match("betfair.com.br") is None
+
+
+def test_camuflagem_decide_sem_ia():
+    """30/09: página que imita erro do navegador (190 de 190 viraram Ameaças na IA online) -> SUSPEITO final, sem IA;
+    no Tranco ou com página longa (artigo que ensina a corrigir o erro) continua indo p/ a IA."""
+    from dnsanalyzer.rules import CAMUFLAGEM_TOPIC, evaluate
+    sinal = "imita a tela de erro do navegador, mas o site responde (camuflagem)"
+    base = {"name": "h3gu39r4.com", "kind": "public", "tld": "com", "features": {}, "ti_hits": [], "catalog": None,
+            "fqdn_stats": {}, "logs": {}, "web": {"site": {"texto": "DNS_PROBE_FINISHED_NXDOMAIN", "sinais": [sinal]}}}
+    r = evaluate(base)
+    assert r.classification == "SUSPEITO" and r.final and not r.needs_llm and r.topic == CAMUFLAGEM_TOPIC
+    assert r.category == "ameaca" and r.risk >= 70
+    assert evaluate({**base, "popularity_rank": 5000}).needs_llm
+    assert evaluate({**base, "web": {"site": {"texto": "x" * 3000, "sinais": [sinal]}}}).needs_llm

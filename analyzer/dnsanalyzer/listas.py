@@ -26,7 +26,12 @@ CATEGORIAS_DINAMICAS = ()   # (listas montadas pela classificação: desligado)
 # Sistema = só manual. infra_bloqueio ("Infraestrutura"): NÃO é a categoria "infraestrutura" da IA (serviços
 # de trabalho); outros_bloqueios ("Outros"); para_revisar: dúvidas da IA + sobras da migração, ninguém aplica
 CATEGORIAS_MANUAIS = ("infra_bloqueio", "outros_bloqueios", "para_revisar")
-CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_CURADAS + CATEGORIAS_MANUAIS
+# (30/09, pedido do usuário) Blacklist: infraestrutura de terceiros (bucket S3, CloudFront, Cloud Run, Azure…) que ia p/ a
+# whitelist do catálogo, mas aparece em lista de ameaça, no VirusTotal ou com veredito malicioso no URLScan. Nem a IA
+# nem pessoa põem aqui na mão: só a verificação (listas_ia.lista_do_catalogo)
+BLACKLIST = "blacklist"
+CATEGORIAS_VERIFICACAO = (BLACKLIST,)
+CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_CURADAS + CATEGORIAS_VERIFICACAO + CATEGORIAS_MANUAIS
 AUTO_BY = "bloqueio automático"
 
 # SUGESTÕES p/ as listas curadas: classificado NAO_TRABALHO na categoria, sem decisão "manter

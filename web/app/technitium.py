@@ -242,7 +242,7 @@ def grupo_da_rede(cidr, ngm):
 # O analisador publica /listas/<categoria>.txt; cada grupo assina as que quiser (blockListUrls).
 # organização das listas (pedido do usuário 2026-09-26): seções só p/ a tela; ⚡ = risco (só destaque)
 SECOES_LISTA = [
-    ("🔒 Segurança", [("ameaca", "Ameaças"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
+    ("🔒 Segurança", [("ameaca", "Ameaças"), ("blacklist", "Blacklist"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
                      ("adware", "Adware / Apps indesejados"), ("nao_identificado", "Não identificados")]),
     ("🚫 Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
                     ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
@@ -270,8 +270,10 @@ CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividad
 # as que vão p/ o DNS (allowListUrls): "Sem resposta" só organiza (nunca é publicada)
 CATEGORIAS_WHITELIST_DNS = [x for x in CATEGORIAS_WHITELIST if x[0] != "sem_resposta"]
 _WL_RE = re.compile(r"/whitelist/([a-z_]+)\.txt$")
-CATEGORIAS_RISCO = {"ameaca", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas", "nao_identificado"}   # ⚡ (só destaque visual)
+CATEGORIAS_RISCO = {"ameaca", "blacklist", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas", "nao_identificado"}   # ⚡ (só destaque visual)
 CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # a IA não põe sozinha
+# Blacklist (30/09): posta só pela verificação do analisador (infraestrutura de terceiros em lista de ameaça, no
+# VirusTotal ou com veredito malicioso no URLScan) — a IA não escolhe essa lista
 
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")
 

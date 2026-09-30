@@ -89,7 +89,8 @@ document.getElementById("lSalvar").addEventListener("click", async (ev) => {
 </script>
 {% endif %}
 {% if modo == 'liberacao' %}
-<h2 style="margin:1.2rem 0 .4rem;font-size:1.05rem" title="Vão ao DNS em todas as empresas e vencem qualquer bloqueio (inclusive por CNAME). A IA põe aqui o que validou como trabalho, sem lista de bloqueio; protegidos do catálogo vão para Essenciais; sai sozinho se aparecer num feed de ameaça.">✅ Whitelists</h2>
+<h2 style="margin:1.2rem 0 .4rem;font-size:1.05rem" title="Vão ao DNS em todas as empresas e vencem qualquer bloqueio (inclusive por CNAME). A IA põe aqui o que validou como trabalho, sem lista de bloqueio; protegidos do catálogo vão para Essenciais; sai sozinho se aparecer num feed de ameaça.">✅ Whitelists
+  {%- if whitelists.categorias %} <span class="mut" style="font-size:.8rem;font-weight:400" title="domínios distintos (um domínio em mais de uma whitelist conta uma vez)">· {{ whitelists.total if whitelists.total is defined else whitelists.categorias|sum(attribute='total') }} domínio(s)</span>{% endif %}</h2>
 <div class="card">
   <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
     {% set totwl = {} %}{% for x in whitelists.categorias %}{% set _ = totwl.update({x.categoria: x.total}) %}{% endfor %}

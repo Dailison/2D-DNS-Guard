@@ -435,3 +435,10 @@ def test_urlscan_malicioso_confere_o_veredito_de_cada_varredura(monkeypatch):
         assert inv.urlscan_malicioso("app-x.run.app", cli, "k") == 1
     with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(403))) as cli:
         assert inv.urlscan_malicioso("app-x.run.app", cli, "k") is None
+
+
+def test_ritmo_espera_a_vez_so_pelo_intervalo():
+    r = inv._Ritmo(100, intervalo=0.3)
+    assert r.pode() and not r.pode() and r.pode(esperar=1)   # espera ~0,3 s pela vez
+    r.pausar(60)
+    assert not r.pode(esperar=1)                              # pausada: não espera

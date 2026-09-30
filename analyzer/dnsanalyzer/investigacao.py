@@ -154,7 +154,18 @@ class _Ritmo:
         self.por_hora, self.intervalo, self.por_dia = por_hora, intervalo, por_dia
         self.lock, self.hora, self.dia, self.ultimo, self.pausa_ate = threading.Lock(), [], [], 0.0, 0.0
 
-    def pode(self) -> bool:
+    def pode(self, esperar: float = 0) -> bool:
+        """`esperar`: se só falta o intervalo mínimo (sem pausa nem limite estourado), espera a vez até esses segundos
+        (30/09: a verificação da infraestrutura pedia 18 de uma vez; sem esperar, 17 eram adiados a cada rodada)."""
+        while True:
+            with self.lock:
+                agora = time.time()
+                falta = self.intervalo - (agora - self.ultimo)
+                if agora >= self.pausa_ate and falta > 0 and falta <= esperar:
+                    esperar -= falta
+                else:
+                    break
+            time.sleep(falta)
         with self.lock:
             agora = time.time()
             if agora < self.pausa_ate or agora - self.ultimo < self.intervalo:
@@ -564,10 +575,10 @@ def urlscan_detalhe(nome: str, cliente: httpx.Client, chave: str) -> dict | None
     return out if (out["paginas"] or out["iniciadores"]) else None
 
 
-def virustotal(nome: str, cliente: httpx.Client, chave: str) -> dict | None:
+def virustotal(nome: str, cliente: httpx.Client, chave: str, esperar: float = 0) -> dict | None:
     """Relatório de domínio do VirusTotal (chave gratuita: 4/min, 500/dia): categoria dada por ~10 fornecedores de
     segurança, detecções, ranking de popularidade, tags e data do registro."""
-    if not RITMO["virustotal"].pode():
+    if not RITMO["virustotal"].pode(esperar):
         return None
     try:
         r = cliente.get(f"https://www.virustotal.com/api/v3/domains/{nome}", headers={"x-apikey": chave}, timeout=30)
@@ -831,7 +842,7 @@ def verificar_infra(did: int, nome: str) -> dict:
     vt = us = None
     with httpx.Client(timeout=30, follow_redirects=True, headers={"User-Agent": webintel.UA}) as http:
         if cfg.virustotal_api_key:
-            vt = virustotal(nome, http, cfg.virustotal_api_key)
+            vt = virustotal(nome, http, cfg.virustotal_api_key, esperar=40)
             if vt is None:
                 return {"estado": "adiar", "resumo": "VirusTotal indisponível ou no limite do plano grátis"}
         if cfg.urlscan_api_key:

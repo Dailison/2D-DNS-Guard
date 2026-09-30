@@ -788,15 +788,26 @@ def buscas(consultas: list[str], nome: str) -> list[dict]:
 
 
 def urlscan_malicioso(nome: str, cliente: httpx.Client, chave: str) -> int | None:
-    """Varreduras do URLScan em que o domínio (ou página dele) teve veredito MALICIOSO. None = indisponível/limite."""
+    """Varreduras da PRÓPRIA página do domínio no URLScan com veredito malicioso (até 3 conferidas). None =
+    indisponível/limite. (No plano grátis a busca não filtra nem devolve o veredito: ele vem da API de resultado.)"""
     if not RITMO["urlscan_chave"].pode():
         return None
+    h = {"API-Key": chave}
     try:
-        r = cliente.get("https://urlscan.io/api/v1/search/", headers={"API-Key": chave}, timeout=20, params={
-            "q": f"(domain:{nome} OR page.domain:{nome}) AND verdicts.malicious:true", "size": 1})
+        r = cliente.get("https://urlscan.io/api/v1/search/", headers=h, timeout=20,
+                        params={"q": f"page.domain:{nome}", "size": 3})
         if r.status_code == 429:
             RITMO["urlscan_chave"].pausar(3600)
-        return int(r.json().get("total") or 0) if r.status_code == 200 else None
+        if r.status_code != 200:
+            return None
+        mal = 0
+        for x in r.json().get("results") or []:
+            uuid = (x.get("task") or {}).get("uuid")
+            d = cliente.get(f"https://urlscan.io/api/v1/result/{uuid}/", headers=h, timeout=20) if uuid else None
+            if d is not None and d.status_code == 200 and (((d.json().get("verdicts") or {}).get("overall") or {})
+                                                           .get("malicious")):
+                mal += 1
+        return mal
     except (httpx.HTTPError, ValueError):
         return None
 

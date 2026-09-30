@@ -418,3 +418,20 @@ def test_ia_online_recebe_o_dossie_da_investigacao():
                                                       "expediente_pct": 0, "madrugada_pct": 80, "fim_de_semana_pct": 30}})
     assert L2[0].startswith("Coleta ampla") and "madrugada" in L2[1]
     assert online._secao_investigacao(None, None) == []
+
+
+def test_urlscan_malicioso_confere_o_veredito_de_cada_varredura(monkeypatch):
+    """Plano grátis: a busca não traz veredito; ele vem da API de resultado de cada varredura da própria página."""
+    import httpx
+    monkeypatch.setattr(inv, "RITMO", {**inv.RITMO, "urlscan_chave": inv._Ritmo(100)})
+
+    def handler(req):
+        if "/search/" in req.url.path:
+            assert req.url.params["q"] == "page.domain:app-x.run.app"
+            return httpx.Response(200, json={"results": [{"task": {"uuid": "a"}}, {"task": {"uuid": "b"}}]})
+        mal = req.url.path.endswith("/a/")
+        return httpx.Response(200, json={"verdicts": {"overall": {"malicious": mal}}})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as cli:
+        assert inv.urlscan_malicioso("app-x.run.app", cli, "k") == 1
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(403))) as cli:
+        assert inv.urlscan_malicioso("app-x.run.app", cli, "k") is None

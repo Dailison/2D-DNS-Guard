@@ -1560,3 +1560,12 @@ def test_dns_inativo_na_etapa_1(env, monkeypatch):
     assert dnsativo.etapa1({**ids["morto.com"], "kind": "public"}) is False
     with db.conn() as c:
         assert not c.execute("SELECT 1 FROM category_lists WHERE domain = 'morto.com'").fetchone()
+
+
+def test_teste_de_dns_desiste_no_primeiro_timeout(monkeypatch):
+    """01/10: domínio com o DNS mudo (timeout) não pode custar minutos: a 1ª consulta sem resposta já encerra ("não sei")."""
+    from dnsanalyzer import dnsativo
+    feitas = []
+    monkeypatch.setattr(dnsativo, "consulta", lambda nome, res, tipo="A": feitas.append((nome, res, tipo)) or "erro")
+    assert dnsativo.resolve("mudo.com") is None and len(feitas) == 1
+    assert dnsativo.inativo(["mudo.com", "www.mudo.com", "a.mudo.com"]) is False and len(feitas) == 2

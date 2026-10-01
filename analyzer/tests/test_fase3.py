@@ -351,8 +351,9 @@ def test_dominios_inexistentes_saem_do_fluxo(api, monkeypatch):
 
 
 def test_nao_resolve_nem_chega_na_ia(api, monkeypatch):
-    """Fase A (regras, antes da IA): domínio novo cujas consultas A voltaram todas sem IP e que o teste ativo confirma
-    sai do fluxo na hora, p/ a lista DNS Inativo (01/10); sem confirmar (resolve no DNS público), segue a análise."""
+    """Domínio novo cujas consultas A voltaram todas sem IP: a fase A (regras) não decide mais só pelos logs nem testa
+    DNS dentro da transação (01/10: prendia as linhas por minutos); o teste ativo da etapa 1, antes da IA, manda p/ a
+    lista DNS Inativo quem o DNS público confirma — e deixa seguir quem resolve."""
     from dnsanalyzer import classifier, db, dnsativo
     monkeypatch.setattr(dnsativo, "consulta", lambda nome, res, tipo="A": "ip" if "publico" in nome and tipo == "A" else "vazio")
     with db.conn() as c:
@@ -367,12 +368,15 @@ def test_nao_resolve_nem_chega_na_ia(api, monkeypatch):
                       "first_seen, last_seen) VALUES (%s,%s,%s,%s,%s,%s,0,0,%s,%s,%s,%s)", (t, cl, ids[n], f, AGORA, ipq, ipq, semip, AGORA, AGORA))
     classifier.phase_a()
     with db.conn() as c:
-        k = {r["name"]: (r["kind"], r["llm_pending"]) for r in c.execute("SELECT name, kind, llm_pending FROM domains WHERE id = ANY(%s)",
-                                                                         (list(ids.values()),))}
+        rows = {r["name"]: r for r in c.execute("SELECT * FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
+    assert all(r["kind"] == "public" for r in rows.values()), "a fase A não tira ninguém só pelos logs"
+    assert dnsativo.etapa1(rows["novo-semip.com"]) is True
+    assert dnsativo.etapa1(rows["novo-comip.com"]) is False and dnsativo.etapa1(rows["novo-publico.com"]) is False
+    with db.conn() as c:
+        k = {r["name"]: r["kind"] for r in c.execute("SELECT name, kind FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
         bl = c.execute("SELECT category FROM category_lists WHERE domain = 'novo-semip.com'").fetchone()
-        wl = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'novo-semip.com'").fetchone()
-    assert k["novo-semip.com"] == ("inexistente", False) and bl and bl["category"] == "dns_inativo" and not wl, (k, bl)
-    assert k["novo-comip.com"][0] == "public" and k["novo-publico.com"][0] == "public", "resolve no DNS público: análise normal"
+    assert k == {"novo-semip.com": "inexistente", "novo-comip.com": "public", "novo-publico.com": "public"}
+    assert bl and bl["category"] == "dns_inativo"
 
 
 # ---------------------------------------------------------------- fase 5

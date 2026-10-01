@@ -34,8 +34,8 @@ def consulta(nome: str, resolvedor: str, tipo: str = "A") -> str:
     if not shutil.which("dig"):
         return "erro"
     try:
-        r = subprocess.run(["dig", "+noall", "+comments", "+answer", "+time=3", "+tries=2", f"@{resolvedor}", tipo, nome],
-                           capture_output=True, text=True, timeout=15)
+        r = subprocess.run(["dig", "+noall", "+comments", "+answer", "+time=2", "+tries=1", f"@{resolvedor}", tipo, nome],
+                           capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         return "erro"
     m = _STATUS.search(r.stdout)
@@ -55,6 +55,8 @@ def resolve(nome: str) -> bool | None:
             r[(res, tipo)] = consulta(nome, res, tipo)
             if r[(res, tipo)] == "ip":
                 return True
+            if r[(res, tipo)] == "erro":   # timeout: não vai dar p/ afirmar que não resolve — desiste já (01/10: um
+                return None                # domínio com o DNS mudo levava minutos nas 24 consultas)
     # sem endereço em TODAS as consultas dos dois resolvedores (vazio, ou DNS do domínio quebrado): não resolve
     return False if all(v in ("vazio", "falha") for v in r.values()) else None
 
@@ -152,12 +154,25 @@ def confirmar(c, drow: dict) -> bool:
 def dos_logs(c, limite: int = 150) -> list[str]:
     """Ciclo de manutenção: domínios que os logs dizem não resolver (7 dias) passam pelo teste ativo; os confirmados
     vão p/ DNS Inativo. Devolve os nomes marcados."""
+    from concurrent.futures import ThreadPoolExecutor
     rows = c.execute(
         "SELECT d.id, d.name, d.kind, d.classification, d.ti_signature FROM domains d "
         "WHERE d.kind = 'public' AND NOT d.locked AND coalesce(d.ti_signature, '') = '' AND d.id IN (" + listas.NAO_RESOLVE_SQL + ") "
         " AND NOT EXISTS (SELECT 1 FROM lookup_cache l WHERE l.kind = %s AND l.key = d.name AND l.fetched_at > now() - interval '1 day') "
         "ORDER BY d.total_queries DESC LIMIT %s", (TESTE, limite)).fetchall()
-    return [r["name"] for r in rows if confirmar(c, r)]
+    rows = [r for r in rows if not catalog.match(r["name"])]
+    nomes = {r["id"]: _nomes(c, r) for r in rows}
+    with ThreadPoolExecutor(24) as pool:   # os testes em paralelo (nenhuma linha fica presa: só leitura até aqui)
+        mortos = list(pool.map(lambda r: inativo(nomes[r["id"]]), rows))
+    out = []
+    for r, morto in zip(rows, mortos):
+        if morto:
+            marcar(c, r, "não resolve no DNS (logs do Technitium e DNS público, sem IP em " + ", ".join(nomes[r["id"]][:3]) + ")")
+            out.append(r["name"])
+        else:
+            c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, '{}') ON CONFLICT (kind, key) "
+                      "DO UPDATE SET fetched_at = now()", (TESTE, r["name"]))
+    return out
 
 
 def migrar_sem_resposta(aplicar: bool = False, threads: int = 48) -> dict:

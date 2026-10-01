@@ -175,29 +175,12 @@ def phase_a(limit: int = 2000) -> int:
         rows = c.execute(
             "SELECT * FROM domains WHERE needs_analysis AND NOT locked "
             "ORDER BY total_queries DESC LIMIT %s FOR UPDATE SKIP LOCKED", (limit,)).fetchall()
-        # antes da IA: o log do Technitium diz que o nome não resolve (todas as consultas A sem IP, ou NXDOMAIN)
-        nao_resolve = {r["domain_id"] for r in c.execute(
-            "SELECT domain_id FROM query_agg WHERE domain_id = ANY(%s) AND bucket >= now() - interval '7 days' "
-            "GROUP BY domain_id HAVING (sum(ip_q) >= 1 AND sum(sem_ip) = sum(ip_q)) "
-            " OR (sum(queries) >= 1 AND sum(nxdomain) = sum(queries))", ([r["id"] for r in rows],))}
+        # (01/10) quem não resolve não sai mais aqui só pelos logs: o teste ativo de DNS roda na etapa 1 (dnsativo.etapa1,
+        # antes da IA e FORA desta transação — testar aqui prendia as linhas dos domínios por minutos) e no ciclo de
+        # manutenção (listas.marcar_inexistentes), e manda p/ a lista DNS Inativo
         for drow in rows:
             dossier = build_dossier(c, drow, with_rdap=False)
             rule = evaluate(dossier)
-            if drow["id"] in nao_resolve and drow["kind"] == "public" and not dossier.get("ti_hits") \
-                    and rule.classification not in ("SUSPEITO", "MALICIOSO") and not dossier.get("catalog"):
-                # (01/10) destino único: os logs dizem que não resolve e o teste ativo confirma -> lista DNS Inativo
-                # (antes: whitelist "Sem resposta" só pelos logs). Não confirmou: análise normal.
-                try:
-                    morto = dnsativo.confirmar(c, drow)
-                except Exception:  # noqa: BLE001 — o teste nunca derruba as regras
-                    log.exception("teste de DNS de %s", drow["name"])
-                    morto = False
-                if morto:
-                    save(c, drow, dossier, rule, rules_only(rule, False), False, None)
-                    c.execute("UPDATE domains SET kind = 'inexistente', llm_pending = false WHERE id = %s", (drow["id"],))
-                    tally["não resolve (DNS Inativo)"] += 1
-                    n += 1
-                    continue
             skip_llm = (not rule.needs_llm) or (cfg.llm_skip_hosting_subdomains and dossier.get("private_suffix"))
             # IA só se for necessária E se as evidências relevantes mudaram desde a última IA
             already = drow["classified_by"] == "llm" and drow["evidence_hash"] == rule.evidence_hash

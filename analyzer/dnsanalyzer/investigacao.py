@@ -1317,7 +1317,6 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
         return "done"
 
 
-SEGUNDA_OPINIAO_MIN = 0.6   # hipótese da investigação a partir daqui (e abaixo do mínimo p/ aplicar) vai p/ a IA online
 MAX_RODADAS = 8          # (limitadas pelo prazo: cada uma só começa se sobra tempo p/ ela, o veredito e o revisor)
 PAGINAS_POR_RODADA = 5   # páginas de terceiros abertas a partir das buscas
 
@@ -1436,10 +1435,9 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
                 motivo_nao = "revisor discordou: " + (revisao.get("problema") or "sem motivo")[:200]
     segundos = round(time.monotonic() - t0, 1)
     from . import online
-    # hipótese sem certeza suficiente: a IA online dá a 2ª opinião lendo este dossiê (pedido do usuário 30/09)
-    segunda = (motivo_nao is not None and not ti_forte and bool(v.get("recognized"))
-               and v.get("classification") != "DESCONHECIDO" and (v.get("confidence") or 0) >= SEGUNDA_OPINIAO_MIN
-               and online.habilitado())
+    # não aplicou (sem certeza OU serviço não identificado): a IA online dá a 2ª opinião lendo este dossiê (pedidos do
+    # usuário 30/09 — ssiloc.com, Akamai, terminava "não identificado" na investigação e não ia p/ a IA online)
+    segunda = motivo_nao is not None and not ti_forte and online.habilitado()
     resumo = {"at": datetime.now(timezone.utc).isoformat(), "segundos": segundos, "aplicado": motivo_nao is None,
               "segunda_opiniao": segunda,
               "sem_aplicar": motivo_nao, "veredito": v, "revisao": revisao, "plano": passo, "etapas": etapas,

@@ -114,7 +114,7 @@ class _Cli:
     extra, model, keep_alive, num_ctx, url = True, "gemma4:26b", "60m", 8192, "http://gpu"
 
 
-def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600):
+def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bool = False):
     """Fontes e IA simuladas; devolve (gravado no domínio, aplicou?, passos pedidos)."""
     from types import SimpleNamespace
     from dnsanalyzer import classifier, config, db
@@ -137,8 +137,9 @@ def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600):
                    {"hipotese": "ERP X", "confianca": 0.9, "pronto": True, "buscas": [], "paginas": [],
                     "subdominios": [], "cnpjs": []}])
     monkeypatch.setattr(inv, "_proximo_passo", lambda *a: (next(passos), {"segundos": 1}))
-    monkeypatch.setattr(inv, "_veredito", lambda *a: ({**V_OK, "service": "X ERP", "motivo": "m", "evidencias": []},
-                                                      {"modelo": "gemma4:26b", "segundos": 1}))
+    if not veredito_ja:
+        monkeypatch.setattr(inv, "_veredito", lambda *a: ({**V_OK, "service": "X ERP", "motivo": "m", "evidencias": []},
+                                                          {"modelo": "gemma4:26b", "segundos": 1}))
     monkeypatch.setattr(inv, "_revisar", lambda *a: ({"sustentado": revisor_ok, "problema": "" if revisor_ok else "homônimo"},
                                                      {"segundos": 1}))
     aplicou = []
@@ -490,3 +491,14 @@ def test_erro_inesperado_nao_prende_a_reserva(monkeypatch):
     monkeypatch.setattr(inv, "_investigar", quebra)
     assert inv.fase(_Cli(), [], []) == "done"
     assert any("investigacao_claimed_at = NULL, investigado_at = now()" in s for s in feitos)
+
+
+def test_nao_identificado_tambem_vai_para_a_ia_online(monkeypatch):
+    """30/09: investigação sem identificar o serviço (ssiloc.com = Akamai) também pede a 2ª opinião da IA online."""
+    from dnsanalyzer import online
+    monkeypatch.setattr(online, "habilitado", lambda: True)
+    monkeypatch.setattr(inv, "_veredito", lambda *a: ({"recognized": False, "classification": "DESCONHECIDO", "confidence": 0.2,
+                                                       "lista": "nao_identificado", "lista_confianca": 0.3, "service": "",
+                                                       "motivo": "sem presença", "evidencias": []}, {"modelo": "m", "segundos": 1}))
+    g, aplicou, _ = _simula(monkeypatch, revisor_ok=True, veredito_ja=True)
+    assert not aplicou and g["sem_aplicar"] == "serviço não identificado" and g["segunda_opiniao"]

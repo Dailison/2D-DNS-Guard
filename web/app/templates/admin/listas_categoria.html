@@ -134,13 +134,17 @@
   <div style="max-height:55vh;overflow:auto;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:.3rem 0">
     <label class="chk" style="margin:.2rem 0;font-weight:600"><input type="checkbox" id="eDefault" {{ 'checked' if default_tem }}> <span>Redes sem cadastro (padrão)</span></label>
     {% for e in empresas_pol %}
-    <label class="chk" style="margin:.2rem 0;font-weight:400"><input type="checkbox" class="eTid" value="{{ e.id }}" {{ 'checked' if e.tem }}> <span>{{ e.nome }}{% if e.unidades %} <span class="mut" style="font-size:.78rem">(também na exceção de: {{ e.unidades|join(', ') }})</span>{% endif %}</span></label>
+    <label class="chk" style="margin:.2rem 0;font-weight:400"><input type="checkbox" class="eTid" value="{{ e.id }}" {{ 'checked' if e.tem }}> <span>{{ e.nome }}</span></label>
+    {% for u in e.unidades %}
+    <label class="chk" style="margin:.1rem 0 .1rem 1.6rem;font-weight:400;font-size:.9rem" title="{{ 'filial com política própria' if u.propria else 'segue a empresa' }}">
+      <input type="checkbox" class="eUni" data-tid="{{ e.id }}" value="{{ u.nome }}" {{ 'checked' if u.tem }}> <span>{{ u.nome }}{% if u.propria %} <span class="mut" style="font-size:.76rem">· própria</span>{% endif %}</span></label>
+    {% endfor %}
     {% endfor %}
   </div>
   <div class="previa" id="ePrev" hidden></div>
   <div style="display:flex;gap:.5rem;justify-content:space-between;margin-top:.7rem;flex-wrap:wrap">
-    <div style="display:flex;gap:.3rem"><button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid').forEach(c=>c.checked=true)">Marcar todas</button>
-      <button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid').forEach(c=>c.checked=false)">Desmarcar todas</button></div>
+    <div style="display:flex;gap:.3rem"><button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid, #dlgEmp .eUni').forEach(c=>c.checked=true)">Marcar todas</button>
+      <button type="button" class="mini" onclick="document.querySelectorAll('#dlgEmp .eTid, #dlgEmp .eUni').forEach(c=>c.checked=false)">Desmarcar todas</button></div>
     <div style="display:flex;gap:.5rem"><button type="button" onclick="document.getElementById('dlgEmp').close()">Cancelar</button>
       <button type="button" class="primary" id="eSalvar">Salvar e aplicar</button></div>
   </div>
@@ -148,6 +152,10 @@
 <style>dialog.dlg{border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;background:var(--card);color:var(--txt)} dialog.dlg::backdrop{background:rgba(15,23,42,.45)} .mini{padding:.25rem .5rem;font-size:.8rem}</style>
 {% include "admin/_previa_impacto.html" %}
 <script>
+// marcar/desmarcar a empresa leva as filiais junto; depois dá para ajustar uma filial só
+document.querySelectorAll("#dlgEmp .eTid").forEach(c => c.addEventListener("change", () => {
+  document.querySelectorAll('#dlgEmp .eUni[data-tid="' + c.value + '"]').forEach(u => { u.checked = c.checked; });
+}));
 document.querySelectorAll("#dlgEmp .eTid, #eDefault").forEach(c => c.addEventListener("change", () => {
   if (c.checked && !c.defaultChecked)   // empresa que ainda não aplica a lista: mostra o que passaria a bloquear
     previaImpacto(document.getElementById("ePrev"), c.id === "eDefault" ? 0 : c.value, {{ cat|tojson }},
@@ -156,7 +164,8 @@ document.querySelectorAll("#dlgEmp .eTid, #eDefault").forEach(c => c.addEventLis
 document.getElementById("eSalvar").addEventListener("click", async (ev) => {
   const b = ev.target; b.disabled = true;
   const body = {cat: {{ cat|tojson }}, default: document.getElementById("eDefault").checked,
-                tenants: [...document.querySelectorAll("#dlgEmp .eTid:checked")].map(c => +c.value)};
+                tenants: [...document.querySelectorAll("#dlgEmp .eTid:checked")].map(c => +c.value),
+                unidades: [...document.querySelectorAll("#dlgEmp .eUni")].map(c => ({tid: +c.dataset.tid, unidade: c.value, liga: c.checked}))};
   try {
     const r = await fetch({{ url_for('admin.lista_empresas')|tojson }}, {method: "POST", credentials: "same-origin",
       headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(body)});

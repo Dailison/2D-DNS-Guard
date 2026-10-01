@@ -550,9 +550,13 @@ def listas_categoria():
             if e.get("auto_created"):
                 continue
             p = por.get(f"tenant:{e['id']}") or {}
-            unid = [s.split(":", 2)[2] for s, v in por.items()
-                    if s.startswith(f"unit:{e['id']}:") and cat in (v.get("lists") or [])]
-            empresas_pol.append({"id": e["id"], "nome": e["name"], "tem": cat in (p.get("lists") or []), "unidades": unid})
+            tem = cat in (p.get("lists") or [])
+            # filiais (unidades das redes): a que tem política própria vale a dela; as outras seguem a empresa
+            unid = []
+            for u in sorted({(n.get("unit") or "").strip() for n in e.get("networks") or []} - {""}, key=str.lower):
+                pu = por.get(f"unit:{e['id']}:{u}")
+                unid.append({"nome": u, "tem": cat in (pu.get("lists") or []) if pu else tem, "propria": bool(pu)})
+            empresas_pol.append({"id": e["id"], "nome": e["name"], "tem": tem, "unidades": unid if len(unid) > 1 else []})
     except AnalyzerError as e:
         flash(f"Falha ao carregar políticas/sugestões: {e}", "erro")
     empresas_pol.sort(key=lambda x: x["nome"].lower())
@@ -863,7 +867,9 @@ def empresa_politica(tid):
 @admin_bp.post("/listas-categoria/empresas")
 @login_required
 def lista_empresas():
-    """Modal da lista: quais empresas (e o default) aplicam esta lista."""
+    """Modal da lista: quais empresas (e o default) aplicam esta lista — e, na empresa com filiais, em quais delas
+    (01/10, pedido do usuário). Filial marcada diferente da empresa = política própria da filial (cópia da empresa com
+    esta lista ligada/desligada); igualou de novo = a política própria sai e a filial volta a seguir a empresa."""
     from app import empresas as emp
     from app import politicas as pol
     d = request.get_json(silent=True) or {}
@@ -871,19 +877,43 @@ def lista_empresas():
     if cat not in dict(dnslib.CATEGORIAS_LISTA):
         return _json(False, "lista inválida")
     quer = {int(x) for x in d.get("tenants") or []}
+    quem = admin_atual().email
+    campos = lambda p: (sorted(p.get("lists") or []), sorted(p.get("services") or []),   # noqa: E731
+                        sorted(p.get("services_blocked") or []))
     try:
         atual = pol.por_escopo()
         mudou = 0
+        novas = {}   # política da empresa depois desta gravação (as filiais se comparam com ela)
         alvos = [(f"tenant:{e['id']}", e["id"] in quer) for e in emp.lista() if not e.get("auto_created")]
         alvos.append(("default", bool(d.get("default"))))
         for scope, liga in alvos:
             p = atual.get(scope) or {}
             ls = set(p.get("lists") or [])
             novo = ls | {cat} if liga else ls - {cat}
+            novas[scope] = {**p, "lists": sorted(novo)}
             if novo != ls and (p or liga):
                 api.put(f"/policies/{quote(scope, safe='')}", {"lists": sorted(novo), "services": p.get("services") or [],
                                                                "services_blocked": p.get("services_blocked") or [],
-                                                               "by": admin_atual().email})
+                                                               "by": quem})
+                mudou += 1
+        for u in d.get("unidades") or []:
+            tid, unidade, liga = int(u.get("tid") or 0), (u.get("unidade") or "").strip(), bool(u.get("liga"))
+            if not unidade or f"tenant:{tid}" not in novas:
+                continue
+            scope = f"unit:{tid}:{unidade}"
+            # o que vale p/ a empresa depois desta gravação: a política dela ou, sem política, a padrão
+            emp_nova = novas[f"tenant:{tid}"] if (atual.get(f"tenant:{tid}") or tid in quer) else novas["default"]
+            pu = atual.get(scope)
+            base = pu or emp_nova   # sem política própria: parte da política da empresa
+            ls = set(base.get("lists") or [])
+            nova = {**base, "lists": sorted(ls | {cat} if liga else ls - {cat})}
+            if campos(nova) == campos(emp_nova):   # igual à empresa: não precisa de política própria
+                if pu:
+                    api.delete(f"/policies/{quote(scope, safe='')}")
+                    mudou += 1
+            elif not pu or campos(nova) != campos(pu):
+                api.put(f"/policies/{quote(scope, safe='')}", {"lists": nova["lists"], "services": nova.get("services") or [],
+                                                               "services_blocked": nova.get("services_blocked") or [], "by": quem})
                 mudou += 1
         if mudou:
             pol.sincronizar()

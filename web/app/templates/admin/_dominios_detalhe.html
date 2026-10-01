@@ -15,6 +15,8 @@
 {% set REV = {'ia': '🤖 Só IA', 'manual': '✋ Revisado', 'pendente': '⏳ Sem análise'} %}
 {% if not so_tabela %}
 <style>
+  .dd-aj{display:inline-block;margin-left:.3rem;padding:.02rem .4rem;border-radius:999px;font-size:.72rem;font-weight:600;white-space:nowrap;border:1px solid}
+  .dd-aj.liberar{color:#0f72bc;border-color:#93c5fd;background:rgba(59,130,246,.1)} .dd-aj.bloquear{color:#b91c1c;border-color:#fca5a5;background:rgba(239,68,68,.1)}
   .dd-t td{vertical-align:top} .dd-cls{display:inline-block;padding:.05rem .45rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
   .dd-sub{font-size:.76rem;color:var(--mut)} .dd-bar{position:sticky;top:0;z-index:2;background:var(--card);display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--bd);margin-bottom:.4rem}
   .dd-f{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end} .dd-f>div{min-width:150px} .dd-pg{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.6rem;align-items:center}
@@ -37,9 +39,9 @@
   .hp-tl .h{color:var(--mut);font-size:.74rem} .hp-chip{display:inline-block;font-size:.72rem;padding:.05rem .45rem;border-radius:6px;background:#e2e8f0;margin:0 .2rem .2rem 0}
 </style>
 {% endif %}
-<div id="ddBox" data-modo="{{ modo }}" data-cat="{{ cat if lst else ('wl:' ~ wl) if wlm else '' }}" data-nomecat="{{ rot.get(cat, cat) if lst else '' }}" data-dec="{{ '1' if dec else '' }}">
+<div id="ddBox" data-modo="{{ modo }}" data-cat="{{ cat if lst else ('wl:' ~ wl) if wlm else '' }}" data-nomecat="{{ rot.get(cat, cat) if lst else '' }}" data-dec="{{ '1' if dec else '' }}" data-escopo="{{ aj_escopo or '' }}" data-esconome="{{ aj_nome or '' }}">
 <form method="get" class="dd-f" style="margin-bottom:.8rem">
-  {% if dec %}<input type="hidden" name="t" value="{{ tid }}">{% elif wlm %}<input type="hidden" name="wl" value="{{ wl }}">{% elif lst %}<input type="hidden" name="cat" value="{{ cat }}">{% else %}<input type="hidden" name="slug" value="_trabalho">{% endif %}
+  {% if dec %}<input type="hidden" name="t" value="{{ tid }}">{% elif wlm %}<input type="hidden" name="wl" value="{{ wl }}">{% elif lst %}<input type="hidden" name="cat" value="{{ cat }}">{% if aj_escopo %}<input type="hidden" name="empresa" value="{{ aj_tid }}">{% if aj_unidade %}<input type="hidden" name="unidade" value="{{ aj_unidade }}">{% endif %}{% endif %}{% else %}<input type="hidden" name="slug" value="_trabalho">{% endif %}
   <div style="flex:1"><label>Buscar</label><input type="text" name="q" value="{{ fd.q or '' }}" placeholder="parte do domínio (filtra enquanto digita)" autocomplete="off"></div>
   <div><label>Classificação da IA</label><select name="cls">
     <option value="">todas</option>
@@ -82,6 +84,11 @@
   <button type="button" class="mini {{ 'danger' if dec else 'primary' }}" data-dd="mover">{{ '⛔ Blocklist…' if dec else 'Mover para…' }}</button>
   <button type="button" class="mini ok" data-dd="wl" style="background:#16a34a;color:#fff;border:0" title="tira de todas as listas de bloqueio e põe na whitelist escolhida">✅ Whitelist…</button>
   {% if not dec %}<button type="button" class="mini danger" data-dd="tirar">✕ Tirar da lista</button>{% endif %}
+  {% if aj_escopo and not dec %}
+  <span style="border-left:1px solid var(--bd);align-self:stretch"></span>
+  <button type="button" class="mini" data-dd="aj_liberar" style="background:#0f72bc;color:#fff;border:0" title="continua na lista para as outras empresas; fica liberado só em {{ aj_nome }}">🔓 Liberar só em {{ aj_nome }}</button>
+  <button type="button" class="mini" data-dd="aj_desfazer" title="tira o ajuste próprio de {{ aj_nome }}: volta a valer a lista">↩ Desfazer ajuste</button>
+  {% endif %}
   {% elif wlm %}
   <button type="button" class="mini danger" data-dd="tirar_wl">✕ Tirar da whitelist</button>
   <button type="button" class="mini danger" data-dd="por">⛔ Pôr em lista de bloqueio…</button>
@@ -100,7 +107,8 @@
     {% set tem_sug = i.lista_at and i.lista_fonte != 'falhou' %}
     <tr>
       <td><input type="checkbox" class="ddSel" value="{{ i.domain }}"></td>
-      <td><a class="dd-hist" data-dom="{{ i.domain }}" href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}" title="clique: histórico · Ctrl+clique: página completa">{{ i.domain }}</a></td>
+      <td><a class="dd-hist" data-dom="{{ i.domain }}" href="{{ url_for('analise.dominio', nome=i.domain, t=0) }}" title="clique: histórico · Ctrl+clique: página completa">{{ i.domain }}</a>
+        {%- set ajo = (aj_origem or {}).get(i.domain) %}{% if ajo %} <span class="dd-aj {{ ajo[0] }}" title="ajuste {{ 'desta unidade/empresa' if ajo[1] == 'aqui' else 'herdado da empresa' }}">{{ '🔓 liberado' if ajo[0] == 'liberar' else '⛔ bloqueado' }} {{ 'aqui' if ajo[1] == 'aqui' else 'na empresa' }}</span>{% endif %}</td>
       <td><div class="dd-ra">
         {% if not (adm and adm.is_super) %}
         {% elif lst %}
@@ -108,6 +116,7 @@
           <button type="button" class="blk" data-ra="mover" data-dom="{{ i.domain }}" title="{{ 'blocklist' if dec else 'mover para outra lista' }}">⛔</button>
           <button type="button" class="lib" data-ra="wl" data-dom="{{ i.domain }}" title="whitelist (sai de todas as listas de bloqueio)">✅</button>
           {% if not dec %}<button type="button" class="blk" data-ra="tirar" data-dom="{{ i.domain }}" title="tirar desta lista (manter liberado)">✕</button>{% endif %}
+          {% if aj_escopo and not dec %}<button type="button" data-ra="aj_liberar" data-dom="{{ i.domain }}" title="liberar só em {{ aj_nome }}">🔓</button>{% endif %}
         {% elif wlm %}
           <button type="button" class="blk" data-ra="tirar_wl" data-dom="{{ i.domain }}" title="tirar da whitelist">✕</button>
           <button type="button" class="blk" data-ra="por" data-dom="{{ i.domain }}" title="pôr em lista de bloqueio">⛔</button>
@@ -206,6 +215,7 @@
 (function () {
   if (window._ddInit) return;
   window._ddInit = true;
+  const URL_AJ = {{ url_for('admin.listas_ajuste')|tojson }};
   const URL_LOTE = {{ url_for('admin.listas_lote_dominios')|tojson }}, URL_IMP = {{ url_for('admin.dominios_impacto')|tojson }},
         URL_HIST = {{ url_for('admin.dominio_historico')|tojson }}, URL_IRM = {{ url_for('admin.dominio_irmaos')|tojson }},
         ROT = {{ LISTAS_ROT|tojson }};
@@ -250,12 +260,25 @@
       else if (j.ok) recarregar();
     } catch (e) { toast("Falha (sessão expirou?)", false); }
   }
+  async function ajuste(acao, doms) {   // liberar/bloquear/desfazer só no escopo (empresa/unidade) escolhido na página
+    try {
+      const r = await fetch(URL_AJ, {method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"},
+        body: JSON.stringify({escopo: info().escopo, nome: info().esconome, acao: acao, dominios: doms})});
+      const j = await r.json(); toast(j.msg, j.ok);
+      if (j.ok) setTimeout(() => location.reload(), 1200);   // (o cartão dos ajustes fica fora da tabela)
+    } catch (e) { toast("Falha (sessão expirou?)", false); }
+  }
   let acaoDlg = null, domsDlg = [];
   window.ddPedir = (acao, doms) => pedir(acao, doms);   // (resultados da busca em todas as listas)
   function pedir(acao, doms) {
     const n = doms.length, d = info(), DEC = !!d.dec, nomeCat = d.nomecat, q = n === 1 ? doms[0] : n + " domínio(s)";
     if (!n) { toast("Selecione pelo menos um domínio.", false); return; }
-    if (acao === "tirar") {
+    if (acao === "aj_liberar") {
+      if (confirm(`Liberar ${q} só em ${d.esconome}? Continua bloqueado para as outras empresas e unidades.`)) ajuste("liberar", doms);
+    } else if (acao === "aj_desfazer") {
+      if (confirm(`Desfazer o ajuste de ${q} em ${d.esconome}? Volta a valer a lista.`)) ajuste("desfazer", doms);
+    } else if (acao === "tirar") {
       if (confirm(`Tirar ${q} da lista ${nomeCat}? Fica registrado como “manter liberado” e vale na hora.`)) envia("tirar", [], doms);
     } else if (acao === "tirar_wl") {
       if (confirm(`Tirar ${q} da whitelist? Voltam a valer as listas de bloqueio (o DNS atualiza em até 2 min).`)) envia("tirar_wl", [], doms);

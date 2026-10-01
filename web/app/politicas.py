@@ -31,7 +31,11 @@ def sincronizar() -> dict:
         por = admin_atual().email
     except Exception:  # noqa: BLE001 — fora de uma requisição (script)
         por = "console"
-    r = dnslib.sincronizar_politicas(empresas, lista(), por=por)
+    try:   # escopos (empresa/unidade) com ajuste das listas: ganham as listas de ajuste (e a unidade, grupo próprio)
+        ajustes = list((api.get("/ajustes").get("escopos") or {}))
+    except Exception:  # noqa: BLE001 — analisador antigo: sem ajustes
+        ajustes = []
+    r = dnslib.sincronizar_politicas(empresas, lista(), por=por, ajustes=ajustes)
     current_app.logger.info("políticas -> Technitium: criados %s, apagados %s, %d rede(s)",
                             r["criados"], r["apagados"], r["redes"])
     return r

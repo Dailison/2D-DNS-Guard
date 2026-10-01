@@ -184,3 +184,22 @@ def test_nome_local():
         assert dnslib.nome_local(n, z), n
     for n in ("google.com", "corp.com", "empresa.corp.com.br", "app.delivery"):
         assert not dnslib.nome_local(n, z), n
+
+
+def test_ajustes_por_unidade_viram_grupo_e_listas(app):
+    """01/10: listas por empresa/unidade — a unidade com ajuste ganha grupo próprio (com as listas da empresa) e cada
+    grupo assina as listas de ajuste do escopo dele; empresa sem política mas com ajuste usa as listas do padrão."""
+    from app import technitium as dnslib
+    grupos, mapa, _ = dnslib.plano_politicas(EMP, POL, ajustes=["unit:1:Matriz", "tenant:1", "tenant:3"])
+    assert mapa["10.35.0.0/16"] == "Empresa: Moderna · Matriz" and mapa["10.36.0.0/16"] == "Empresa: Moderna · Filial"
+    assert grupos["Empresa: Moderna · Matriz"] == {"lists": ["streaming"], "services": ["instagram"],
+                                                   "blocked": ["instagram", "tiktok"], "escopo": "unit:1:Matriz"}
+    assert grupos["Empresa: Moderna · Filial"]["escopo"] == "tenant:1", "unidade sem ajuste próprio: os da empresa"
+    assert grupos["Empresa: Norte"]["escopo"] is None
+    assert grupos["Empresa: Sem Política"] == {"lists": ["ameaca", "jogos"], "services": [], "blocked": [], "escopo": "tenant:3"}
+    g = {"blockListUrls": [], "allowListUrls": []}
+    dnslib._aplica_politica(g, ["jogos"], [], [], "unit:1:Matriz")
+    lib, blq = dnslib.url_ajuste("unit:1:Matriz", "liberar"), dnslib.url_ajuste("unit:1:Matriz", "bloquear")
+    assert lib in g["allowListUrls"] and blq in g["blockListUrls"] and dnslib.escopo_do_grupo(g) == "unit:1:Matriz"
+    dnslib._aplica_politica(g, ["jogos"], [], [], None)   # ajuste desfeito: as URLs saem
+    assert lib not in g["allowListUrls"] and blq not in g["blockListUrls"] and dnslib.escopo_do_grupo(g) is None

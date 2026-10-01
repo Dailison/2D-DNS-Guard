@@ -11,12 +11,26 @@
     <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
       <span class="mut" style="font-size:.8rem;font-weight:700;min-width:7.5rem">{{ titulo }}</span>
       {% for c, r in itens %}
-      <a href="{{ url_for('admin.listas_categoria', cat=c) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if c == cat else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if c == cat }}">{{ r }}{{ ' ⚡' if c in LISTAS_RISCO }} <span class="mut">({{ tot.get(c, 0) }})</span></a>
+      <a href="{{ url_for('admin.listas_categoria', cat=c, empresa=aj_tid or None, unidade=aj_unidade or None) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if c == cat else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if c == cat }}">{{ r }}{{ ' ⚡' if c in LISTAS_RISCO }} <span class="mut">({{ tot.get(c, 0) }})</span></a>
       {% endfor %}
     </div>
     {% endfor %}
   </div>
-  <div style="display:flex;justify-content:flex-end;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-top:.8rem">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-top:.8rem">
+    <form method="get" id="fEscopo" style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap;margin:0"
+          title="com uma empresa (e filial) escolhida, dá para liberar ou bloquear um site só ali; a lista continua a mesma para as outras">
+      <input type="hidden" name="cat" value="{{ cat }}">
+      <div><label>Ajustar só para</label>
+        <select name="empresa" onchange="this.form.unidade.value='';this.form.submit()">
+          <option value="">todas as empresas</option>
+          {% for e in aj_empresas %}<option value="{{ e.id }}" {{ 'selected' if e.id == aj_tid }}>{{ e.nome }}</option>{% endfor %}
+        </select></div>
+      <div><label>Filial</label>
+        <select name="unidade" onchange="this.form.submit()" {{ 'disabled' if not aj_tid }}>
+          <option value="">empresa inteira</option>
+          {% for e in aj_empresas if e.id == aj_tid %}{% for u in e.unidades %}<option value="{{ u }}" {{ 'selected' if u == aj_unidade }}>{{ u }}</option>{% endfor %}{% endfor %}
+        </select></div>
+    </form>
     <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">
       <form method="get" style="display:flex;gap:.3rem;margin:0" title="procura em todas as listas de bloqueio (mínimo 3 letras)">
         <input type="hidden" name="cat" value="{{ cat }}">
@@ -48,6 +62,45 @@
         <td class="mut" style="font-size:.85rem">{{ a.classification or '—' }}</td>
         <td class="num">{{ a.total_queries }}</td>
         <td style="white-space:nowrap">{% if adm and adm.is_super %}<button type="button" class="mini" style="background:#16a34a;color:#fff;border:0" onclick="ddPedir('wl', [{{ a.domain|tojson|forceescape }}])" title="tira de todas as listas de bloqueio e põe na whitelist escolhida">✅ Whitelist…</button>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if aj_escopo %}
+<div class="card" style="border-left:4px solid #0f72bc">
+  <h2 style="margin-top:0">Ajustes de {{ aj_nome }}
+    <span class="mut" style="font-size:.8rem;font-weight:400">· {{ aj.efetivo.liberar|length }} liberado(s) · {{ aj.efetivo.bloquear|length }} bloqueado(s)</span></h2>
+  {% if adm and adm.is_super %}
+  <form method="post" action="{{ url_for('admin.listas_ajuste') }}" class="row" style="align-items:flex-end;margin:0 0 .6rem">
+    <input type="hidden" name="escopo" value="{{ aj_escopo }}"><input type="hidden" name="nome" value="{{ aj_nome }}">
+    <div style="flex:1"><label>Domínio(s)</label><input type="text" name="dominios" placeholder="ex.: fornecedor.com.br" required
+         title="um ou mais domínios, separados por espaço ou vírgula"></div>
+    <div style="flex:0;display:flex;gap:.3rem">
+      <button name="acao" value="liberar" class="btn" style="background:#0f72bc;white-space:nowrap" title="libera só aqui, mesmo que esteja numa lista de bloqueio">🔓 Liberar aqui</button>
+      <button name="acao" value="bloquear" class="danger" style="white-space:nowrap" title="bloqueia só aqui, mesmo fora das listas de bloqueio">⛔ Bloquear aqui</button>
+    </div>
+  </form>
+  {% endif %}
+  {% set linhas = aj.proprios + (aj.herdados|rejectattr('domain', 'in', aj.proprios|map(attribute='domain')|list)|list) %}
+  {% if linhas %}
+  <div class="dd-tw" style="max-height:16rem;overflow:auto"><table>
+    <thead><tr><th>Domínio</th><th>Ajuste</th><th>Vale em</th><th>Por</th><th>Quando</th><th></th></tr></thead>
+    <tbody>
+    {% for x in linhas %}{% set meu = x.scope == aj_escopo %}
+      <tr>
+        <td><a href="{{ url_for('admin.dominios', q=x.domain) }}">{{ x.domain }}</a></td>
+        <td>{{ '🔓 liberado' if x.acao == 'liberar' else '⛔ bloqueado' }}</td>
+        <td class="mut" style="font-size:.85rem">{{ aj_nome if meu else 'empresa inteira (herdado)' }}</td>
+        <td class="mut" style="font-size:.85rem">{{ x.por or '—' }}</td>
+        <td class="mut" style="font-size:.85rem">{{ x.em|dt_sp }}</td>
+        <td>{% if meu and adm and adm.is_super %}
+          <form method="post" action="{{ url_for('admin.listas_ajuste') }}" style="margin:0" onsubmit="return confirm('Desfazer o ajuste de {{ x.domain }} em {{ aj_nome }}? Volta a valer a lista.')">
+            <input type="hidden" name="escopo" value="{{ aj_escopo }}"><input type="hidden" name="nome" value="{{ aj_nome }}">
+            <input type="hidden" name="dominios" value="{{ x.domain }}"><button name="acao" value="desfazer" class="mini">↩ desfazer</button></form>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

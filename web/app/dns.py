@@ -452,6 +452,77 @@ def listas_categoria_antiga():
     return redirect(url_for("admin.listas_categoria", **request.args), 301)
 
 
+def _escopo_ajuste():
+    """Escopo escolhido em Domínios bloqueados (?empresa=<id>&unidade=<nome>) e os ajustes dele (01/10: listas por
+    empresa/unidade). -> dict p/ o template: empresas (com as unidades), escopo, nome, ajustes."""
+    from app import empresas as emp
+    try:
+        empresas = sorted(({"id": e["id"], "nome": e["name"],
+                            "unidades": sorted({(n.get("unit") or "").strip() for n in e.get("networks") or []} - {""})}
+                           for e in emp.lista() if not e.get("auto_created")), key=lambda x: x["nome"].lower())
+    except AnalyzerError:
+        empresas = []
+    tid = request.args.get("empresa", type=int)
+    e = next((x for x in empresas if x["id"] == tid), None)
+    unidade = (request.args.get("unidade") or "").strip()
+    unidade = unidade if e and unidade in e["unidades"] else ""
+    out = {"aj_empresas": empresas, "aj_tid": e["id"] if e else None, "aj_unidade": unidade, "aj_escopo": "",
+           "aj_nome": "", "aj": {"proprios": [], "herdados": [], "efetivo": {"liberar": [], "bloquear": []}}, "aj_origem": {}}
+    if not e:
+        return out
+    out["aj_escopo"] = f"unit:{e['id']}:{unidade}" if unidade else f"tenant:{e['id']}"
+    out["aj_nome"] = e["nome"] + (f" · {unidade}" if unidade else "")
+    try:
+        out["aj"] = api.get("/ajustes", scope=out["aj_escopo"])
+    except AnalyzerError as err:
+        flash(f"Falha ao carregar os ajustes: {err}", "erro")
+        return out
+    # de onde vem o que vale aqui: o da unidade vence o da empresa
+    origem = {x["domain"]: (x["acao"], "empresa") for x in out["aj"].get("herdados") or []}
+    origem.update({x["domain"]: (x["acao"], "aqui") for x in out["aj"].get("proprios") or []})
+    out["aj_origem"] = origem
+    return out
+
+
+@admin_bp.post("/dominios-bloqueados/ajuste")
+@login_required
+@super_required
+def listas_ajuste():
+    """Ajuste das listas só para uma empresa ou unidade: liberar aqui, bloquear aqui ou desfazer. Aplica no Technitium
+    (a unidade com ajuste ganha grupo próprio); vale em até 2 min."""
+    from app import politicas as pol
+    j = request.get_json(silent=True)
+    d = j if j is not None else {"escopo": request.form.get("escopo"), "acao": request.form.get("acao"),
+                                 "nome": request.form.get("nome"), "dominios": request.form.getlist("dominios")}
+    escopo, acao = d.get("escopo") or "", d.get("acao") or ""
+    nome = d.get("nome") or escopo
+    doms = [x for v in (d.get("dominios") or []) for x in str(v).replace(",", " ").split()]
+    doms = list(dict.fromkeys(x.strip().lower().rstrip(".") for x in doms if x.strip()))
+
+    def volta(ok, msg):
+        if j is not None:
+            return _json(ok, msg)
+        flash(msg, "ok" if ok else "erro")
+        return redirect(request.referrer or url_for("admin.listas_categoria"))
+    if not doms:
+        return volta(False, "Informe pelo menos um domínio.")
+    if acao not in ("liberar", "bloquear", "desfazer"):
+        return volta(False, "Ação inválida.")
+    quem = admin_atual().email
+    try:
+        if acao == "desfazer":
+            n = api.post("/ajustes/desfazer", {"scope": escopo, "domains": doms, "by": quem}).get("desfeitos", 0)
+            msg = f"{n} ajuste(s) desfeito(s) em {nome}: volta a valer a lista." if n else f"Nenhum ajuste próprio de {nome} para desfazer."
+        else:
+            n = api.put("/ajustes", {"scope": escopo, "domains": doms, "acao": acao, "by": quem}).get("gravados", 0)
+            msg = (f"{n} domínio(s) liberado(s) só em {nome}." if acao == "liberar" else f"{n} domínio(s) bloqueado(s) só em {nome}.")
+        pol.sincronizar()
+        current_app.logger.info("DNS: %s ajuste %s em %s: %s", quem, acao, escopo, ", ".join(doms[:20]))
+        return volta(True, msg + " O DNS atualiza em até 2 min.")
+    except Exception as e:  # noqa: BLE001
+        return volta(False, f"Falha no ajuste: {e}")
+
+
 @admin_bp.get("/dominios-bloqueados")
 @login_required
 def listas_categoria():
@@ -497,15 +568,16 @@ def listas_categoria():
         except AnalyzerError as e:
             flash(f"Falha na busca: {e}", "erro")
             achados = []
+    aj = _escopo_ajuste()
     if request.headers.get("X-Partial"):   # filtros/paginação/ações via Ajax: só a tabela
         return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="lista", cat=cat, det=det, fd=fd,
-                               categorias=dnslib.CATEGORIAS_LISTA, scats=_site_cats(), pag_url=_pag_url)
+                               categorias=dnslib.CATEGORIAS_LISTA, scats=_site_cats(), pag_url=_pag_url, **aj)
     pulso = next((x.get("pulso") for x in resumo.get("categorias", []) if x["categoria"] == cat), None)
     return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd, pulso=pulso,
                            total_bloqueados=_total_bloqueados(resumo),
                            scats=_site_cats(), pag_url=_pag_url,
                            categorias=dnslib.CATEGORIAS_LISTA, empresas_pol=empresas_pol,
-                           default_tem=default_tem, servicos=servicos, busca=busca, achados=achados)
+                           default_tem=default_tem, servicos=servicos, busca=busca, achados=achados, **aj)
 
 
 def _total_bloqueados(resumo: dict) -> int:

@@ -2212,6 +2212,76 @@ def _scope_ok(scope: str) -> bool:
     return scope == "default" or bool(re.fullmatch(r"tenant:\d+|unit:\d+:.{1,120}", scope))
 
 
+# ------------------------------------------------------------------ ajustes das listas por empresa/unidade
+class AjusteIn(BaseModel):
+    scope: str
+    domains: list[str]
+    acao: str = "liberar"
+    by: str = ""
+
+
+@app.get("/ajustes", dependencies=[Depends(auth)])
+def ajustes_listar(scope: str = ""):
+    """Ajustes do escopo (próprios + os herdados da empresa, p/ uma unidade) — ou, sem escopo, o resumo de todos."""
+    from . import ajustes
+    with db.conn() as c:
+        if not scope:
+            return {"escopos": ajustes.resumo(c)}
+        if not ajustes.escopo_ok(scope):
+            raise HTTPException(400, "escopo inválido")
+        emp = ajustes.empresa_do(scope)
+        return {"scope": scope, "proprios": ajustes.proprios(c, scope),
+                "herdados": ajustes.proprios(c, emp) if emp else [], "efetivo": ajustes.efetivo(c, scope)}
+
+
+@app.put("/ajustes", dependencies=[Depends(auth)])
+def ajustes_gravar(body: AjusteIn):
+    from . import ajustes
+    if not ajustes.escopo_ok(body.scope):
+        raise HTTPException(400, "escopo inválido")
+    if body.acao not in ajustes.ACOES:
+        raise HTTPException(400, "ação inválida")
+    doms = ajustes.normalizar(body.domains)
+    if not doms:
+        raise HTTPException(400, "nenhum domínio válido")
+    with db.conn() as c:
+        n = ajustes.gravar(c, body.scope, doms, body.acao, body.by[:120] or None)
+    return {"ok": True, "gravados": n, "domains": doms}
+
+
+@app.post("/ajustes/desfazer", dependencies=[Depends(auth)])
+def ajustes_desfazer(body: AjusteIn):
+    from . import ajustes
+    if not ajustes.escopo_ok(body.scope):
+        raise HTTPException(400, "escopo inválido")
+    with db.conn() as c:
+        n = ajustes.desfazer(c, body.scope, body.domains, body.by[:120] or None)
+    return {"ok": True, "desfeitos": n}
+
+
+@app.get("/ajustes/log", dependencies=[Depends(auth)])
+def ajustes_log(scope: str = "", limit: int = Query(100, ge=1, le=500)):
+    with db.conn() as c:
+        return c.execute("SELECT scope, domain, acao, por, em FROM ajustes_lista_log "
+                         + ("WHERE scope = %(s)s " if scope else "") + "ORDER BY id DESC LIMIT %(n)s",
+                         {"s": scope, "n": limit}).fetchall()
+
+
+@app.get("/ajustes/{acao}/{tok}.txt", response_class=PlainTextResponse)
+def ajustes_txt(acao: str, tok: str, request: Request):
+    """Lista do escopo p/ o Technitium assinar no grupo dele (liberar -> allowListUrls; bloquear -> blockListUrls),
+    já com a herança empresa -> unidade resolvida. Sem token; só LISTS_ALLOWED_IPS."""
+    from . import ajustes
+    if request.client is None or request.client.host not in settings().lists_allowed_ips:
+        raise HTTPException(403, "IP sem acesso às listas")
+    scope = ajustes.escopo_do_token(tok)
+    if acao not in ajustes.ACOES or not scope:
+        raise HTTPException(404, "ajuste inexistente")
+    with db.conn() as c:
+        doms = ajustes.efetivo(c, scope)[acao]
+    return f"# 2D DNS Guard - ajustes ({acao}) de {scope} ({len(doms)} domínios)\n" + "".join(d + "\n" for d in doms)
+
+
 @app.get("/policies", dependencies=[Depends(auth)])
 def policies_list():
     with db.conn() as c:

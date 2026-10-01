@@ -503,3 +503,34 @@ def test_controle_pausa_as_filas(api):
     assert api.put("/ai/controle/tudo", json={"pausado": True}, headers=H).status_code == 400
     api.put("/ai/controle/online", json={"pausado": False, "by": "ti@2d"}, headers=H)
     assert not controle.estado(fresco=True)["online"]["pausado"]
+
+
+def test_ajustes_por_empresa_e_unidade(api):
+    """01/10: lista de bloqueio única + ajustes por escopo — a unidade herda os da empresa e o dela vence."""
+    from dnsanalyzer import ajustes
+    from dnsanalyzer.config import settings
+    if "testclient" not in settings().lists_allowed_ips:
+        settings().lists_allowed_ips.append("testclient")
+    emp, uni = "tenant:7", "unit:7:Filial São José"
+    r = api.put("/ajustes", json={"scope": emp, "domains": ["Fornecedor.com.br", "lixo"], "acao": "liberar", "by": "ti@2d"}, headers=H)
+    assert r.status_code == 200 and r.json()["domains"] == ["fornecedor.com.br"]
+    api.put("/ajustes", json={"scope": emp, "domains": ["so-empresa.com"], "acao": "bloquear", "by": "ti@2d"}, headers=H)
+    # a unidade bloqueia o que a empresa liberou e libera outro site só nela
+    api.put("/ajustes", json={"scope": uni, "domains": ["fornecedor.com.br"], "acao": "bloquear", "by": "ti@2d"}, headers=H)
+    api.put("/ajustes", json={"scope": uni, "domains": ["so-filial.com"], "acao": "liberar", "by": "ti@2d"}, headers=H)
+    d = api.get("/ajustes", params={"scope": uni}, headers=H).json()
+    assert d["efetivo"] == {"liberar": ["so-filial.com"], "bloquear": ["fornecedor.com.br", "so-empresa.com"]}
+    assert [x["domain"] for x in d["herdados"]] == ["fornecedor.com.br", "so-empresa.com"]
+    assert api.get("/ajustes", params={"scope": emp}, headers=H).json()["efetivo"]["liberar"] == ["fornecedor.com.br"]
+    # listas publicadas p/ o Technitium (por IP, sem token)
+    lib = api.get(f"/ajustes/liberar/{ajustes.token(uni)}.txt").text
+    blq = api.get(f"/ajustes/bloquear/{ajustes.token(uni)}.txt").text
+    assert "so-filial.com\n" in lib and "fornecedor.com.br" not in lib and "fornecedor.com.br\n" in blq
+    assert api.get("/ajustes/liberar/xxx.txt").status_code == 404
+    assert api.get("/ajustes", headers=H).json()["escopos"] == {emp: {"liberar": 1, "bloquear": 1}, uni: {"liberar": 1, "bloquear": 1}}
+    # desfazer o da unidade: volta a valer o da empresa; o histórico guarda quem fez
+    assert api.post("/ajustes/desfazer", json={"scope": uni, "domains": ["fornecedor.com.br"], "by": "chefe@2d"}, headers=H).json()["desfeitos"] == 1
+    assert api.get("/ajustes", params={"scope": uni}, headers=H).json()["efetivo"]["liberar"] == ["fornecedor.com.br", "so-filial.com"]
+    log = api.get("/ajustes/log", params={"scope": uni}, headers=H).json()
+    assert (log[0]["acao"], log[0]["por"], log[0]["domain"]) == ("desfazer", "chefe@2d", "fornecedor.com.br")
+    assert api.put("/ajustes", json={"scope": "default", "domains": ["x.com"]}, headers=H).status_code == 400

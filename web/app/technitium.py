@@ -346,8 +346,10 @@ def indice_bloqueio(cfg=None):
             m = _LIB_RE.search(str(u))
             if m:
                 s |= dominios_liberacao(m.group(1))
-        grupos[g["name"]] = s
-        permitidos[g["name"]] = {x.lower() for x in g.get("allowed") or []}
+        esc = escopo_do_grupo(g)   # ajustes das listas do escopo (empresa/unidade) que o grupo assina
+        aj = ajustes_do_escopo(esc) if esc else {"liberar": set(), "bloquear": set()}
+        grupos[g["name"]] = s | aj["bloquear"]
+        permitidos[g["name"]] = {x.lower() for x in g.get("allowed") or []} | aj["liberar"]
         for slug in listas_liberacao_do_grupo(g):
             permitidos[g["name"]] |= dominios_liberacao(slug)
         if any(_WL_RE.search(str(u)) for u in g.get("allowListUrls") or []):
@@ -532,24 +534,32 @@ def nome_grupo(empresa: str, unidade: str | None = None) -> str:
     return PREFIXO_GRUPO + empresa + (f" · {unidade}" if unidade else "")
 
 
-def plano_politicas(empresas, politicas):
-    """-> (grupos {nome: {"lists", "services"}}, mapa {cidr: grupo}, default {"lists","services"}).
-    Rede de empresa sem política (nem da unidade nem da empresa) fica sem mapeamento: vale o default."""
+def plano_politicas(empresas, politicas, ajustes=()):
+    """-> (grupos {nome: {"lists", "services", "blocked", "escopo"}}, mapa {cidr: grupo}, default {...}).
+    Rede de empresa sem política (nem da unidade nem da empresa) e sem ajuste fica sem mapeamento: vale o default.
+    `ajustes` = escopos com ajuste próprio das listas (01/10: listas por empresa/unidade): a unidade com ajuste ganha
+    grupo próprio (com as listas da empresa) e cada grupo assina as listas de ajuste do escopo dele ("escopo")."""
     pol = {p["scope"]: p for p in politicas}
+    ajustes = set(ajustes or ())
     grupos, mapa = {}, {}
     for e in empresas:
-        pe = pol.get(f"tenant:{e['id']}")
+        te = f"tenant:{e['id']}"
+        pe = pol.get(te)
         for n in e.get("networks") or []:
             cidr = norm_ip(n.get("cidr"))
             if not cidr:
                 continue
             unidade = n.get("unit") or ""
-            pu = pol.get(f"unit:{e['id']}:{unidade}") if unidade else None
-            p, nome = (pu, nome_grupo(e["name"], unidade)) if pu else (pe, nome_grupo(e["name"]))
+            tu = f"unit:{e['id']}:{unidade}" if unidade else None
+            pu = pol.get(tu) if tu else None
+            proprio = bool(tu) and (bool(pu) or tu in ajustes)       # unidade com política ou ajuste: grupo dela
+            escopo = tu if tu in ajustes else te if te in ajustes else None
+            p = pu or pe or (pol.get("default") if escopo else None)   # só ajuste, sem política: listas do padrão
             if not p:
                 continue
+            nome = nome_grupo(e["name"], unidade) if proprio else nome_grupo(e["name"])
             grupos[nome] = {"lists": sorted(p.get("lists") or []), "services": sorted(p.get("services") or []),
-                            "blocked": sorted(p.get("services_blocked") or [])}
+                            "blocked": sorted(p.get("services_blocked") or []), "escopo": escopo}
             mapa[cidr] = nome
     d = pol.get("default") or {}
     return grupos, mapa, {"lists": sorted(d.get("lists") or []), "services": sorted(d.get("services") or []),
@@ -564,19 +574,61 @@ def url_liberacao(slug):
     return (current_app.config.get("ANALYZER_URL") or "").rstrip("/") + f"/servico/{slug}.txt"
 
 
+_AJ_RE = re.compile(r"/ajustes/(liberar|bloquear)/([A-Za-z0-9_-]+)\.txt$")
+
+
+def url_ajuste(escopo: str, acao: str) -> str:
+    """Lista de ajustes do escopo (empresa/unidade) publicada pelo analisador (ver analyzer: ajustes.py)."""
+    import base64
+    tok = base64.urlsafe_b64encode(escopo.encode()).decode().rstrip("=")
+    return (current_app.config.get("ANALYZER_URL") or "").rstrip("/") + f"/ajustes/{acao}/{tok}.txt"
+
+
+def escopo_do_grupo(g) -> str | None:
+    """Escopo cujos ajustes o grupo assina (pela URL)."""
+    import base64
+    for u in (g.get("allowListUrls") or []) + (g.get("blockListUrls") or []):
+        m = _AJ_RE.search(str(u))
+        if m:
+            try:
+                return base64.urlsafe_b64decode(m.group(2) + "=" * (-len(m.group(2)) % 4)).decode()
+            except (ValueError, UnicodeDecodeError):
+                return None
+    return None
+
+
+def ajustes_do_escopo(escopo: str) -> dict:
+    """{"liberar": set, "bloquear": set} que valem no escopo (do analisador; cache por requisição). Falha = vazio."""
+    from flask import g as fg
+    from app import analyzer_client as api
+    cache = fg.setdefault("_ajustes_escopo", {})
+    if escopo not in cache:
+        try:
+            ef = api.get("/ajustes", scope=escopo).get("efetivo") or {}
+            cache[escopo] = {k: set(ef.get(k) or []) for k in ("liberar", "bloquear")}
+        except Exception:  # noqa: BLE001
+            cache[escopo] = {"liberar": set(), "bloquear": set()}
+    return cache[escopo]
+
+
 def listas_liberacao_do_grupo(g):
     return sorted({m.group(1) for u in (g.get("allowListUrls") or []) if (m := _LIB_RE.search(str(u)))})
 
 
-def _aplica_politica(g, lists, services, bloqueados=()):
+def _aplica_politica(g, lists, services, bloqueados=(), escopo=None):
     """Listas de bloqueio + serviços bloqueados -> blockListUrls; serviços/listas de liberação
-    liberados -> allowListUrls (vencem o bloqueio). URLs de terceiros e liberações manuais ficam."""
-    outras = [u for u in (g.get("blockListUrls") or []) if not _LISTA_RE.search(str(u)) and not _LIB_RE.search(str(u))]
+    liberados -> allowListUrls (vencem o bloqueio). URLs de terceiros e liberações manuais ficam.
+    `escopo` (empresa/unidade com ajuste das listas): o grupo assina também "bloquear aqui" e "liberar aqui"."""
+    nossa = lambda u: _LISTA_RE.search(str(u)) or _LIB_RE.search(str(u)) or _AJ_RE.search(str(u))   # noqa: E731
+    outras = [u for u in (g.get("blockListUrls") or []) if not nossa(u)]
     g["blockListUrls"] = (outras + [url_lista(c) for c, _ in CATEGORIAS_LISTA if c in set(lists)]
-                          + [url_liberacao(s) for s in sorted(set(bloqueados) - set(services))])
-    outras = [u for u in (g.get("allowListUrls") or []) if not _LIB_RE.search(str(u)) and not _WL_RE.search(str(u))]
+                          + [url_liberacao(s) for s in sorted(set(bloqueados) - set(services))]
+                          + ([url_ajuste(escopo, "bloquear")] if escopo else []))
+    outras = [u for u in (g.get("allowListUrls") or []) if not _LIB_RE.search(str(u)) and not _WL_RE.search(str(u))
+              and not _AJ_RE.search(str(u))]
     g["allowListUrls"] = (outras + [url_whitelist(c) for c, _ in CATEGORIAS_WHITELIST_DNS]
-                          + [url_liberacao(s) for s in sorted(set(services))])
+                          + [url_liberacao(s) for s in sorted(set(services))]
+                          + ([url_ajuste(escopo, "liberar")] if escopo else []))
 
 
 def _valida_sincronizacao(antes: dict, depois: dict, lib: str) -> None:
@@ -596,7 +648,7 @@ def _valida_sincronizacao(antes: dict, depois: dict, lib: str) -> None:
         raise RuntimeError(f"a sincronização mexeria em redes isentas ({', '.join(mudou[:5])}); nada foi gravado")
 
 
-def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", motivo="sincronizar políticas"):
+def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", motivo="sincronizar políticas", ajustes=()):
     """Deixa o Technitium igual às políticas: cria/atualiza/apaga os grupos "Empresa: …", aponta
     as redes das empresas para eles e aplica a política default no grupo default. Não mexe no
     grupo Liberados nem em redes/IPs mapeados para ele. Valida o resultado antes de gravar (ver
@@ -606,15 +658,15 @@ def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", moti
 
     def muda(cfg):
         antes = json.loads(_canon(cfg))
-        r = _sincroniza(cfg, empresas, politicas, lib)
+        r = _sincroniza(cfg, empresas, politicas, lib, ajustes)
         _valida_sincronizacao(antes, cfg, lib)
         return r, aplicar
     return _read_modify_write(muda, por, motivo)
 
 
-def _sincroniza(cfg, empresas, politicas, lib):
+def _sincroniza(cfg, empresas, politicas, lib, ajustes=()):
     """Aplica as políticas no config (em memória)."""
-    grupos, mapa, default = plano_politicas(empresas, politicas)
+    grupos, mapa, default = plano_politicas(empresas, politicas, ajustes)
     existentes = {g.get("name"): g for g in cfg.get("groups", [])}
     criados, atualizados, apagados = [], [], []
     for nome, p in grupos.items():
@@ -630,7 +682,7 @@ def _sincroniza(cfg, empresas, politicas, lib):
         else:
             atualizados.append(nome)
         g["enableBlocking"] = True
-        _aplica_politica(g, p["lists"], p["services"], p["blocked"])
+        _aplica_politica(g, p["lists"], p["services"], p["blocked"], p.get("escopo"))
     if "default" in existentes:
         _aplica_politica(existentes["default"], default["lists"], default["services"], default["blocked"])
     ngm = cfg.setdefault("networkGroupMap", {})

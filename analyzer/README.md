@@ -208,8 +208,12 @@ sudo systemctl start dnsanalyzer-collector dnsanalyzer-classifier
 ```
 
 Override recomendado do Ollama (`/etc/systemd/system/ollama.service.d/override.conf`):
-`OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_KEEP_ALIVE=60m`, `OLLAMA_NUM_PARALLEL=1`,
-`OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_CONTEXT_LENGTH=8192`.
+`OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_KEEP_ALIVE=60m`, `OLLAMA_NUM_PARALLEL=2` (uma vaga da análise, outra do
+atendente virtual do 2D-Suporte), `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_CONTEXT_LENGTH=8192`.
+
+E `LLAMA_ARG_CTX_CHECKPOINTS=4` (`ollama.service.d/checkpoints.conf`): o llama-server guarda por padrão até 32
+"context checkpoints" de ~200 MiB por vaga; com a investigação na VM a RAM (26 GB) encheu e o kernel matou o servidor
+(OOM em 30/09). Com 4 por vaga o servidor fica em ~19-21 GB.
 
 ### Reforço com GPU (PC da rede)
 

@@ -502,3 +502,17 @@ def test_nao_identificado_tambem_vai_para_a_ia_online(monkeypatch):
                                                        "motivo": "sem presença", "evidencias": []}, {"modelo": "m", "segundos": 1}))
     g, aplicou, _ = _simula(monkeypatch, revisor_ok=True, veredito_ja=True)
     assert not aplicou and g["sem_aplicar"] == "serviço não identificado" and g["segunda_opiniao"]
+
+
+def test_cadeia_de_cname_dos_nomes_dos_logs(monkeypatch):
+    """30/09: ssiloc.com não tem IP, mas 1.ssiloc.com (o que os computadores consultam) -> edgesuite.net -> akamai.net."""
+    respostas = {("A", "1.ssiloc.com"): ["1.ssiloc.com.edgesuite.net.", "a79.w39.akamai.net.", "95.101.31.162"],
+                 ("TXT", "162.31.101.95.origin.asn.cymru.com"): ["20940 | 95.101.0.0/16 | NL"],
+                 ("TXT", "AS20940.asn.cymru.com"): ["20940 | NL | ripencc | | AKAMAI-ASN1 Akamai International B.V., NL"]}
+    monkeypatch.setattr(inv, "_dig", lambda t, n: respostas.get((t, n), []))
+    d = inv.registros_dns("ssiloc.com", ["ssiloc.com", "1.ssiloc.com"])
+    assert d["cadeias"] == [{"nome": "1.ssiloc.com", "cadeia": ["1.ssiloc.com.edgesuite.net", "a79.w39.akamai.net"],
+                             "ip": ["95.101.31.162"], "asn": "AS20940 AKAMAI-ASN1 Akamai International B.V., NL"}]
+    txt = " | ".join(e["text"] for e in inv.novas_evidencias(0, {"dns": d}))
+    assert "1.ssiloc.com (consultado pelos computadores) aponta para 1.ssiloc.com.edgesuite.net → a79.w39.akamai.net" in txt
+    assert "Akamai" in txt

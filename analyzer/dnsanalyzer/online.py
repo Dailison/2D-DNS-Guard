@@ -56,7 +56,10 @@ Para o domínio, diga:
   compras; fbcdn.net = Facebook = redes_sociais; ytimg.com = YouTube = streaming; akamaihd.net de um jogo = jogos).
   Whitelist só para o que NÃO é de nenhuma lista de bloqueio: ferramentas de trabalho, bancos, governo, fornecedores,
   infraestrutura GENÉRICA (AWS, Azure, Google Cloud, certificados, atualizações de sistema), CDN GENÉRICA sem serviço
-  identificado (CloudFront, Akamai, Fastly, Cloudflare, subdomínio aleatório de CDN) = "wl:cdn" etc.
+  identificado (CloudFront, Akamai, Fastly, Cloudflare, subdomínio aleatório de CDN) = "wl:cdn" etc. Domínio cujo nome
+  consultado aponta (CNAME) para uma CDN (akamai/edgesuite, cloudfront, fastly…) ou fica na rede dela, com categorias
+  "content delivery"/"web infrastructure" nos fornecedores de segurança e VirusTotal limpo, É identificado pelo papel:
+  "reconhecido": true, TRABALHO, "wl:cdn" — mesmo sem saber de quem é o software que o usa;
   Domínio que imita marca famosa com letras trocadas (ffacebook, g00gle) e não é o oficial = "ameaca";
   Página com SINAL de camuflagem (imita erro do navegador sem estar fora do ar, prende o botão Voltar) = SUSPEITO, "ameaca"
   (ou "apostas" se a página mostrar cassino/slots);

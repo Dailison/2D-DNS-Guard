@@ -217,8 +217,7 @@
 <div class="iav" x-data="iav" x-cloak>
   <section class="topo glass">
     <div class="st"><span class="pulse" :class="ia.ok ? 'ok' : (ia.ok === false ? 'x' : '')"></span>
-      <b x-text="'IA local · ' + (ia.model || '…')"></b><small x-text="ia.txt"></small>
-      <span class="tag" :class="onlineOn ? 'on' : 'off'" x-show="onlineOn !== null" x-text="onlineOn ? 'IA online ativa' : 'IA online sem chave'"></span></div>
+      <b x-text="'IA local · ' + (ia.model || '…')"></b><small x-text="ia.txt"></small></div>
     <template x-for="k in kpis" :key="k.l">
       <div class="kp" :title="k.s"><b x-text="k.v"></b><span x-text="k.l"></span></div>
     </template>
@@ -294,6 +293,7 @@
     <div class="eh">
       <span class="ico">{{ ico }}</span>
       <h2 title="{{ dsc }}">{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2>
+      {% if et == "e2" %}<span class="tag" :class="onlineOn ? 'on' : 'off'" x-show="onlineOn !== null" x-text="onlineOn ? 'ativa' : 'sem chave'"></span>{% endif %}
       <div class="lane">
         <span class="lane-h"><span class="lv"></span>Analisando <span class="cnt" x-text="lane.{{ et }}.filter(c => !c.res).length"></span></span>
         <template x-for="c in lane.{{ et }}" :key="c.key">

@@ -1346,38 +1346,53 @@ def test_ia_chat_repassa_ao_ollama_local(env, monkeypatch):
     assert env.post("/ia/chat", json={"messages": msgs}, headers=H).status_code == 504
 
 
-def test_infra_de_terceiros_verificada_antes_da_whitelist(env, monkeypatch):
-    """30/09: infraestrutura que hospeda apps de terceiros (Cloud Run, Azure, S3…) passa por listas de ameaça,
-    VirusTotal e URLScan antes da whitelist do catálogo: limpo -> whitelist; malicioso -> Blacklist (SUSPEITO);
-    suspeito -> IA online; fonte no limite -> adia (sem IA local, sem lista)."""
-    from dnsanalyzer import catalog, config, db, investigacao, listas, listas_ia
-    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+def test_infra_de_terceiros_entra_na_whitelist_e_e_verificada_na_etapa_2(env, monkeypatch):
+    """01/10: a infraestrutura de terceiros do catálogo (Cloud Run, Azure, S3…) entra na whitelist na etapa 1, sem
+    esperar; a etapa 2 verifica (listas de ameaça, VirusTotal, URLScan) os mais acessados primeiro: limpo fica,
+    malicioso sai da whitelist p/ a Blacklist (SUSPEITO), suspeito vai p/ a IA online, fonte no limite = tenta depois."""
+    from dnsanalyzer import catalog, classifier, config, db, investigacao, listas, listas_ia
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    monkeypatch.setattr(cfg, "virustotal_api_key", "vt")
+    monkeypatch.setattr(classifier, "event", lambda *a, **k: None)
     assert catalog.match("app-x.run.app")["verificar"] and catalog.match("x.blob.core.windows.net")["verificar"]
     assert not catalog.match("windows.net").get("verificar") and catalog.match("windows.net")["protected"]
     assert catalog.match("da-frwiki-wiki.translate.goog") is None and catalog.match("nel.goog")["lista"] == "wl:infraestrutura"
     estados = {"limpo-x.run.app": {"estado": "limpo", "resumo": "sem listas de ameaça; VirusTotal: 0 de 94"},
                "golpe-x.run.app": {"estado": "malicioso", "resumo": "VirusTotal: 7 de 94 marcam como malicioso"},
-               "meio-x.run.app": {"estado": "suspeito", "resumo": "VirusTotal: 1 de 94 marcam como malicioso"},
-               "espera-x.run.app": {"estado": "adiar", "resumo": "VirusTotal no limite"}}
-    monkeypatch.setattr(investigacao, "verificar_infra", lambda did, nome: estados[nome])
+               "meio-x.run.app": {"estado": "suspeito", "resumo": "VirusTotal: 1 de 94 marcam como malicioso"}}
+    acessos = {"golpe-x.run.app": 90, "meio-x.run.app": 50, "limpo-x.run.app": 10}
     with db.conn() as c:
+        c.execute("DELETE FROM lookup_cache WHERE kind = 'verif_infra'")
+        c.execute("UPDATE domains SET lista_fonte = 'local' WHERE lista_fonte = 'catalogo'")   # (só os deste teste na fila)
         ids = {n: c.execute("INSERT INTO domains (name, classification, category, classified_by, analyzed_at, total_queries) "
-                            "VALUES (%s, 'TRABALHO', 'infraestrutura', 'catalog', now(), 2) RETURNING id", (n,)).fetchone()["id"]
+                            "VALUES (%s, 'TRABALHO', 'infraestrutura', 'catalog', now(), %s) RETURNING id", (n, acessos[n])).fetchone()["id"]
                for n in estados}
-    for n in estados:
-        assert listas_ia.sugerir(None, ids[n]) == "done", n   # client=None: nunca pergunta à IA local
+    for n in estados:   # etapa 1: whitelist na hora (client=None: nunca pergunta à IA; nem chama a verificação)
+        assert listas_ia.sugerir(None, ids[n]) == "done", n
+    with db.conn() as c:
+        assert {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain = ANY(%s)", (list(ids),))} == set(ids)
+
+    def verificar(did, nome):   # (a de verdade grava o resultado em cache: quem foi verificado sai da fila)
+        with db.conn() as c:
+            c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('verif_infra', %s, true, '{}')", (nome,))
+        return estados[nome]
+    monkeypatch.setattr(investigacao, "verificar_infra", verificar)
+    assert [investigacao.verificacao_fase() for _ in range(4)] == ["done", "done", "done", "idle"]
     with db.conn() as c:
         wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain = ANY(%s)", (list(ids),))}
         bl = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain = ANY(%s)", (list(ids),))}
-        d = {r["name"]: r for r in c.execute("SELECT name, classification, lista_ia, lista_wl, lista_duvida, lista_at, lista_motivo, reasons "
+        d = {r["name"]: r for r in c.execute("SELECT name, classification, lista_ia, lista_wl, lista_duvida, reasons "
                                              "FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
-    assert wl == {"limpo-x.run.app"} and "verificado" in d["limpo-x.run.app"]["lista_motivo"]
+    assert "golpe-x.run.app" not in wl and "limpo-x.run.app" in wl
     assert bl == {(listas.BLACKLIST, "golpe-x.run.app")}
     assert d["golpe-x.run.app"]["classification"] == "SUSPEITO" and d["golpe-x.run.app"]["lista_ia"] == "blacklist"
-    assert d["meio-x.run.app"]["lista_duvida"] and not d["meio-x.run.app"]["lista_wl"]
-    assert d["meio-x.run.app"]["reasons"][0]["by"] == "verificação"
-    assert d["espera-x.run.app"]["lista_at"] is None, "adiado: nada gravado, a fila de listas tenta de novo"
-
+    assert d["meio-x.run.app"]["lista_duvida"] and d["meio-x.run.app"]["reasons"][0]["by"] == "verificação"
+    # fonte no limite (cota do VirusTotal): não grava nada e tenta depois
+    with db.conn() as c:
+        c.execute("DELETE FROM lookup_cache WHERE kind = 'verif_infra' AND key = 'limpo-x.run.app'")
+    monkeypatch.setattr(investigacao, "verificar_infra", lambda did, nome: {"estado": "adiar", "resumo": "cota do dia"})
+    assert investigacao.verificacao_fase() == "unavailable"
 
 def test_camuflagem_e_traducao_do_google_sem_ia(env, monkeypatch):
     """30/09: camuflagem (regras) -> Ameaças sem IA; x.translate.goog -> a lista já aplicada ao site original."""

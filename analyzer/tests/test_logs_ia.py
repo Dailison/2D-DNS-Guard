@@ -534,3 +534,23 @@ def test_ajustes_por_empresa_e_unidade(api):
     log = api.get("/ajustes/log", params={"scope": uni}, headers=H).json()
     assert (log[0]["acao"], log[0]["por"], log[0]["domain"]) == ("desfazer", "chefe@2d", "fornecedor.com.br")
     assert api.put("/ajustes", json={"scope": "default", "domains": ["x.com"]}, headers=H).status_code == 400
+
+
+def test_cota_do_virustotal_por_uso_e_gravada(api, monkeypatch):
+    """01/10: a cota do dia do VirusTotal é gravada (sobrevive a reinícios) e dividida — a investigação não gasta a
+    parte da verificação da infraestrutura; "cota esgotada" do VirusTotal fecha os dois até a virada do dia."""
+    import httpx
+    from dnsanalyzer import investigacao as inv
+    monkeypatch.setattr(inv, "RITMO", {**inv.RITMO, "virustotal": inv._Ritmo(1000)})
+    monkeypatch.setattr(inv, "VT_DIA", {"investigacao": 2, "verificacao": 1})
+    ok = httpx.MockTransport(lambda r: httpx.Response(404))
+    with httpx.Client(transport=ok) as cli:
+        assert inv.virustotal("a.com", cli, "k")["nao_visto"] and inv.virustotal("b.com", cli, "k")["nao_visto"]
+        assert inv.virustotal("c.com", cli, "k") is None, "a parte da investigação acabou"
+        assert inv.vt_resta("investigacao") == 0 and inv.vt_resta("verificacao") == 1
+        assert inv.virustotal("infra.com", cli, "k", uso="verificacao")["nao_visto"], "a da verificação continua"
+    monkeypatch.setattr(inv, "VT_DIA", {"investigacao": 50, "verificacao": 50})
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(429))) as cli:
+        assert inv.virustotal("d.com", cli, "k") is None
+    assert inv.vt_resta("investigacao") <= 0 and inv.vt_resta("verificacao") <= 0
+    assert not inv.RITMO["virustotal"].pode(), "pausado até a virada do dia"

@@ -797,6 +797,9 @@ def run_forever(stop=lambda: False) -> None:
             for j in range(n):
                 threading.Thread(target=_investigacao_worker, args=(stop, cats, OllamaClient(url)), daemon=True,
                                  name=f"investigacao-{url or 'vm'}-{j}").start()
+        from . import investigacao as _inv   # etapa 2: verificação da infraestrutura que o catálogo liberou (01/10)
+        threading.Thread(target=_fase_worker, args=(stop, _inv.verificacao_fase, "worker da verificação da infraestrutura"),
+                         daemon=True, name="verificacao-infra").start()
         log.info("fase 6 (investigação profunda): com a fila da IA vazia, até %d dias entre reavaliações, aplica com "
                  "confiança >= %.2f", cfg.investigacao_dias, cfg.investigacao_confianca_min)
     log.info("fase 4 (IA online): %s", " | ".join(",".join(f"{m} {r}/min {d}/dia" for m, r, d in n) for n in online.niveis())

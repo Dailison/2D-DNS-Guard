@@ -202,8 +202,48 @@ class _Ritmo:
 
 
 RITMO = {"certificados": _Ritmo(90), "crtsh": _Ritmo(20), "wayback": _Ritmo(240), "urlscan": _Ritmo(150),
-         "otx": _Ritmo(300), "virustotal": _Ritmo(60, intervalo=16, por_dia=480),   # VirusTotal grátis: 4/min, 500/dia
+         "otx": _Ritmo(300), "virustotal": _Ritmo(230, intervalo=16),   # VirusTotal grátis: 4/min (o dia: VT_DIA)
          "urlscan_chave": _Ritmo(35, por_dia=900)}                                   # URLScan com chave: 1.000 buscas/dia
+
+
+# VirusTotal grátis: 500 consultas por dia (UTC). Cada uso tem a sua parte, gravada no banco (fonte_cota): a verificação
+# da infraestrutura antes da whitelist não pode ficar sem cota porque a investigação gastou tudo (01/10)
+VT_DIA = {"investigacao": 290, "verificacao": 200}
+
+
+def _vt_hoje():
+    return datetime.now(timezone.utc).date()
+
+
+def vt_reabre() -> datetime:
+    """Quando a cota do dia do VirusTotal volta (meia-noite UTC, com folga)."""
+    amanha = datetime.now(timezone.utc).date() + timedelta(days=1)
+    return datetime(amanha.year, amanha.month, amanha.day, 0, 3, tzinfo=timezone.utc)
+
+
+def vt_resta(uso: str) -> int:
+    try:
+        with db.conn() as c:
+            r = c.execute("SELECT n FROM fonte_cota WHERE fonte = %s AND dia = %s", (f"virustotal:{uso}", _vt_hoje())).fetchone()
+        return VT_DIA[uso] - (r["n"] if r else 0)
+    except Exception:  # noqa: BLE001 — sem banco: não trava a fonte por isso
+        return VT_DIA[uso]
+
+
+def _vt_conta(uso: str, n: int = 1) -> None:
+    try:
+        with db.conn() as c:
+            c.execute("INSERT INTO fonte_cota (fonte, dia, n) VALUES (%s, %s, %s) ON CONFLICT (fonte, dia) "
+                      "DO UPDATE SET n = fonte_cota.n + EXCLUDED.n", (f"virustotal:{uso}", _vt_hoje(), n))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _vt_esgotou() -> None:
+    """O VirusTotal respondeu "cota esgotada": ninguém consulta de novo até a virada do dia."""
+    for uso, lim in VT_DIA.items():
+        _vt_conta(uso, max(vt_resta(uso), 0))
+    RITMO["virustotal"].pausar((vt_reabre() - datetime.now(timezone.utc)).total_seconds())
 
 
 def _com_ritmo(fonte: str, fn):
@@ -612,15 +652,16 @@ def urlscan_detalhe(nome: str, cliente: httpx.Client, chave: str) -> dict | None
     return out if (out["paginas"] or out["iniciadores"]) else None
 
 
-def virustotal(nome: str, cliente: httpx.Client, chave: str, esperar: float = 0) -> dict | None:
+def virustotal(nome: str, cliente: httpx.Client, chave: str, esperar: float = 0, uso: str = "investigacao") -> dict | None:
     """Relatório de domínio do VirusTotal (chave gratuita: 4/min, 500/dia): categoria dada por ~10 fornecedores de
     segurança, detecções, ranking de popularidade, tags e data do registro."""
-    if not RITMO["virustotal"].pode(esperar):
+    if vt_resta(uso) <= 0 or not RITMO["virustotal"].pode(esperar):
         return None
+    _vt_conta(uso)
     try:
         r = cliente.get(f"https://www.virustotal.com/api/v3/domains/{nome}", headers={"x-apikey": chave}, timeout=30)
         if r.status_code == 429:
-            RITMO["virustotal"].pausar(3600)
+            _vt_esgotou()
         if r.status_code == 404:   # nunca analisado (comum em subdomínio de nuvem): sem detecção, não "indisponível"
             return {"nao_visto": True, "categorias": {}, "maliciosos": 0, "suspeitos": 0, "total_fornecedores": 0,
                     "reputacao": None, "tags": [], "registrador": None, "criado": None, "ranks": {}}
@@ -879,9 +920,10 @@ def verificar_infra(did: int, nome: str) -> dict:
     vt = us = None
     with httpx.Client(timeout=30, follow_redirects=True, headers={"User-Agent": webintel.UA}) as http:
         if cfg.virustotal_api_key:
-            vt = virustotal(nome, http, cfg.virustotal_api_key, esperar=40)
+            vt = virustotal(nome, http, cfg.virustotal_api_key, esperar=40, uso="verificacao")
             if vt is None:
-                return {"estado": "adiar", "resumo": "VirusTotal indisponível ou no limite do plano grátis"}
+                return {"estado": "adiar", "resumo": "cota do dia do VirusTotal esgotada" if vt_resta("verificacao") <= 0
+                        else "VirusTotal indisponível ou no limite do plano grátis"}
         if cfg.urlscan_api_key:
             us = urlscan_malicioso(nome, http, cfg.urlscan_api_key)
             if us is None:
@@ -901,6 +943,45 @@ def verificar_infra(did: int, nome: str) -> dict:
         c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, %s) ON CONFLICT (kind, key) "
                   "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (VERIFICACAO, nome, _jsonb(out)))
     return out
+
+
+# infraestrutura de terceiros que o catálogo pôs na whitelist (etapa 1) e ainda não foi verificada (ou há 30 dias)
+VERIF_FILA = ("kind = 'public' AND lista_fonte = 'catalogo' AND lista_wl IS NOT NULL AND NOT locked "
+              "AND NOT EXISTS (SELECT 1 FROM lookup_cache l WHERE l.kind = 'verif_infra' AND l.key = domains.name "
+              "                AND l.fetched_at > now() - interval '30 days')")
+
+
+def verificacao_fase() -> str:
+    """Etapa 2 (pedido do usuário 01/10): verifica UM domínio de infraestrutura já liberado pelo catálogo — listas de
+    ameaça, VirusTotal e URLScan; o que não passa sai da whitelist p/ a Blacklist (ou vai p/ a IA online). Os mais
+    acessados primeiro. 'idle' = nada a verificar; 'unavailable' = fonte no limite (tenta depois)."""
+    from . import catalog
+    from .classifier import event
+    cfg = settings()
+    if not (cfg.virustotal_api_key or cfg.urlscan_api_key):
+        return "idle"
+    with db.conn() as c:
+        d = c.execute("SELECT id, name, classification, topic FROM domains WHERE " + VERIF_FILA
+                      + " ORDER BY total_queries DESC, id LIMIT 1").fetchone()
+    if not d:
+        return "idle"
+    e = catalog.match(d["name"])
+    if not e or not e.get("verificar"):   # catálogo protegido (windows.net, pki.goog…): não é conteúdo de terceiros
+        with db.conn() as c:
+            c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, %s) ON CONFLICT (kind, key) "
+                      "DO UPDATE SET value = EXCLUDED.value, fetched_at = now()",
+                      (VERIFICACAO, d["name"], _jsonb({"estado": "limpo", "resumo": "catálogo sem verificação"})))
+        return "done"
+    verif = verificar_infra(d["id"], d["name"])
+    if verif["estado"] == "adiar":
+        return "unavailable"
+    if verif["estado"] != "limpo":
+        with db.conn() as c:
+            listas_ia._verificado(c, d, e, verif, FASE)
+        event("investigacao_done", d["name"], d["id"], "SUSPEITO" if verif["estado"] == "malicioso" else d["classification"],
+              detail=f"fase 6 · verificação da infraestrutura · {verif['estado']} · {verif['resumo']}")
+    log.info("verificação da infraestrutura %s: %s (%s)", d["name"], verif["estado"], verif["resumo"])
+    return "done"
 
 
 # ------------------------------------------------------------------ coleta ampla (sem IA)

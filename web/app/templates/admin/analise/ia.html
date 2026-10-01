@@ -210,7 +210,7 @@
   .fila .spin{display:inline-block;vertical-align:-1px;margin-right:6px;width:10px;height:10px;border-radius:50%;
               border:2px solid color-mix(in srgb,var(--ac) 25%,transparent);border-top-color:var(--ac);animation:sp .8s linear infinite}
   .eb.investigacao{color:var(--e-ped);border-color:var(--e-ped-bd);background:var(--e-ped-bg)}
-  .eb.infra,.eb.decisoes,.eb.duvida{color:var(--e-rea);border-color:var(--e-rea-bd);background:var(--e-rea-bg)}
+  .eb.infra,.eb.decisoes,.eb.duvida,.eb.lista,.eb.verificacao{color:var(--e-rea);border-color:var(--e-rea-bd);background:var(--e-rea-bg)}
   .fila .fvazia,.fila .ferr{margin:14px 16px;color:var(--mu)}
   .fila .ferr{color:var(--rd)}
   .fila .fmais{display:block;margin-top:8px}
@@ -452,10 +452,11 @@ document.addEventListener('alpine:init', function () {
       ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: 'Investigação'},
             e2: {novo: '1ª vez', reavaliacao: 'Revalidação', pedida: 'Reanálise pedida'}},
       paused: false, upd: '', agora: Date.now(), carregado: false, sel: null,
-      FILAS: [{k: 'e1', l: 'Etapa 1 · IA local', dica: 'fase 1: na ordem em que a IA local pega'},
-              {k: 'investigacao', l: 'Investigação', dica: 'desconhecidos/suspeitos: só com a fila da etapa 1 vazia e a GPU no ar'},
-              {k: 'e2', l: 'Etapa 2 · IA online', dica: 'na ordem em que a IA online pega'}],
+      FILAS: [{k: 'e1', l: 'Fila local · etapa 1', dica: 'IA local e listas a decidir, na ordem em que são pegos'},
+              {k: 'investigacao', l: 'Fila local · etapa 2', dica: 'desconhecidos/suspeitos (com a fila da etapa 1 vazia) e a verificação da infraestrutura do catálogo'},
+              {k: 'e2', l: 'Fila online', dica: 'na ordem em que a IA online pega'}],
       FENT: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: '2ª opinião',
+             lista: 'Lista', verificacao: 'Verificação',
              infra: 'Infraestrutura', decisoes: 'Decisões', duvida: 'Dúvida de lista'},
       fila: {aberta: false, aba: 'e1', d: {}, upd: '', erro: '', carregando: false},
       SUPER: SUPER, ctrl: {}, pz: {aberto: false, enviando: false, erro: ''},
@@ -631,7 +632,7 @@ document.addEventListener('alpine:init', function () {
         this.kpis = [
           {v: d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–', l: 'fila local · etapa 1',
            s: ['IA local', q.aguarda ? q.aguarda + ' de pouco acesso' : '', antigo ? antigo + ' do fluxo antigo' : ''].filter(Boolean).join(' · ')},
-          {v: q.investigacao != null ? q.investigacao : '–', l: 'fila local · etapa 2', s: 'investigação'},
+          {v: q.investigacao != null ? q.investigacao : '–', l: 'fila local · etapa 2', s: 'investigação + verificação da infraestrutura do catálogo'},
           {v: d.last_hour ? d.last_hour.done : '–', l: 'na última hora', s: 'domínios analisados na última hora'},
           {v: d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–', l: 'por domínio', s: 'tempo médio da IA local'},
           {v: m ? '~' + (m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2)) : '–', l: 'p/ zerar a fila',

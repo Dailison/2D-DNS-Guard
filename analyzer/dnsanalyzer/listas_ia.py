@@ -253,18 +253,26 @@ VERIFICADO_POR = "verificação: listas de ameaça, VirusTotal e URLScan"
 
 
 def _verificado(c, d: dict, e: dict, verif: dict, fase_n: int) -> None:
-    """Infraestrutura de terceiros que NÃO passou na verificação (`investigacao.verificar_infra`) não vai p/ a whitelist:
-    malicioso -> lista Blacklist (e SUSPEITO); suspeito (1-2 detecções, lista de ameaça fraca) -> a IA online decide."""
-    motivo = f"verificação antes da whitelist ({e.get('topic')}): {verif['resumo']}"
+    """Etapa 2 (01/10): infraestrutura de terceiros que o catálogo já pôs na whitelist e NÃO passou na verificação
+    (`investigacao.verificar_infra`): malicioso -> sai da whitelist (entrada automática; a de pessoa fica) e entra na
+    lista Blacklist (SUSPEITO); suspeito (1-2 detecções, lista de ameaça fraca) -> a IA online decide."""
+    motivo = f"verificação da infraestrutura ({e.get('topic')}): {verif['resumo']}"
     razao = [{"evidence_id": None, "text": motivo[:400], "by": "verificação"}]
     if verif["estado"] == "malicioso":
+        if c.execute("SELECT 1 FROM whitelist_domains WHERE domain = %s AND added_by NOT LIKE 'IA%%' AND added_by <> %s",
+                     (d["name"], whitelist.CATALOGO_BY)).fetchone():
+            log.info("verificação: %s detectado, mas está na whitelist por decisão de pessoa: fica", d["name"])
+            c.execute("UPDATE domains SET reasons = %s || coalesce(reasons, '[]'::jsonb) WHERE id = %s", (Jsonb(razao), d["id"]))
+            return
+        listas.contexto(c, VERIFICADO_POR, verif["resumo"][:200])
+        c.execute("DELETE FROM whitelist_domains WHERE domain = %s", (d["name"],))
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                   (listas.BLACKLIST, d["name"], VERIFICADO_POR))
         salvar(c, d["id"], listas.BLACKLIST, 1.0, motivo, e.get("topic") or "", FONTE_CATALOGO, fase_n)
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at, lista_duvida = false, classification = 'SUSPEITO', "
                   " risk_score = greatest(coalesce(risk_score, 0), 70), reasons = %s || coalesce(reasons, '[]'::jsonb) "
                   "WHERE id = %s", (Jsonb(razao), d["id"]))
-        eventos.lista("lista_add", d["name"], listas.BLACKLIST, f"Blacklist · {verif['resumo']}", d["id"], None, "SUSPEITO")
+        eventos.lista("lista_add", d["name"], listas.BLACKLIST, f"Blacklist · saiu da whitelist · {verif['resumo']}", d["id"], None, "SUSPEITO")
         return
     salvar(c, d["id"], NENHUMA, 0.5, motivo, e.get("topic") or "", FONTE_CATALOGO, fase_n)
     c.execute("UPDATE domains SET lista_aplicada_at = lista_at, lista_duvida = true, "
@@ -274,11 +282,11 @@ def _verificado(c, d: dict, e: dict, verif: dict, fase_n: int) -> None:
 
 
 def lista_do_catalogo(d: dict, fase_n: int = 1) -> bool:
-    """Lista decidida sem perguntar à IA (`_lista_sem_ia`): grava e aplica. True = tratado (sem IA).
+    """Lista decidida sem perguntar à IA (`_lista_sem_ia`): grava e aplica na hora. True = tratado (sem IA).
     Segue o fluxo normal quem já está numa lista de bloqueio (bucket/distribuição que a IA ou uma pessoa identificou
-    como apostas, adulto, ameaça… — o catálogo não desbloqueia). Infraestrutura de TERCEIROS (`verificar: true` no
-    catálogo) passa antes pela verificação (30/09): limpo -> whitelist; senão Blacklist ou IA online; fonte no limite
-    do plano grátis -> fica reservado e a fila de listas tenta de novo em 10 min."""
+    como apostas, adulto, ameaça… — o catálogo não desbloqueia). A infraestrutura de TERCEIROS (`verificar: true`)
+    também entra na whitelist aqui; a verificação (listas de ameaça, VirusTotal, URLScan) é da etapa 2
+    (`investigacao.verificacao_fase`) e tira p/ a Blacklist o que não passar (pedido do usuário 01/10)."""
     with db.conn() as c:
         r = _lista_sem_ia(c, d)
         if not r:
@@ -287,26 +295,11 @@ def lista_do_catalogo(d: dict, fase_n: int = 1) -> bool:
         if c.execute("SELECT 1 FROM category_lists WHERE domain = %s AND category NOT IN (%s, %s)",   # (Não identificados
                      (d["name"], PARA_REVISAR, NAO_IDENT)).fetchone():                                  #  não é identificação)
             return False
-    e = catalog.match(d["name"]) if motivo.startswith("catálogo") else None
-    verif = None
-    if e and e.get("verificar") and e_wl(lista):
-        from . import investigacao
-        verif = investigacao.verificar_infra(d["id"], d["name"])
-        if verif["estado"] == "adiar":
-            log.info("lista de %s adiada: %s", d["name"], verif["resumo"])
-            return True   # lista_claimed_at continua: a fila de listas pega de novo em 10 min
-        if verif["estado"] != "limpo":
-            with db.conn() as c:
-                _verificado(c, d, e, verif, fase_n)
-            return True
-        motivo += f" · verificado: {verif['resumo']}"
-    servico = motivo.split(": ", 1)[-1].split(" · verificado")[0]
-    with db.conn() as c:
+        servico = motivo.split(": ", 1)[-1]
         salvar(c, d["id"], lista, 1.0, motivo, servico, FONTE_CATALOGO, fase_n)
         aplicar(c, ids=[d["id"]])
     eventos.registrar("lista_local", d["name"], d["id"], d.get("classification"), None,
-                      detail=f"{fase_n}|lista {lista} 100% · {servico} — {motivo.split(':')[0]} (sem IA)"
-                             + (" · verificado" if verif else ""))
+                      detail=f"{fase_n}|lista {lista} 100% · {servico} — {motivo.split(':')[0]} (sem IA)")
     return True
 
 

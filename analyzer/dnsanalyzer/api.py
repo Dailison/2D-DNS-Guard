@@ -794,6 +794,18 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
             " " + ja_ia + " ASC, aguarda_recorrencia ASC, (classification IS NOT DISTINCT FROM 'SUSPEITO') DESC, "
             " total_queries DESC LIMIT %s", (limit,)).fetchall()
         n1 = c.execute("SELECT count(*) AS n FROM domains d WHERE " + f1).fetchone()["n"]
+        # a etapa 1 também decide a LISTA do que foi classificado sem a IA local (catálogo/regras) — inclusive a
+        # infraestrutura de terceiros à espera da verificação (VirusTotal/URLScan) antes da whitelist (01/10: o
+        # contador somava esses e o modal não mostrava)
+        from . import listas_ia as _li
+        e1 += c.execute(
+            "SELECT name, total_queries, classification, false AS pouco_acesso, "
+            " 'lista' AS entrada, "
+            " COALESCE(lista_claimed_at BETWEEN now() - interval '10 minutes' AND now(), false) AS analisando, "
+            " extract(epoch from now() - first_seen)::int AS desde_s "
+            "FROM domains WHERE " + _li._FILA + " ORDER BY 6 DESC, total_queries DESC LIMIT %s", (limit,)).fetchall()
+        n1 += c.execute("SELECT count(*) AS n FROM domains WHERE " + _li._FILA).fetchone()["n"]
+        e1 = e1[:limit]
         fila_on = online._FILA.replace(online._RESERVA, "")
         pedido = "(d.online_pedido_at IS NOT NULL AND (d.online_at IS NULL OR d.online_at < d.online_pedido_at))"
         e2 = c.execute(
@@ -816,22 +828,29 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
             "FROM domains WHERE " + f6 + " ORDER BY (investigacao_claimed_at > now() - interval '30 minutes') DESC NULLS LAST, "
             " " + investigacao.FILA_ORDEM + " LIMIT %(n)s", par).fetchall()
         n6 = c.execute("SELECT count(*) AS n FROM domains WHERE " + f6, par).fetchone()["n"]
+        # verificação da infraestrutura já liberada pelo catálogo (listas de ameaça, VirusTotal, URLScan)
+        nv = c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.VERIF_FILA).fetchone()["n"]
+        ev = c.execute("SELECT name, total_queries, classification, 'verificacao' AS entrada, false AS analisando "
+                       "FROM domains WHERE " + investigacao.VERIF_FILA + " ORDER BY total_queries DESC, id LIMIT %s",
+                       (limit,)).fetchall()
         fila1_vazia = not c.execute(investigacao._FILA_FASE1).fetchone()
     return {"e1": {"total": n1, "itens": e1}, "e2": {"total": n2, "itens": e2, "habilitado": online.habilitado()},
-            "investigacao": {"total": n6, "itens": e6, "habilitado": settings().investigacao_enabled,
-                             "espera_etapa1": not fila1_vazia}}
+            "investigacao": {"total": n6 + nv, "itens": (e6 + ev)[:limit], "habilitado": settings().investigacao_enabled,
+                             "espera_etapa1": not fila1_vazia, "investigar": n6, "verificar": nv,
+                             "virustotal_resta": investigacao.vt_resta("verificacao")}}
 
 
 _FILA_INV = [0.0, 0]   # (quando contou, total): a página consulta a cada 3 s e a contagem custa ~0,2 s
 
 
 def _fila_investigacao(c) -> int:
-    """Quantos domínios esperam a investigação (fase 6), com cache de 15 s."""
+    """Quantos domínios esperam a etapa 2 (investigação + verificação da infraestrutura), com cache de 15 s."""
     import time
     from . import investigacao
     if time.monotonic() - _FILA_INV[0] > 15 or not _FILA_INV[0]:
-        _FILA_INV[1] = c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.FILA_SQL,
-                                 {"dias": settings().investigacao_dias}).fetchone()["n"]
+        _FILA_INV[1] = (c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.FILA_SQL,
+                                  {"dias": settings().investigacao_dias}).fetchone()["n"]
+                        + c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.VERIF_FILA).fetchone()["n"])
         _FILA_INV[0] = time.monotonic()
     return _FILA_INV[1]
 
@@ -876,7 +895,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "   extract(epoch from now() - CASE WHEN online_resp IS NOT NULL THEN COALESCE(online_at, first_seen) ELSE first_seen END)::int FROM domains "
             "   WHERE online_claimed_at > now() - interval '10 minutes' AND online_falhas = 0 "
             " UNION ALL SELECT name, total_queries, lista_claimed_at, '1', " + local + " FROM domains" + ult +
-            "   WHERE lista_claimed_at > now() - interval '10 minutes'"
+            "   WHERE lista_claimed_at BETWEEN now() - interval '10 minutes' AND now()"   # (reserva futura = à espera)
             # investigação (fase 6) também é da IA local: aparece no "Analisando" da etapa 1 (30/09)
             " UNION ALL SELECT name, total_queries, investigacao_claimed_at, '6', 'investigacao', "
             "   extract(epoch from now() - COALESCE(investigado_at, first_seen))::int FROM domains "

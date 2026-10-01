@@ -110,7 +110,7 @@ def build_dossier(c, drow: dict, with_rdap: bool = False, with_web: bool = False
         "                    OR ((features->>'sub_entropy')::float >= 3.6 AND (features->>'sub_max_len')::int >= 12)) AS rnd "
         "FROM fqdns WHERE domain_id=%s", (drow["id"],)).fetchone()
     sample = [r["name"] for r in c.execute(
-        "SELECT f.name FROM fqdns f LEFT JOIN query_agg q ON q.fqdn_id=f.id "
+        "SELECT f.name FROM fqdns f LEFT JOIN query_agg q ON q.fqdn_id=f.id AND q.domain_id=f.domain_id "
         "WHERE f.domain_id=%s GROUP BY f.name ORDER BY sum(q.queries) DESC NULLS LAST LIMIT 8",
         (drow["id"],))]
     d["fqdn_stats"] = {"count": fs["n"], "random_subs": fs["rnd"], "sample": sample}

@@ -71,7 +71,7 @@ def inativo(nomes: list[str]) -> bool:
 
 def _nomes(c, drow: dict) -> list[str]:
     fq = [r["name"] for r in c.execute(
-        "SELECT f.name FROM fqdns f LEFT JOIN query_agg q ON q.fqdn_id = f.id WHERE f.domain_id = %s "
+        "SELECT f.name FROM fqdns f LEFT JOIN query_agg q ON q.fqdn_id = f.id AND q.domain_id = f.domain_id WHERE f.domain_id = %s "
         "GROUP BY f.name ORDER BY sum(q.queries) DESC NULLS LAST LIMIT 4", (drow["id"],))]
     return list(dict.fromkeys([drow["name"], "www." + drow["name"]] + fq))
 

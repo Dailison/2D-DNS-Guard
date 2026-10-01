@@ -502,9 +502,19 @@ def listas_categoria():
                                categorias=dnslib.CATEGORIAS_LISTA, scats=_site_cats(), pag_url=_pag_url)
     pulso = next((x.get("pulso") for x in resumo.get("categorias", []) if x["categoria"] == cat), None)
     return render_template("admin/listas_categoria.html", cat=cat, q=q, resumo=resumo, det=det, fd=fd, pulso=pulso,
+                           total_bloqueados=_total_bloqueados(resumo),
                            scats=_site_cats(), pag_url=_pag_url,
                            categorias=dnslib.CATEGORIAS_LISTA, empresas_pol=empresas_pol,
                            default_tem=default_tem, servicos=servicos, busca=busca, achados=achados)
+
+
+def _total_bloqueados(resumo: dict) -> int:
+    """Domínios distintos nas listas de bloqueio da página (um domínio em mais de uma lista conta uma vez), como o
+    contador das whitelists em Domínios liberados. Sem a relação dos domínios (analisador fora), soma as listas."""
+    cats = [c for c, _ in dnslib.CATEGORIAS_LISTA]
+    soma = sum(x.get("total") or 0 for x in resumo.get("categorias", []) if x.get("categoria") in cats)
+    distintos = len(set().union(*dnslib.dominios_das_listas(cats).values())) if cats else 0
+    return distintos or soma
 
 
 # --------------------------------------------- tabela detalhada (listas e "Classificados por IA como Trabalho")

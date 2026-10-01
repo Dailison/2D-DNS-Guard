@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Domínios bloqueados{% endblock %}
 {% block content %}
-<h1>Domínios bloqueados</h1>
+<h1>Domínios bloqueados
+  {%- if resumo.categorias %} <span class="mut" style="font-size:.8rem;font-weight:400" title="domínios distintos (um domínio em mais de uma lista conta uma vez)">· {{ total_bloqueados }} domínio(s)</span>{% endif %}</h1>
 {% set rot = dict(categorias) %}
 {% set tot = {} %}{% set tipo = {} %}{% for x in resumo.categorias %}{% set _ = tot.update({x.categoria: x.total}) %}{% set _ = tipo.update({x.categoria: x.tipo}) %}{% endfor %}
 <div class="card">

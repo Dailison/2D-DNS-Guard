@@ -30,7 +30,9 @@ CATEGORIAS_MANUAIS = ("infra_bloqueio", "outros_bloqueios", "para_revisar")
 # whitelist do catálogo, mas aparece em lista de ameaça, no VirusTotal ou com veredito malicioso no URLScan. Nem a IA
 # nem pessoa põem aqui na mão: só a verificação (listas_ia.lista_do_catalogo)
 BLACKLIST = "blacklist"
-CATEGORIAS_VERIFICACAO = (BLACKLIST,)
+# DNS Inativo (01/10): domínio que não resolve (dnsativo.py) — teste de DNS na etapa 1, sem IA
+DNS_INATIVO = "dns_inativo"
+CATEGORIAS_VERIFICACAO = (BLACKLIST, DNS_INATIVO)
 CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_CURADAS + CATEGORIAS_VERIFICACAO + CATEGORIAS_MANUAIS
 AUTO_BY = "bloqueio automático"
 

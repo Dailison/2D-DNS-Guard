@@ -243,7 +243,8 @@ def grupo_da_rede(cidr, ngm):
 # organização das listas (pedido do usuário 2026-09-26): seções só p/ a tela; ⚡ = risco (só destaque)
 SECOES_LISTA = [
     ("🔒 Segurança", [("ameaca", "Ameaças"), ("blacklist", "Blacklist"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
-                     ("adware", "Adware / Apps indesejados"), ("nao_identificado", "Não identificados")]),
+                     ("adware", "Adware / Apps indesejados"), ("nao_identificado", "Não identificados"),
+                     ("dns_inativo", "DNS Inativo")]),
     ("🚫 Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
                     ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
     ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),

@@ -1528,3 +1528,35 @@ def _dados(c):
     c.execute("INSERT INTO policies (scope, lists, services) VALUES ('tenant:%s', '{mensageiros,jogos}', '{}')" % t)
     c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'sobra.com', 'migração dos grupos antigos'),"
               "('para_revisar', 'duvida-sobra.com', 'migração dos grupos antigos'), ('infra_bloqueio', 'ja-listado.com', 'op'), ('outros_bloqueios', 'de-outros.com', 'migração')")
+
+
+def test_dns_inativo_na_etapa_1(env, monkeypatch):
+    """01/10: domínio que não resolve (DNS público, 2 resolvedores, sem MX) e sem resposta com IP nos logs vai p/ a
+    lista DNS Inativo sem IA; nome interno (os logs têm IP), só-subdomínio, só-e-mail e falha de rede não vão; quem
+    volta a resolver sai da lista."""
+    from dnsanalyzer import db, dnsativo
+    resp = {"morto.com": "vazio", "www.morto.com": "vazio", "so-email.com": "vazio", "www.so-email.com": "vazio",
+            "raiz-sem-ip.com": "vazio", "www.raiz-sem-ip.com": "vazio", "app.raiz-sem-ip.com": "ip",
+            "rede-fora.com": "erro", "www.rede-fora.com": "erro", "interno.com.br": "vazio", "www.interno.com.br": "vazio"}
+    mx = {"so-email.com": "ip"}
+    monkeypatch.setattr(dnsativo, "consulta", lambda nome, res, tipo="A": (mx.get(nome, "vazio") if tipo == "MX" else resp.get(nome, "vazio")))
+    with db.conn() as c:
+        ids = {n: c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES (%s, 'public', 'DESCONHECIDO', true) "
+                            "RETURNING id, name, kind, classification, ti_signature", (n,)).fetchone()
+               for n in ("morto.com", "so-email.com", "raiz-sem-ip.com", "rede-fora.com", "interno.com.br")}
+        c.execute("INSERT INTO fqdns (domain_id, name) VALUES (%s, 'app.raiz-sem-ip.com')", (ids["raiz-sem-ip.com"]["id"],))
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('nao_identificado', 'morto.com', 'IA automática (nao_identificado)')")
+    monkeypatch.setattr(dnsativo, "_com_ip", lambda c, did: 5 if did == ids["interno.com.br"]["id"] else 0)
+    assert dnsativo.etapa1(ids["morto.com"]) is True
+    for n in ("so-email.com", "raiz-sem-ip.com", "rede-fora.com", "interno.com.br"):
+        assert dnsativo.etapa1(ids[n]) is False, n
+    with db.conn() as c:
+        em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain = ANY(%s)", (list(ids),))}
+        d = c.execute("SELECT kind, llm_pending, lista_ia FROM domains WHERE name = 'morto.com'").fetchone()
+    assert em == {("dns_inativo", "morto.com")}, "saiu de Não identificados e entrou em DNS Inativo"
+    assert (d["kind"], d["llm_pending"], d["lista_ia"]) == ("inexistente", False, "dns_inativo")
+    # voltou a resolver: sai da lista e a análise segue
+    resp["morto.com"] = "ip"
+    assert dnsativo.etapa1({**ids["morto.com"], "kind": "public"}) is False
+    with db.conn() as c:
+        assert not c.execute("SELECT 1 FROM category_lists WHERE domain = 'morto.com'").fetchone()

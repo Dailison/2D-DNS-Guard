@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, controle, db, enrich, listas, listas_ia, online, ti, webintel, whitelist, whois
+from . import catalog, controle, db, dnsativo, enrich, listas, listas_ia, online, ti, webintel, whitelist, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -328,6 +328,13 @@ def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2
     esperar_busca = espera a vez da busca na web (1 domínio pedido na mão) em vez de adiar."""
     cfg = settings()
     name, did = drow["name"], drow["id"]
+    if not etapa2 and not etapa3:   # (01/10) teste de resolução antes de tudo: quem não resolve vai p/ DNS Inativo, sem IA
+        try:
+            if dnsativo.etapa1(drow):
+                event("rules_final", name, did, drow.get("classification"), detail="não resolve no DNS: lista DNS Inativo (IA não foi necessária)")
+                return "done"
+        except Exception:  # noqa: BLE001 — o teste nunca derruba a análise
+            log.exception("teste de DNS de %s", name)
     if etapa2:
         event("search_start", name, did, detail=f"fase 3 · busca na web · {drow['total_queries']} consultas")
     if etapa3:

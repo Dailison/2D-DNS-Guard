@@ -104,7 +104,7 @@ class Settings:
     web_search_min_interval: int
     web_search_motores: list[str]            # busca leve (fases 1-4): buscadores pedidos ao SearXNG ([] = os habilitados)
     web_search_motores_completos: list[str]  # busca completa: só na investigação (fase 6)
-    web_search_intervalo_completo: int       # s entre buscas completas (todas as instâncias)
+    web_search_intervalo_completo: int       # s entre buscas completas, por instância (cada uma sai por um IP)
     web_search_skip_rank: int    # fase 1: não busca p/ domínio até esta posição do Tranco (0 = busca em todos)
     web_search_before_llm: bool
     web_search_before_llm_todos: bool   # "todos": todo domínio da fase 1, não só os que a IA não reconheceria

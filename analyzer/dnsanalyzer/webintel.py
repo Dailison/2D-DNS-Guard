@@ -226,21 +226,26 @@ def _reservar(cfg, wait: bool, evitar: set[str] = frozenset()) -> str:
         time.sleep(espera)
 
 
-_completa_lock = threading.Lock()
-_completa_ultima = [0.0]
+_completa_ultima: dict[str, float] = {}   # SearXNG -> última busca completa
 
 
-def reservar_completa(cfg) -> None:
-    """Busca COMPLETA (todos os buscadores, investigação): espera a vez — no máximo 1 a cada
-    WEB_SEARCH_INTERVALO_COMPLETO s entre todas as instâncias (Yandex/Google/Brave bloqueiam rajadas)."""
+def reservar_completa(cfg) -> str:
+    """Busca COMPLETA (todos os buscadores, investigação): espera a vez e devolve o SearXNG. O intervalo
+    (WEB_SEARCH_INTERVALO_COMPLETO) vale POR INSTÂNCIA — os buscadores limitam por IP e cada instância sai por um IP
+    (01/10: com um intervalo só p/ todas, a GPU do reforço ficava ~80% do tempo esperando a vez de buscar)."""
     import time
     while True:
-        with _completa_lock:
-            falta = cfg.web_search_intervalo_completo - (time.monotonic() - _completa_ultima[0])
-            if falta <= 0:
-                _completa_ultima[0] = time.monotonic()
-                return
-        time.sleep(min(falta, 30))
+        with _busca_lock:
+            agora = time.monotonic()
+            urls = _urls(cfg)
+            vivos = [u for u in urls if _fora_ate.get(u, 0) <= agora] or urls
+            espera, _, url = min((max(cfg.web_search_intervalo_completo - (agora - _completa_ultima.get(u, float("-inf"))),
+                                      cfg.web_search_min_interval - (agora - _ultima.get(u, float("-inf")))), i, u)
+                                 for i, u in enumerate(vivos))
+            if espera <= 0:
+                _completa_ultima[url] = _ultima[url] = agora
+                return url
+        time.sleep(min(espera, 30))
 
 
 def fora_do_ar(cfg) -> bool:

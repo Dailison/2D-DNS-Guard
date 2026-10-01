@@ -826,8 +826,7 @@ def buscas(consultas: list[str], nome: str) -> list[dict]:
     out = []
     for q in consultas[:4]:
         try:   # caso grave (investigação): todos os buscadores, no ritmo da busca completa (30/09)
-            webintel.reservar_completa(cfg)
-            url = webintel._reservar(cfg, True)
+            url = webintel.reservar_completa(cfg)
             res, _ = webintel._consulta(cfg, q, lambda t: label in t or nome in t, url, cfg.web_search_motores_completos)
         except Exception as e:  # noqa: BLE001
             log.info("busca extra %r: %s", q, e)

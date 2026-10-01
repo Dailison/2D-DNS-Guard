@@ -86,13 +86,18 @@ def test_busca_leve_e_completa_pedem_buscadores_diferentes(monkeypatch):
     assert pedidos[0]["engines"] == "bing,yahoo" and pedidos[1]["engines"] == "yandex,google"
 
 
-def test_busca_completa_respeita_o_intervalo(monkeypatch):
+def test_busca_completa_respeita_o_intervalo_por_instancia(monkeypatch):
+    """01/10: o intervalo da busca completa vale por instância (IPs diferentes): duas saem na hora, a 3ª espera."""
     import time
     from types import SimpleNamespace
     from dnsanalyzer import webintel
-    monkeypatch.setattr(webintel, "_completa_ultima", [0.0])
-    cfg = SimpleNamespace(web_search_intervalo_completo=0.3)
+    monkeypatch.setattr(webintel, "_completa_ultima", {})
+    monkeypatch.setattr(webintel, "_ultima", {})
+    monkeypatch.setattr(webintel, "_fora_ate", {})
+    cfg = SimpleNamespace(web_search_intervalo_completo=0.3, web_search_min_interval=0, web_search_url="http://vm",
+                          web_search_urls=["http://vm", "http://vps"])
     t0 = time.monotonic()
-    webintel.reservar_completa(cfg)
+    usados = [webintel.reservar_completa(cfg), webintel.reservar_completa(cfg)]
+    assert sorted(usados) == ["http://vm", "http://vps"] and time.monotonic() - t0 < 0.2
     webintel.reservar_completa(cfg)
     assert time.monotonic() - t0 >= 0.29

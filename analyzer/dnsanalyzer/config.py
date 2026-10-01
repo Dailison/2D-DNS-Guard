@@ -102,6 +102,9 @@ class Settings:
     web_search_urls: list[str]   # todos os SearXNG (WEB_SEARCH_URL com vírgula); web_search_url = o primeiro
     web_search_results: int
     web_search_min_interval: int
+    web_search_motores: list[str]            # busca leve (fases 1-4): buscadores pedidos ao SearXNG ([] = os habilitados)
+    web_search_motores_completos: list[str]  # busca completa: só na investigação (fase 6)
+    web_search_intervalo_completo: int       # s entre buscas completas (todas as instâncias)
     web_search_skip_rank: int    # fase 1: não busca p/ domínio até esta posição do Tranco (0 = busca em todos)
     web_search_before_llm: bool
     web_search_before_llm_todos: bool   # "todos": todo domínio da fase 1, não só os que a IA não reconheceria
@@ -113,7 +116,7 @@ class Settings:
     lista_confianca_min: float
     online_confianca_min: float
     online_enabled: bool
-    online_exige_busca: bool           # (30/09) IA online só com busca na web (grounding); sem modelo com busca, a fila espera
+    online_exige_busca: bool           # (30/09) IA online só com a busca na web do SearXNG feita; SearXNG fora = a fila espera
     investigacao_enabled: bool         # fase 6: investigação profunda com a fila da IA vazia
     investigacao_dias: int             # reinvestiga depois de N dias (ou quando o domínio é reanalisado)
     investigacao_confianca_min: float  # aplica classificação/lista só com esta confiança (e serviço reconhecido)
@@ -223,6 +226,13 @@ def load_settings() -> Settings:
         web_search_results=_int("WEB_SEARCH_RESULTS", 6),
         # buscadores gratuitos bloqueiam rajadas (~10-15 buscas seguidas): intervalo mínimo (s) por SearXNG
         web_search_min_interval=_int("WEB_SEARCH_MIN_INTERVAL", 20),
+        # (30/09, pedido do usuário: busca paga é cara demais) SearXNG mais moderado: a busca do dia a dia usa poucos
+        # buscadores; o conjunto completo (Yandex — o único que achou pvdpix.com —, Google, Brave) só nos casos graves
+        # da investigação, com intervalo próprio, p/ não levarem CAPTCHA/suspensão por excesso
+        web_search_motores=_list("WEB_SEARCH_ENGINES") or ["bing", "yahoo", "wikipedia"],
+        web_search_motores_completos=_list("WEB_SEARCH_ENGINES_COMPLETOS") or ["yandex", "google", "brave", "bing", "yahoo",
+                                                                                "wikipedia"],
+        web_search_intervalo_completo=_int("WEB_SEARCH_INTERVALO_COMPLETO", 30),
         # (28/09) a busca era o teto da fila (1 a cada 8 s = 7,5 domínios/min com a GPU ociosa): o top 100 mil do Tranco
         # a IA conhece sem busca
         web_search_skip_rank=_int("WEB_SEARCH_SKIP_RANK", 0),

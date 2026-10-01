@@ -226,6 +226,30 @@ def _reservar(cfg, wait: bool, evitar: set[str] = frozenset()) -> str:
         time.sleep(espera)
 
 
+_completa_lock = threading.Lock()
+_completa_ultima = [0.0]
+
+
+def reservar_completa(cfg) -> None:
+    """Busca COMPLETA (todos os buscadores, investigação): espera a vez — no máximo 1 a cada
+    WEB_SEARCH_INTERVALO_COMPLETO s entre todas as instâncias (Yandex/Google/Brave bloqueiam rajadas)."""
+    import time
+    while True:
+        with _completa_lock:
+            falta = cfg.web_search_intervalo_completo - (time.monotonic() - _completa_ultima[0])
+            if falta <= 0:
+                _completa_ultima[0] = time.monotonic()
+                return
+        time.sleep(min(falta, 30))
+
+
+def fora_do_ar(cfg) -> bool:
+    """Todas as instâncias do SearXNG estão de lado (falharam há pouco)."""
+    import time
+    agora = time.monotonic()
+    return bool(_urls(cfg)) and all(_fora_ate.get(u, 0) > agora for u in _urls(cfg))
+
+
 def _deixar_de_lado(url: str) -> None:
     import time
     with _busca_lock:
@@ -254,10 +278,15 @@ def _motores_web(cfg, url: str | None = None) -> set[str]:
     return nomes
 
 
-def _consulta(cfg, q: str, relevante=None, url: str | None = None) -> tuple[list[dict], list[str]]:
-    """Uma consulta ao SearXNG: (resultados limpos, buscadores sem resposta)."""
-    r = httpx.get((url or cfg.web_search_url).rstrip("/") + "/search", timeout=40,
-                  params={"q": q, "format": "json", "language": "pt-BR", "safesearch": 0})
+def _consulta(cfg, q: str, relevante=None, url: str | None = None,
+              motores: list[str] | None = None) -> tuple[list[dict], list[str]]:
+    """Uma consulta ao SearXNG: (resultados limpos, buscadores sem resposta). `motores`: os buscadores pedidos (o
+    SearXNG usa até os desligados por padrão quando vêm em `engines`); None = os leves da configuração."""
+    motores = getattr(cfg, "web_search_motores", None) if motores is None else motores
+    params = {"q": q, "format": "json", "language": "pt-BR", "safesearch": 0}
+    if motores:
+        params["engines"] = ",".join(motores)
+    r = httpx.get((url or cfg.web_search_url).rstrip("/") + "/search", timeout=40, params=params)
     r.raise_for_status()
     j = r.json()
     out = []
@@ -277,27 +306,28 @@ def _consulta(cfg, q: str, relevante=None, url: str | None = None) -> tuple[list
     return out, [e[0] for e in j.get("unresponsive_engines") or []]
 
 
-def _buscar_em(cfg, domain: str, url: str) -> list[dict]:
+def _buscar_em(cfg, domain: str, url: str, motores: list[str] | None = None) -> list[dict]:
     label = domain.split(".")[0]
     alvo = (domain, label) if len(label) >= 5 else (domain,)
     cita = lambda t: any(a in t for a in alvo)   # noqa: E731
     # só entram resultados que citam o domínio (ou o nome dele, se distintivo) — até entre aspas vem lixo
     # (27/09: '"herosistemas-storage.s3.amazonaws.com"' voltou 4 resultados do Google Tradutor)
-    out, fora = _consulta(cfg, f'"{domain}"', cita, url)
+    out, fora = _consulta(cfg, f'"{domain}"', cita, url, motores)
     if not out:
         # entre aspas o Bing às vezes volta vazio sem erro (e o DuckDuckGo quebra); sem aspas acha, com ruído
-        out2, fora2 = _consulta(cfg, domain, cita, url)
+        out2, fora2 = _consulta(cfg, domain, cita, url, motores)
         out, fora = out2, sorted(set(fora) & set(fora2))
         # nome composto (ex.: herosistemas-storage.s3.amazonaws.com): pelas palavras do nome, só com
         # resultado que cite a palavra mais distintiva (o nome completo quase nunca aparece na web)
         palavras = [p for p in re.split(r"[-_]", label) if p.isalpha()]
         chave = max(palavras, key=len, default="")
         if not out and len(palavras) >= 2 and len(chave) >= 5:
-            out3, fora3 = _consulta(cfg, " ".join(palavras), lambda t: chave in t, url)
+            out3, fora3 = _consulta(cfg, " ".join(palavras), lambda t: chave in t, url, motores)
             out, fora = out3, sorted(set(fora) & set(fora3))
     # sem resultado só é "indisponível" se NENHUM buscador de web respondeu. Alguns vivem
     # suspensos (captcha): antes, domínio sem presença na web era retentado para sempre.
-    if not out and fora and not (_motores_web(cfg, url) - set(fora)):
+    pedidos = set(motores if motores is not None else (getattr(cfg, "web_search_motores", None) or [])) - {"wikipedia"}
+    if not out and fora and not ((pedidos or _motores_web(cfg, url)) - set(fora)):
         raise BuscaIndisponivel("buscadores sem resposta: " + ", ".join(fora))
     return out
 

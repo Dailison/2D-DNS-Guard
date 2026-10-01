@@ -43,7 +43,7 @@ def test_busca_pelas_palavras_do_nome_composto(monkeypatch):
     monkeypatch.setattr(webintel, "_ultima_busca", 0.0, raising=False)
     consultas = []
 
-    def falsa(cfg, q, relevante=None, url=None):
+    def falsa(cfg, q, relevante=None, url=None, motores=None):
         consultas.append(q)
         if q == "herosistemas storage":
             res = [{"title": "Hero Sistemas - ERP", "snippet": "software de gestão herosistemas", "host": "herosistemas.com.br", "url": "u"},
@@ -86,7 +86,7 @@ def test_varios_searxng_cada_um_com_o_seu_intervalo(monkeypatch):
     esperar, e a 3ª (os dois ocupados) é BuscaOcupada quando o worker não espera."""
     webintel = _varios_searxng(monkeypatch)
     usados = []
-    monkeypatch.setattr(webintel, "_consulta", lambda cfg, q, rel=None, url=None: (usados.append(url) or
+    monkeypatch.setattr(webintel, "_consulta", lambda cfg, q, rel=None, url=None, motores=None: (usados.append(url) or
                         ([{"title": "t", "snippet": "s", "host": "h", "url": "u"}], [])))
     webintel.search(_SemCache(), "a.com", fetch=True, wait=False)
     webintel.search(_SemCache(), "b.com", fetch=True, wait=False)
@@ -102,7 +102,7 @@ def test_searxng_fora_do_ar_fica_de_lado(monkeypatch):
     webintel = _varios_searxng(monkeypatch, intervalo=0)
     usados = []
 
-    def consulta(cfg, q, rel=None, url=None):
+    def consulta(cfg, q, rel=None, url=None, motores=None):
         usados.append(url)
         if url == "http://pc:8888":
             raise httpx.ConnectError("desligado")

@@ -214,27 +214,16 @@ def _com_busca(modelo: str) -> bool:
 BUSCA_PAUSA_S = 1800   # 429 com busca: o modelo/chave só tenta buscar de novo daqui a 30 min (não reserva domínio à toa)
 
 
-def niveis_com_busca() -> tuple[list, list]:
-    """(volume, reforço) só com modelos que fazem busca na web — ONLINE_EXIGE_BUSCA (pedido do usuário 30/09)."""
-    vol, reforco, busca = niveis()
-    vol = [m for m in (vol + busca) if _com_busca(m[0])]
-    reforco = [m for m in reforco if _com_busca(m[0])]
-    return list(dict.fromkeys(vol)), list(dict.fromkeys(reforco))
-
-
 def espera_busca(c=None) -> str | None:
-    """Motivo de a fila online esperar (exige busca na web e não há modelo/cota de busca), ou None."""
+    """Motivo de a fila online esperar, ou None. ONLINE_EXIGE_BUSCA (pedido do usuário 30/09): a IA online só responde
+    com a busca na web feita — pelo nosso SearXNG (a busca do Google pelo Gemini é paga: US$ 14/mil depois de 5 mil/mês)."""
     cfg = settings()
     if not cfg.online_exige_busca:
         return None
-    vol, reforco = niveis_com_busca()
-    if not (vol or reforco):
-        return "nenhum modelo com busca na web configurado"
-    agora = time.time()
-    if not any(agora >= cota(m, k).pausa_ate for m, _, _ in vol + reforco for k in range(len(_chaves()))):
-        return "sem cota de busca na web (plano grátis): aguardando"
-    if c is not None and _buscas_no_mes(c) >= cfg.gemini_grounding_month:
-        return f"limite de {cfg.gemini_grounding_month} buscas no mês atingido"
+    if not cfg.web_search_url:
+        return "busca na web (SearXNG) não configurada"
+    if webintel.fora_do_ar(cfg):
+        return "busca na web (SearXNG) fora do ar: aguardando"
     return None
 
 
@@ -555,8 +544,12 @@ def fase(categorias: list[str]) -> str:
         try:
             with db.conn() as c:
                 d["_busca"] = webintel.search(c, d["name"], fetch=True, wait=True)
-        except Exception as e:  # noqa: BLE001 — sem busca a IA online segue com o que tem
+        except Exception as e:  # noqa: BLE001
             log.info("busca da fase 4 indisponível p/ %s: %s", d["name"], e)
+            if cfg.online_exige_busca:   # sem a busca na web a IA online não responde: devolve e espera
+                with db.conn() as c:
+                    c.execute("UPDATE domains SET online_claimed_at = NULL WHERE id = %s", (d["id"],))
+                return "unavailable"
     if d["classification"] in ("DESCONHECIDO", "SUSPEITO") and not d.get("investigado_at"):
         # contexto mais robusto (30/09): as fontes da investigação, sem IA local (~20-45 s; cache p/ a fase 6)
         try:
@@ -568,10 +561,6 @@ def fase(categorias: list[str]) -> str:
     revalidar = (bool(d.get("online_resp")) and not (d.get("online_resp") or {}).get("erro")) or bool(d.get("pedido"))
     vol, reforco, busca = niveis()
     etapas = ((vol, False), (reforco, False), (busca if pode_buscar else [], True))
-    if cfg.online_exige_busca:   # as duas etapas com busca na web (pedido do usuário 30/09)
-        vol, reforco = niveis_com_busca()
-        busca = []
-        etapas = ((vol, True), (reforco, True))
     obj = meta = None
     invalidas: list[str] = []
     for nivel, buscar in etapas:

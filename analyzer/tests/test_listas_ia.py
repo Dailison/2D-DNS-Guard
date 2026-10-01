@@ -1407,39 +1407,109 @@ def test_camuflagem_e_traducao_do_google_sem_ia(env, monkeypatch):
 
 
 def test_ia_online_exige_busca_na_web(env, monkeypatch):
-    """30/09 (pedido do usuário): as duas etapas da IA online só com busca na web; sem modelo/cota de busca, a fila espera
-    sem reservar domínio."""
+    """30/09 (pedido do usuário): a IA online só responde com a busca na web feita — pelo SearXNG (a do Google pelo
+    Gemini é paga). SearXNG fora do ar: a fila espera sem reservar; a busca falhou: devolve o domínio e espera."""
     import time
-    from dnsanalyzer import config, db, online
+    from dnsanalyzer import config, db, online, webintel
     cfg = config.settings()
     monkeypatch.setattr(cfg, "gemini_api_key", "k")
     monkeypatch.setattr(cfg, "online_exige_busca", True)
-    monkeypatch.setattr(cfg, "gemini_modelos", [("gemini-3.5-flash-lite", 10, 500)])
-    monkeypatch.setattr(cfg, "gemini_reforco", [("gemma-4-31b-it", 10, 500), ("gemini-3.8-flash", 5, 20)])
-    monkeypatch.setattr(cfg, "gemini_busca", [])
-    vol, reforco = online.niveis_com_busca()
-    assert [m for m, _, _ in vol] == ["gemini-3.5-flash-lite"] and [m for m, _, _ in reforco] == ["gemini-3.8-flash"]
-    online._COTAS.clear()
+    monkeypatch.setattr(cfg, "web_search_url", "http://sx1")
+    monkeypatch.setattr(cfg, "web_search_urls", ["http://sx1", "http://sx2"])
+    monkeypatch.setattr(webintel, "_fora_ate", {})
     with db.conn() as c:
         assert online.espera_busca(c) is None
-    for m in ("gemini-3.5-flash-lite", "gemini-3.8-flash"):   # 429 com busca em todos: espera
-        for k in range(len(online._chaves())):
-            online.cota(m, k).pausar(online.BUSCA_PAUSA_S)
+    monkeypatch.setattr(webintel, "_fora_ate", {"http://sx1": time.monotonic() + 300, "http://sx2": time.monotonic() + 300})
     with db.conn() as c:
-        assert "sem cota de busca" in online.espera_busca(c)
+        assert "fora do ar" in online.espera_busca(c)
     reservou = []
     monkeypatch.setattr(online, "_reservar", lambda c: reservou.append(1))
     assert online.fase([]) == "unavailable" and not reservou
-    perguntas = []
-    online._COTAS.clear()
-    monkeypatch.setattr(online, "_reservar", lambda c: {"id": 0, "name": "x.com", "classification": "TRABALHO", "lista_ia": None,
-                                                        "online_resp": None, "investigado_at": None, "pedido": False, "em_infra": False})
-    monkeypatch.setattr(cfg, "web_search_url", "")
+    monkeypatch.setattr(webintel, "_fora_ate", {})
+    with db.conn() as c:
+        did = c.execute("INSERT INTO domains (name, classification, online_claimed_at) VALUES ('busca-falhou.com', 'DESCONHECIDO', now()) "
+                        "RETURNING id").fetchone()["id"]
+    monkeypatch.setattr(online, "_reservar", lambda c: {"id": did, "name": "busca-falhou.com", "classification": "TRABALHO",
+                                                        "investigado_at": None, "online_resp": None, "pedido": False})
 
-    def perguntar(d, cats, buscar, modelo=None, chave=0):
-        perguntas.append((modelo, buscar))
-        raise online.OnlineIndisponivel("429")
-    monkeypatch.setattr(online, "perguntar", perguntar)
-    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)   # (cotas gravadas por outros testes não contam)
-    online.fase([])
-    assert perguntas and all(b for _, b in perguntas) and all(not m.startswith("gemma") for m, _ in perguntas)
+    def falha(*a, **k):
+        raise webintel.BuscaIndisponivel("captcha")
+    monkeypatch.setattr(webintel, "search", falha)
+    perguntou = []
+    monkeypatch.setattr(online, "perguntar", lambda *a, **k: perguntou.append(1))
+    assert online.fase([]) == "unavailable" and not perguntou
+    with db.conn() as c:
+        assert c.execute("SELECT online_claimed_at FROM domains WHERE id = %s", (did,)).fetchone()["online_claimed_at"] is None
+
+"""Etapa "lista": a IA diz a qual lista cada site pertence; certeza -> direto na lista, dúvida -> Para
+revisar; aprovação da sugestão; etapa 4. PostgreSQL real (pgserver); a IA é simulada."""
+
+import pytest
+
+pgserver = pytest.importorskip("pgserver")
+
+TOKEN = "t-lia"
+H = {"Authorization": f"Bearer {TOKEN}"}
+
+
+@pytest.fixture(autouse=True)
+def _sem_exigir_busca(monkeypatch):
+    """Os testes da IA online são do fluxo por níveis (sem a exigência de busca na web de 30/09); quem testa a
+    exigência liga de novo."""
+    from dnsanalyzer import config
+    monkeypatch.setattr(config.settings(), "online_exige_busca", False, raising=False)
+
+
+@pytest.fixture(scope="module")
+def env(tmp_path_factory):
+    import os
+
+    from dnsanalyzer import config, db
+    from dnsanalyzer.migrate import migrate
+
+    srv = pgserver.get_server(str(tmp_path_factory.mktemp("pg")), cleanup_mode="stop")
+    uri = srv.get_uri()
+    antes = {k: os.environ.get(k) for k in ("DATABASE_URL", "API_TOKEN", "DNSANALYZER_ENV")}
+    os.environ.update(DATABASE_URL=uri, API_TOKEN=TOKEN, DNSANALYZER_ENV="/nao-existe")
+    config._settings = None
+    db.close()
+    migrate(uri)
+    with db.conn() as c:
+        _dados(c)
+    from fastapi.testclient import TestClient
+
+    from dnsanalyzer.api import app
+    yield TestClient(app)
+    db.close()
+    for k, v in antes.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    config._settings = None
+    srv.cleanup()
+
+
+# nome -> (classificação, lista da IA, confiança)
+IA = {"chatgpt.com": ("TRABALHO", "ia_chatbots", 1.0), "roblox.com": ("NAO_TRABALHO", "jogos", 0.95),
+      "talvez-jogo.com": ("NAO_TRABALHO", "jogos", 0.6), "erp.com.br": ("TRABALHO", "nenhuma", 1.0),
+      "loja-trab.com": ("TRABALHO", "jogos", 1.0), "whatsapp.com": ("TRABALHO", "mensageiros", 1.0),
+      "tiktok.com": ("NAO_TRABALHO", "redes_sociais", 1.0), "sobra.com": ("NAO_TRABALHO", "pirataria", 0.95),
+      "duvida-sobra.com": ("NAO_TRABALHO", "streaming", 0.5), "ja-listado.com": ("NAO_TRABALHO", "compras", 1.0),
+      "cognito.aws.com": ("TRABALHO", "nuvem_remoto", 1.0), "de-outros.com": ("NAO_TRABALHO", "jogos", 1.0)}
+
+
+def _dados(c):
+    t = c.execute("INSERT INTO tenants (slug, name) VALUES ('a', 'A') RETURNING id").fetchone()["id"]
+    ids = {}
+    for n, (cls, _, _) in IA.items():
+        ids[n] = c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries) "
+                           "VALUES (%s, %s, %s, now(), 10) RETURNING id",
+                           (n, cls, "infraestrutura" if n.startswith("cognito") else "outros")).fetchone()["id"]
+    c.execute("INSERT INTO domains (name, classification, analyzed_at) VALUES ('nao-sei.com', 'DESCONHECIDO', now())")
+    # whatsapp: alguém decidiu "manter liberado" e a empresa A aplica Mensageiros -> não entra sozinho
+    c.execute("INSERT INTO tenant_domains (tenant_id, domain_id, first_seen, last_seen, review_status, reviewed_by, reviewed_at) "
+              "VALUES (%s, %s, now(), now(), 'allowed', 'ana', now())", (t, ids["whatsapp.com"]))
+    c.execute("INSERT INTO policies (scope, lists, services) VALUES ('tenant:%s', '{mensageiros,jogos}', '{}')" % t)
+    c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'sobra.com', 'migração dos grupos antigos'),"
+              "('para_revisar', 'duvida-sobra.com', 'migração dos grupos antigos'), ('infra_bloqueio', 'ja-listado.com', 'op'), ('outros_bloqueios', 'de-outros.com', 'migração')")

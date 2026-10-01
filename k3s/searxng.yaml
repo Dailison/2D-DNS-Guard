@@ -1,0 +1,81 @@
+# SearXNG no k3s do VPS (30/09, pedido do usuário): 3ª instância da busca na web do analisador, com o IP público do
+# VPS (cota própria nos buscadores — as da VM e do PC saem pelo mesmo IP da 2D). Só escuta no IP interno da rede da
+# 2D (10.100.50.202:8888, hostPort com hostIP): NÃO fica exposta no IP público. O analisador (VM 10.100.10.4) a usa
+# em WEB_SEARCH_URL.
+#
+# Aplicar (admin): sudo k3s kubectl apply -f k3s/searxng.yaml
+# Chave secreta (fora do git), uma vez:
+#   sudo k3s kubectl -n dns-guard create secret generic searxng-secret --from-literal=secret_key="$(openssl rand -hex 32)"
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-settings
+  namespace: dns-guard
+data:
+  settings.yml: |
+    use_default_settings: true
+    general:
+      instance_name: "2D SearXNG k3s (uso interno do DNS Guard)"
+    server:
+      limiter: false
+      image_proxy: false
+      method: "GET"
+    search:
+      safe_search: 0
+      formats: [html, json]
+    # o analisador escolhe os buscadores em cada busca (engines=): leve = bing, yahoo, wikipedia; completa (só na
+    # investigação) = + yandex, google, brave. Os desligados aqui (captcha) ainda podem ser pedidos assim.
+    engines:
+      - name: bing
+        disabled: false
+      - name: google
+        disabled: false
+      - name: yahoo
+        disabled: false
+      - name: brave
+        disabled: false
+      - name: yandex
+        disabled: false
+      - name: qwant
+        disabled: true   # captcha em ~100% das buscas (28/09)
+      - name: duckduckgo
+        disabled: true   # captcha (28/09)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  namespace: dns-guard
+  labels: {app: searxng}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # hostPort: a nova só sobe depois que a antiga solta a porta
+  selector:
+    matchLabels: {app: searxng}
+  template:
+    metadata:
+      labels: {app: searxng}
+    spec:
+      containers:
+        - name: searxng
+          image: docker.io/searxng/searxng:2026.9.25-d8ae3abd5   # mesma versão da VM
+          env:
+            - name: SEARXNG_SECRET
+              valueFrom:
+                secretKeyRef: {name: searxng-secret, key: secret_key}
+          ports:
+            - containerPort: 8080
+              hostPort: 8888
+              hostIP: 10.100.50.202   # só a rede interna da 2D
+          volumeMounts:
+            - {name: settings, mountPath: /etc/searxng/settings.yml, subPath: settings.yml, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+      volumes:
+        - name: settings
+          configMap: {name: searxng-settings}

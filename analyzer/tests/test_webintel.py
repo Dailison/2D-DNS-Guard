@@ -65,3 +65,34 @@ def test_clean_sanitizes():
     assert _clean("  A &amp; B\x00\n  C ") == "A & B C"
     assert _clean("x" * 500, 10) == "x" * 10
     assert _clean(None) is None
+
+
+def test_busca_leve_e_completa_pedem_buscadores_diferentes(monkeypatch):
+    """30/09: busca do dia a dia com poucos buscadores; a completa (investigação) com todos, inclusive o Yandex."""
+    from types import SimpleNamespace
+    from dnsanalyzer import webintel
+    pedidos = []
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"results": [], "unresponsive_engines": []}
+    monkeypatch.setattr(webintel.httpx, "get", lambda url, timeout=None, params=None: pedidos.append(params) or R())
+    cfg = SimpleNamespace(web_search_url="http://sx", web_search_results=6, web_search_motores=["bing", "yahoo"])
+    webintel._consulta(cfg, "x")
+    webintel._consulta(cfg, "x", motores=["yandex", "google"])
+    assert pedidos[0]["engines"] == "bing,yahoo" and pedidos[1]["engines"] == "yandex,google"
+
+
+def test_busca_completa_respeita_o_intervalo(monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from dnsanalyzer import webintel
+    monkeypatch.setattr(webintel, "_completa_ultima", [0.0])
+    cfg = SimpleNamespace(web_search_intervalo_completo=0.3)
+    t0 = time.monotonic()
+    webintel.reservar_completa(cfg)
+    webintel.reservar_completa(cfg)
+    assert time.monotonic() - t0 >= 0.29

@@ -755,7 +755,8 @@ def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
     db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
-                    + cfg.whois_workers + ((1 + len(cfg.ollama_extra_urls)) if cfg.investigacao_enabled else 0))
+                    + cfg.whois_workers
+                    + ((1 + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)) if cfg.investigacao_enabled else 0))
     liberar_reservas_orfas()
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
@@ -790,9 +791,12 @@ def run_forever(stop=lambda: False) -> None:
     for i in range(cfg.online_workers):
         threading.Thread(target=_online_worker, args=(stop,), daemon=True, name=f"online-{i}").start()
     if cfg.llm_enabled and cfg.investigacao_enabled:
-        for url in [None] + list(cfg.ollama_extra_urls):   # VM + cada reforço com GPU, em paralelo
-            threading.Thread(target=_investigacao_worker, args=(stop, cats, OllamaClient(url)), daemon=True,
-                             name=f"investigacao-{url or 'vm'}").start()
+        # VM (1 worker: a vaga da análise é uma só) + cada reforço com GPU, com tantos workers quantas análises
+        # simultâneas ele aguenta (01/10: na GPU uma investigação leva ~1m45 e usava ~40% dela; na VM, 10-15 min)
+        for url, n in [(None, 1)] + [(u, _workers_reforco(cfg, u)) for u in cfg.ollama_extra_urls]:
+            for j in range(n):
+                threading.Thread(target=_investigacao_worker, args=(stop, cats, OllamaClient(url)), daemon=True,
+                                 name=f"investigacao-{url or 'vm'}-{j}").start()
         log.info("fase 6 (investigação profunda): com a fila da IA vazia, até %d dias entre reavaliações, aplica com "
                  "confiança >= %.2f", cfg.investigacao_dias, cfg.investigacao_confianca_min)
     log.info("fase 4 (IA online): %s", " | ".join(",".join(f"{m} {r}/min {d}/dia" for m, r, d in n) for n in online.niveis())

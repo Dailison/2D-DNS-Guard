@@ -451,3 +451,38 @@ def test_ritmo_espera_a_vez_so_pelo_intervalo():
     assert r.pode() and not r.pode() and r.pode(esperar=1)   # espera ~0,3 s pela vez
     r.pausar(60)
     assert not r.pode(esperar=1)                              # pausada: não espera
+
+
+def test_sem_nulos_no_que_vai_para_o_banco():
+    """30/09: \\u0000 de página/arquivo binário derrubava a gravação do dossiê (o Postgres recusa)."""
+    assert inv._sem_nulos({"a": "x\x00y", "b": [{"c": "\x00"}], "n": 3}) == {"a": "xy", "b": [{"c": ""}], "n": 3}
+    assert "\x00" not in inv._texto("<p>oi\x00</p>", 100)
+
+
+def test_erro_inesperado_nao_prende_a_reserva(monkeypatch):
+    from dnsanalyzer import classifier, db
+    feitos = []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, p=None):
+            feitos.append(sql)
+            return self
+
+        def fetchone(self):
+            return None if "llm_pending" in feitos[-1] else {"id": 1, "name": "x.com", "total_queries": 1}
+    monkeypatch.setattr(db, "conn", lambda: Conn())
+    monkeypatch.setattr(classifier, "build_dossier", lambda c, d: {})
+    monkeypatch.setattr(classifier, "event", lambda *a, **k: None)
+    monkeypatch.setattr(inv, "_reservar", lambda c: {"id": 1, "name": "x.com", "total_queries": 1})
+
+    def quebra(*a):
+        raise RuntimeError("dado recusado")
+    monkeypatch.setattr(inv, "_investigar", quebra)
+    assert inv.fase(_Cli(), [], []) == "done"
+    assert any("investigacao_claimed_at = NULL, investigado_at = now()" in s for s in feitos)

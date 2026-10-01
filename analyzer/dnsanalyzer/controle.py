@@ -17,7 +17,7 @@ from . import db
 log = logging.getLogger(__name__)
 CHAVES = ("local", "online", "reforco")
 ESPERA_S = 10
-_cache: tuple[float, dict] = (0.0, {})
+_cache: tuple[float, dict] = (float("-inf"), {})   # (30/09: com 0.0, logo após o boot da VM o cache vazio "valia")
 _lock = threading.Lock()
 
 

@@ -862,7 +862,11 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "   extract(epoch from now() - CASE WHEN online_resp IS NOT NULL THEN COALESCE(online_at, first_seen) ELSE first_seen END)::int FROM domains "
             "   WHERE online_claimed_at > now() - interval '10 minutes' AND online_falhas = 0 "
             " UNION ALL SELECT name, total_queries, lista_claimed_at, '1', " + local + " FROM domains" + ult +
-            "   WHERE lista_claimed_at > now() - interval '10 minutes') x ORDER BY t DESC LIMIT 30").fetchall()
+            "   WHERE lista_claimed_at > now() - interval '10 minutes'"
+            # investigação (fase 6) também é da IA local: aparece no "Analisando" da etapa 1 (30/09)
+            " UNION ALL SELECT name, total_queries, investigacao_claimed_at, '6', 'investigacao', "
+            "   extract(epoch from now() - COALESCE(investigado_at, first_seen))::int FROM domains "
+            "   WHERE investigacao_claimed_at > now() - interval '30 minutes') x ORDER BY t DESC LIMIT 30").fetchall()
         vistos: set = set()   # o mesmo domínio pode estar reservado na IA local e na fila de lista: aparece uma vez
         em_analise = [r for r in em_analise if (r["name"], r["fase"] == "4") not in vistos
                       and not vistos.add((r["name"], r["fase"] == "4"))]

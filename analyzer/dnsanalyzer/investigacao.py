@@ -56,7 +56,24 @@ _TITULO = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 
 
 # ------------------------------------------------------------------ utilitários
+def _sem_nulos(x):
+    """O Postgres não aceita \\u0000 em texto/JSON: página ou arquivo binário (30/09: derrubava a gravação do dossiê
+    e a reserva ficava presa)."""
+    if isinstance(x, str):
+        return x.replace("\x00", "")
+    if isinstance(x, dict):
+        return {k: _sem_nulos(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_sem_nulos(v) for v in x]
+    return x
+
+
+def _jsonb(x) -> Jsonb:
+    return Jsonb(_sem_nulos(x))
+
+
 def _texto(html: str, n: int) -> str:
+    html = (html or "").replace("\x00", "")
     html = re.sub(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", html or "")
     return _ESPACO.sub(" ", _TAG.sub(" ", html)).strip()[:n]
 
@@ -862,7 +879,7 @@ def verificar_infra(did: int, nome: str) -> dict:
     out = {"estado": estado, "resumo": "; ".join(partes)}
     with db.conn() as c:
         c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, %s) ON CONFLICT (kind, key) "
-                  "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (VERIFICACAO, nome, Jsonb(out)))
+                  "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (VERIFICACAO, nome, _jsonb(out)))
     return out
 
 
@@ -909,7 +926,7 @@ def coleta_em_cache(nome: str) -> dict | None:
 
 def _guardar_coleta(c, nome: str, fontes: dict) -> None:
     c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, %s) ON CONFLICT (kind, key) "
-              "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (COLETA, nome, Jsonb(fontes)))
+              "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (COLETA, nome, _jsonb(fontes)))
 
 
 def coleta(did: int, limite_s: float = 45) -> dict | None:
@@ -1289,6 +1306,15 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
         event("investigacao_erro", nome, did, detail=f"fase 6 · {e.__class__.__name__}: {str(e)[:200]}")
         log.warning("investigação de %s falhou: %s", nome, e)
         return "unavailable"
+    except Exception as e:  # noqa: BLE001 — erro do próprio domínio (ex.: dado que o banco recusa): não prende a reserva
+        # nem volta p/ o topo da fila (repetiria sem parar): conta como investigado agora, com o erro no dossiê
+        log.exception("investigação de %s: erro inesperado", nome)
+        with db.conn() as c:
+            c.execute("UPDATE domains SET investigacao_claimed_at = NULL, investigado_at = now(), investigacao = %s WHERE id = %s",
+                      (_jsonb({"at": datetime.now(timezone.utc).isoformat(), "aplicado": False,
+                               "sem_aplicar": f"erro: {e.__class__.__name__}: {str(e)[:200]}"}), did))
+        event("investigacao_erro", nome, did, detail=f"fase 6 · {e.__class__.__name__}: {str(e)[:200]}")
+        return "done"
 
 
 SEGUNDA_OPINIAO_MIN = 0.6   # hipótese da investigação a partir daqui (e abaixo do mínimo p/ aplicar) vai p/ a IA online
@@ -1423,7 +1449,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     with db.conn() as c:
         c.execute("UPDATE domains SET investigado_at = now(), investigacao_claimed_at = NULL, investigacao = %s, "
                   "online_pedido_at = CASE WHEN %s THEN now() ELSE online_pedido_at END WHERE id = %s",
-                  (Jsonb(resumo), segunda, did))
+                  (_jsonb(resumo), segunda, did))
         if motivo_nao is None:
             _aplicar(c, d, v, ev, meta_v["modelo"])
     cls = v.get("classification") if motivo_nao is None else d.get("classification")
@@ -1445,11 +1471,11 @@ def _aplicar(c, d: dict, v: dict, ev: list[dict], modelo: str) -> None:
         "UPDATE domains SET classification = %s, category = %s, topic = %s, confidence = %s, classified_by = 'investigacao', "
         " model = %s, reasons = %s || coalesce(reasons, '[]'::jsonb), evidence = %s WHERE id = %s",
         (v["classification"], v.get("category") or d.get("category"), (v.get("service") or "")[:80], v.get("confidence"),
-         modelo, Jsonb(razoes), Jsonb(ev), d["id"]))
+         modelo, _jsonb(razoes), _jsonb(ev), d["id"]))
     c.execute("INSERT INTO classification_history (domain_id, classification, risk_score, work_score, confidence, topic, "
               "reasons, evidence, source, model, note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'investigacao',%s,%s)",
               (d["id"], v["classification"], d.get("risk_score"), d.get("work_score"), v.get("confidence"),
-               (v.get("service") or "")[:80], Jsonb(razoes), Jsonb(ev), modelo, "fase 6: investigação profunda"))
+               (v.get("service") or "")[:80], _jsonb(razoes), _jsonb(ev), modelo, "fase 6: investigação profunda"))
     lista = v["lista"]
     listas_ia.salvar(c, d["id"], lista, float(v.get("lista_confianca") or 0), (v.get("motivo") or "")[:500],
                      (v.get("service") or "")[:200], FONTE, FASE, modelo)

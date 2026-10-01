@@ -28,7 +28,7 @@ def api(tmp_path_factory):
     db.close()
     migrate(uri)
     with db.conn() as c:
-        ensure_partitions(c, AGORA, AGORA)
+        ensure_partitions(c, AGORA - timedelta(days=40), AGORA + timedelta(days=2))   # (dados de dias antes e now(): virada do mês)
         _dados(c)
     from fastapi.testclient import TestClient
 

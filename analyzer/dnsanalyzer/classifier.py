@@ -742,8 +742,11 @@ def liberar_reservas_orfas() -> tuple[int, int]:
     with db.conn() as c:
         n = c.execute("UPDATE domains SET claimed_at = NULL WHERE claimed_at > now() - interval '5 minutes'").rowcount
         m = c.execute("UPDATE domains SET lista_claimed_at = NULL WHERE lista_claimed_at > now() - interval '10 minutes'").rowcount
-    if n or m:
-        log.info("reservas órfãs devolvidas à fila ao iniciar: %d da fase 1, %d da pergunta de lista", n, m)
+        k = c.execute("UPDATE domains SET investigacao_claimed_at = NULL "   # (30/09: ficavam 30 min "em investigação")
+                      "WHERE investigacao_claimed_at > now() - interval '30 minutes'").rowcount
+    if n or m or k:
+        log.info("reservas órfãs devolvidas à fila ao iniciar: %d da fase 1, %d da pergunta de lista, %d da investigação",
+                 n, m, k)
     return n, m
 
 

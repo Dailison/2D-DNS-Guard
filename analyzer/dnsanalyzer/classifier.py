@@ -608,15 +608,16 @@ def _busca_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
     _fase_worker(stop, passo, "worker da busca na web")
 
 
-def _investigacao_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
-    """Fase 6 (29/09): investigação profunda de DESCONHECIDOS/SUSPEITOS, 1 por vez, só com a fila da fase 1 vazia —
-    no reforço com GPU e, sem GPU no ar (ou com o reforço pausado), também na VM (30/09, pedido do usuário). Na VM a
-    investigação usa a única vaga da análise (o atendente virtual tem a dele) e não olha imagens. Começada, vai até o
-    fim mesmo que a fase 1 volte a ter fila (pedido do usuário 30/09); só então a fase 1 retoma a vaga."""
+def _investigacao_worker(stop, cats: list[dict], cliente: OllamaClient) -> None:
+    """Fase 6 (29/09): investigação profunda de DESCONHECIDOS/SUSPEITOS, só com a fila da fase 1 vazia — um worker por
+    máquina, ao mesmo tempo (30/09, pedido do usuário): a VM e cada reforço com GPU (este só no ar e sem o reforço
+    pausado). Na VM usa a única vaga da análise (o atendente virtual tem a dele) e não olha imagens. Começada, vai até
+    o fim mesmo que a fase 1 volte a ter fila; só então a fase 1 retoma a vaga."""
     from . import investigacao
 
     def passo():
-        cliente = reforco.cliente()
+        if cliente.extra and (controle.pausado("reforco") or not cliente.available()[0]):
+            return "idle"
         with db.conn() as c:
             scats = site_categories(c)
         return investigacao.fase(cliente, cats, scats)
@@ -754,7 +755,7 @@ def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
     db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
-                    + cfg.whois_workers + (1 if cfg.investigacao_enabled else 0))
+                    + cfg.whois_workers + ((1 + len(cfg.ollama_extra_urls)) if cfg.investigacao_enabled else 0))
     liberar_reservas_orfas()
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
@@ -789,8 +790,9 @@ def run_forever(stop=lambda: False) -> None:
     for i in range(cfg.online_workers):
         threading.Thread(target=_online_worker, args=(stop,), daemon=True, name=f"online-{i}").start()
     if cfg.llm_enabled and cfg.investigacao_enabled:
-        threading.Thread(target=_investigacao_worker, args=(stop, cats, reforco), daemon=True,
-                         name="investigacao").start()
+        for url in [None] + list(cfg.ollama_extra_urls):   # VM + cada reforço com GPU, em paralelo
+            threading.Thread(target=_investigacao_worker, args=(stop, cats, OllamaClient(url)), daemon=True,
+                             name=f"investigacao-{url or 'vm'}").start()
         log.info("fase 6 (investigação profunda): com a fila da IA vazia, até %d dias entre reavaliações, aplica com "
                  "confiança >= %.2f", cfg.investigacao_dias, cfg.investigacao_confianca_min)
     log.info("fase 4 (IA online): %s", " | ".join(",".join(f"{m} {r}/min {d}/dia" for m, r, d in n) for n in online.niveis())

@@ -339,7 +339,7 @@ def test_fase6_tambem_na_vm(monkeypatch):
     chamadas, passos = [], []
     monkeypatch.setattr(investigacao, "fase", lambda *a, **k: chamadas.append(a) or "done")
     monkeypatch.setattr(classifier, "_fase_worker", lambda stop, passo, nome: passos.append(passo))
-    reforco = SimpleNamespace(cliente=lambda: SimpleNamespace(extra=False))
+    vm = SimpleNamespace(extra=False)
     monkeypatch.setattr(classifier, "site_categories", lambda c: [])
 
     class Conn:
@@ -349,8 +349,12 @@ def test_fase6_tambem_na_vm(monkeypatch):
         def __exit__(self, *a):
             return False
     monkeypatch.setattr(classifier.db, "conn", lambda: Conn())
-    classifier._investigacao_worker(lambda: False, [], reforco)
+    classifier._investigacao_worker(lambda: False, [], vm)
     assert passos[0]() == "done" and len(chamadas) == 1
+    # reforço pausado ou fora do ar: o worker dele fica parado (o da VM segue)
+    monkeypatch.setattr(classifier.controle, "pausado", lambda k: k == "reforco")
+    classifier._investigacao_worker(lambda: False, [], SimpleNamespace(extra=True, available=lambda: (True, "")))
+    assert passos[1]() == "idle" and len(chamadas) == 1
 
 
 def test_evidencias_das_fontes_novas():

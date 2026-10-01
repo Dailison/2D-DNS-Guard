@@ -1410,6 +1410,14 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
             return "idle"
         dossie = build_dossier(c, d)             # só o que já está no cache (fases 1-4)
     nome, did = d["name"], d["id"]
+    try:   # (01/10) não resolve no DNS: não há site p/ investigar — lista DNS Inativo, sem gastar a investigação
+        from . import dnsativo
+        if dnsativo.etapa1(d):
+            from .classifier import event as _ev
+            _ev("investigacao_done", nome, did, d.get("classification"), detail="fase 6 · não resolve no DNS: lista DNS Inativo")
+            return "done"
+    except Exception:  # noqa: BLE001 — o teste nunca derruba a investigação
+        log.exception("teste de DNS de %s", nome)
     try:
         return _investigar(client, cats, scats, d, dossie)
     except (httpx.HTTPError, ValueError) as e:   # Ollama fora / resposta fora do esquema: devolve p/ a fila

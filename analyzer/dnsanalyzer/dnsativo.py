@@ -46,15 +46,15 @@ def consulta(nome: str, resolvedor: str, tipo: str = "A") -> str:
 
 
 def resolve(nome: str) -> bool | None:
-    """True = tem endereço; False = não resolve nos dois resolvedores (A e AAAA); None = não deu p/ saber."""
-    vazios = 0
-    for res in RESOLVEDORES:
-        r = [consulta(nome, res, t) for t in ("A", "AAAA")]
-        if "ip" in r:
-            return True
-        if r == ["vazio", "vazio"]:
-            vazios += 1
-    return False if vazios == len(RESOLVEDORES) else None
+    """True = tem endereço; False = não resolve nos dois resolvedores (A e AAAA); None = não deu p/ saber.
+    Para no primeiro endereço (a maioria resolve na 1ª consulta)."""
+    r = {}
+    for tipo in ("A", "AAAA"):
+        for res in RESOLVEDORES:
+            r[(res, tipo)] = consulta(nome, res, tipo)
+            if r[(res, tipo)] == "ip":
+                return True
+    return False if all(v == "vazio" for v in r.values()) else None
 
 
 def inativo(nomes: list[str]) -> bool:
@@ -111,36 +111,57 @@ def etapa1(drow: dict) -> bool:
         return False
     with db.conn() as c:
         com_ip = _com_ip(c, drow["id"])
-        na_lista = c.execute("SELECT 1 FROM category_lists WHERE category = %s AND domain = %s",
-                             (listas.DNS_INATIVO, nome)).fetchone()
+        em = {r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain = %s", (nome,))}
         nomes = _nomes(c, drow)
-    if com_ip > 0 and not na_lista:   # os clientes recebem IP (nome interno, ou resolve mesmo): não é inativo
+    na_lista, bloqueado = listas.DNS_INATIVO in em, bool(em)
+    # fora de lista de bloqueio os logs valem: o cliente recebe IP (nome interno, ou resolve mesmo) = não é inativo.
+    # Numa lista de bloqueio o Technitium responde 0.0.0.0 e os logs não dizem nada: vale só o DNS público.
+    if com_ip > 0 and not bloqueado:
         return False
     morto = inativo(nomes)
     with db.conn() as c:
-        if morto and (com_ip <= 0 or na_lista):   # (na lista, o Technitium responde 0.0.0.0: os logs não dizem nada)
-            marcar(c, drow, "não resolve no DNS público (sem IP em " + ", ".join(nomes[:3]) + ") nem nos logs em 7 dias")
+        if morto:
+            marcar(c, drow, "não resolve no DNS público (sem IP em " + ", ".join(nomes[:3]) + ")"
+                   + ("" if bloqueado else " nem nos logs em 7 dias"))
             return True
-        if not morto and na_lista:
+        if na_lista:
             desmarcar(c, drow)
     return False
 
 
-def varrer(categoria: str = "nao_identificado", limite: int = 5000) -> dict:
-    """Passada única numa lista (ex.: Não identificados): quem não resolve no DNS público vai p/ DNS Inativo."""
+def varrer(aplicar: bool = False, threads: int = 48) -> dict:
+    """Passada única (01/10, pedido do usuário): todos os DESCONHECIDOS e a lista Não identificados pelo teste de DNS;
+    quem não resolve vai p/ DNS Inativo. Quem não está em lista de bloqueio só entra se os logs também não têm resposta
+    com IP em 7 dias (nome interno do cliente). aplicar=False só conta."""
+    import time
     from concurrent.futures import ThreadPoolExecutor
+    t0 = time.time()
     with db.conn() as c:
-        rows = c.execute("SELECT d.id, d.name, d.kind, d.classification, d.ti_signature FROM category_lists l "
-                         "JOIN domains d ON d.name = l.domain WHERE l.category = %s AND coalesce(d.ti_signature, '') = '' "
-                         "AND NOT d.locked ORDER BY d.total_queries DESC LIMIT %s", (categoria, limite)).fetchall()
-        nomes = {r["id"]: _nomes(c, r) for r in rows}
-    with ThreadPoolExecutor(12) as pool:
-        mortos = list(pool.map(lambda r: inativo(nomes[r["id"]]), rows))
-    n = 0
-    for r, morto in zip(rows, mortos):
-        if morto and not catalog.match(r["name"]):
+        rows = c.execute(
+            "SELECT d.id, d.name, d.kind, d.classification, d.total_queries, "
+            " EXISTS (SELECT 1 FROM category_lists l WHERE l.domain = d.name) AS em_lista FROM domains d "
+            "WHERE d.kind = 'public' AND NOT d.locked AND coalesce(d.ti_signature, '') = '' "
+            " AND (d.classification = 'DESCONHECIDO' OR EXISTS (SELECT 1 FROM category_lists l WHERE l.domain = d.name "
+            "      AND l.category = 'nao_identificado')) ORDER BY d.total_queries DESC").fetchall()
+        ids = [r["id"] for r in rows]
+        fq: dict[int, list[str]] = {}
+        for r in c.execute("SELECT domain_id, name FROM fqdns WHERE domain_id = ANY(%s) ORDER BY domain_id, length(name)", (ids,)):
+            if len(fq.setdefault(r["domain_id"], [])) < 4:
+                fq[r["domain_id"]].append(r["name"])
+        com_ip = {r["domain_id"]: r["n"] for r in c.execute(
+            "SELECT domain_id, sum(ip_q) - sum(sem_ip) AS n FROM query_agg WHERE bucket >= now() - interval '7 days' "
+            "AND domain_id = ANY(%s) GROUP BY 1", (ids,))}
+    nomes = {r["id"]: list(dict.fromkeys([r["name"], "www." + r["name"]] + fq.get(r["id"], []))) for r in rows}
+    # fora de lista de bloqueio, os logs valem: resposta com IP em 7 dias = não testa (resolve p/ o cliente)
+    alvo = [r for r in rows if not catalog.match(r["name"]) and (r["em_lista"] or (com_ip.get(r["id"]) or 0) <= 0)]
+    with ThreadPoolExecutor(threads) as pool:
+        mortos = list(pool.map(lambda r: inativo(nomes[r["id"]]), alvo))
+    ina = [r for r, m in zip(alvo, mortos) if m]
+    if aplicar:
+        for r in ina:
             with db.conn() as c:
                 marcar(c, r, "não resolve no DNS público (sem IP em " + ", ".join(nomes[r["id"]][:3]) + ")")
-            n += 1
-    log.info("DNS inativo: %d de %d da lista %s", n, len(rows), categoria)
-    return {"testados": len(rows), "inativos": n}
+    out = {"candidatos": len(rows), "testados": len(alvo), "inativos": len(ina), "aplicado": aplicar,
+           "segundos": round(time.time() - t0), "mais_acessados": [(r["name"], r["total_queries"]) for r in ina[:15]]}
+    log.info("DNS inativo (varredura): %s", {k: v for k, v in out.items() if k != "mais_acessados"})
+    return out

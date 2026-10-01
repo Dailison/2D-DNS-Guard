@@ -1290,7 +1290,8 @@ FILA_SQL = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') 
             "     AND NOT EXISTS (SELECT 1 FROM tenant_domains t WHERE t.domain_id = domains.id AND t.review_status = 'allowed'))) "
             "AND (investigado_at IS NULL OR investigado_at < now() - make_interval(days => %(dias)s) "
             "     OR investigado_at < analyzed_at)")
-FILA_ORDEM = "(investigado_at IS NULL) DESC, dominio_decidido(id) ASC, total_queries DESC"
+# (01/10, pedido do usuário) os mais acessados primeiro — antes: nunca investigados, depois os sem decisão
+FILA_ORDEM = "total_queries DESC, id"
 
 
 def _reservar(c) -> dict | None:

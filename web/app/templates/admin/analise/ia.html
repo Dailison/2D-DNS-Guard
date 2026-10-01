@@ -165,6 +165,9 @@
   }
   @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin,.fila .spin{animation:none}}
 
+  .eh .fq{font-size:.76rem;color:var(--tx2);white-space:nowrap}
+  .eh .fq b{font-size:1rem;font-weight:800;font-variant-numeric:tabular-nums;color:var(--kp)}
+
   /* menu do Pausar */
   .pz{position:relative}
   .pz-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:230px;padding:6px;display:flex;flex-direction:column;gap:2px}
@@ -293,7 +296,8 @@
     <div class="eh">
       <span class="ico">{{ ico }}</span>
       <h2 title="{{ dsc }}">{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2>
-      {% if et == "e2" %}<span class="tag" :class="onlineOn && !onlineEspera ? 'on' : 'off'" x-show="onlineOn !== null"
+      {% if et == "e2" %}<span class="fq" x-show="onlineFila !== null" title="domínios esperando a IA online"><b x-text="onlineFila"></b> na fila</span>
+      <span class="tag" :class="onlineOn && !onlineEspera ? 'on' : 'off'" x-show="onlineOn !== null"
             :title="onlineEspera || ''" x-text="!onlineOn ? 'sem chave' : onlineEspera ? 'aguardando busca na web' : 'ativa'"></span>{% endif %}
       <div class="lane">
         <span class="lane-h"><span class="lv"></span>Analisando <span class="cnt" x-text="lane.{{ et }}.filter(c => !c.res).length"></span></span>
@@ -441,8 +445,8 @@ document.addEventListener('alpine:init', function () {
     var idx = {e1: {}, e2: {}}, lastId = 0, first = true;
     return {
       LBL: {TRABALHO: 'Trabalho', NAO_TRABALHO: 'Não trabalho', SUSPEITO: 'Suspeito', MALICIOSO: 'Malicioso', DESCONHECIDO: 'Desconhecido'},
-      ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null, onlineEspera: '',
-      kpis: [{v: '–', l: 'na fila local', s: ''}, {v: '–', l: 'na fila online', s: ''},
+      ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null, onlineEspera: '', onlineFila: null,
+      kpis: [{v: '–', l: 'fila local · etapa 1', s: ''}, {v: '–', l: 'fila local · etapa 2', s: ''},
              {v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
       rows: {e1: [], e2: []}, lane: {e1: [], e2: []},
       ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: 'Investigação'},
@@ -622,11 +626,12 @@ document.addEventListener('alpine:init', function () {
         this.ia = {ok: d.llm ? !!llm.ok : null, model: llm.model || '?', txt: llm.ok ? 'no ar' : 'fora' + (llm.detail ? ' · ' + llm.detail : '')};
         this.onlineOn = q.online != null ? !!q.online_on : null;
         this.onlineEspera = q.online_espera || '';
+        this.onlineFila = q.online != null ? q.online : null;
         var antigo = (q.whois || 0) + (q.busca || 0), m = d.eta_seconds ? Math.round(d.eta_seconds / 60) : 0;
         this.kpis = [
-          {v: d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–', l: 'na fila local',
-           s: [q.aguarda ? q.aguarda + ' de pouco acesso' : '', antigo ? antigo + ' do fluxo antigo' : ''].filter(Boolean).join(' · ')},
-          {v: q.online != null ? q.online : '–', l: 'na fila online', s: q.online != null && !q.online_on ? 'sem chave: parada' : ''},
+          {v: d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–', l: 'fila local · etapa 1',
+           s: ['IA local', q.aguarda ? q.aguarda + ' de pouco acesso' : '', antigo ? antigo + ' do fluxo antigo' : ''].filter(Boolean).join(' · ')},
+          {v: q.investigacao != null ? q.investigacao : '–', l: 'fila local · etapa 2', s: 'investigação'},
           {v: d.last_hour ? d.last_hour.done : '–', l: 'na última hora', s: 'domínios analisados na última hora'},
           {v: d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–', l: 'por domínio', s: 'tempo médio da IA local'},
           {v: m ? '~' + (m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2)) : '–', l: 'p/ zerar a fila',

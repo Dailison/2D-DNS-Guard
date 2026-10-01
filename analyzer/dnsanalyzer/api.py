@@ -822,6 +822,20 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
                              "espera_etapa1": not fila1_vazia}}
 
 
+_FILA_INV = [0.0, 0]   # (quando contou, total): a página consulta a cada 3 s e a contagem custa ~0,2 s
+
+
+def _fila_investigacao(c) -> int:
+    """Quantos domínios esperam a investigação (fase 6), com cache de 15 s."""
+    import time
+    from . import investigacao
+    if time.monotonic() - _FILA_INV[0] > 15 or not _FILA_INV[0]:
+        _FILA_INV[1] = c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.FILA_SQL,
+                                 {"dias": settings().investigacao_dias}).fetchone()["n"]
+        _FILA_INV[0] = time.monotonic()
+    return _FILA_INV[1]
+
+
 @app.get("/ai/events", dependencies=[Depends(auth)])
 def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
     """Feed "IA ao vivo": eventos novos (id > after_id), o que está em análise agora e o ritmo."""
@@ -886,6 +900,7 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
         from . import listas_ia, online
         st_on = online.status(c)
         queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": st_on["fila"],
+                 "investigacao": _fila_investigacao(c),   # etapa 2 da fila local (01/10)
                  "online_on": online.habilitado(), "online_espera": st_on.get("espera"),
                  "revisar": c.execute(listas.FASE5_SQL).fetchone()["n"]}
         hour = c.execute("SELECT count(*) AS done, round(avg(seconds)::numeric, 1) AS avg_seconds FROM ai_events "

@@ -807,16 +807,14 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
             " AND d.online_falhas = 0) DESC, " + online._EM_INFRA.format(t="d") + " DESC, " + online._EM_DECISOES + " DESC, "
             " d.lista_duvida DESC, d.total_queries DESC LIMIT %s", (limit,)).fetchall()
         n2 = c.execute("SELECT count(*) AS n FROM domains d WHERE " + fila_on).fetchone()["n"]
-        f6 = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') AND NOT locked AND NOT llm_pending "
-              "AND NOT dominio_decidido(id) AND (investigado_at IS NULL OR investigado_at < now() - make_interval(days => %(dias)s) "
-              " OR investigado_at < analyzed_at)")
+        f6 = investigacao.FILA_SQL
         par = {"dias": settings().investigacao_dias, "n": limit}
         e6 = c.execute(
             "SELECT name, total_queries, classification, "
             " CASE WHEN investigado_at IS NULL THEN 'novo' ELSE 'reavaliacao' END AS entrada, "
             " COALESCE(investigacao_claimed_at > now() - interval '30 minutes', false) AS analisando "
             "FROM domains WHERE " + f6 + " ORDER BY (investigacao_claimed_at > now() - interval '30 minutes') DESC NULLS LAST, "
-            " (investigado_at IS NULL) DESC, total_queries DESC LIMIT %(n)s", par).fetchall()
+            " " + investigacao.FILA_ORDEM + " LIMIT %(n)s", par).fetchall()
         n6 = c.execute("SELECT count(*) AS n FROM domains WHERE " + f6, par).fetchone()["n"]
         fila1_vazia = not c.execute(investigacao._FILA_FASE1).fetchone()
     return {"e1": {"total": n1, "itens": e1}, "e2": {"total": n2, "itens": e2, "habilitado": online.habilitado()},

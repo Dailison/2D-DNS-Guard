@@ -332,16 +332,25 @@ def test_chat_usa_as_mesmas_opcoes_de_carga(monkeypatch):
     assert "num_thread" not in enviado["options"]
 
 
-def test_fase6_so_na_gpu(monkeypatch):
-    """Sem GPU no ar, a fase 6 fica parada (não cai para a VM, que fica p/ a fase 1 e o atendente virtual)."""
+def test_fase6_tambem_na_vm(monkeypatch):
+    """30/09 (pedido do usuário): sem GPU no ar, a fase 6 roda na VM (com a fila da fase 1 vazia — investigacao.fase)."""
     from types import SimpleNamespace
     from dnsanalyzer import classifier, investigacao
     chamadas, passos = [], []
     monkeypatch.setattr(investigacao, "fase", lambda *a, **k: chamadas.append(a) or "done")
     monkeypatch.setattr(classifier, "_fase_worker", lambda stop, passo, nome: passos.append(passo))
     reforco = SimpleNamespace(cliente=lambda: SimpleNamespace(extra=False))
+    monkeypatch.setattr(classifier, "site_categories", lambda c: [])
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(classifier.db, "conn", lambda: Conn())
     classifier._investigacao_worker(lambda: False, [], reforco)
-    assert passos[0]() == "idle" and not chamadas
+    assert passos[0]() == "done" and len(chamadas) == 1
 
 
 def test_evidencias_das_fontes_novas():

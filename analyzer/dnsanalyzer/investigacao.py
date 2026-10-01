@@ -1233,16 +1233,26 @@ _FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND NOT a
                "AND (NOT dominio_decidido(id) OR reanalise_pedida) LIMIT 1")
 
 
+# quem a fase 6 investiga: DESCONHECIDOS/SUSPEITOS sem decisão — e (30/09, pedido do usuário) TODO DESCONHECIDO já
+# decidido (pela IA ou por pessoa), menos os liberados: na whitelist ou com decisão "liberado" (global ou de empresa).
+# A lista posta por pessoa continua valendo (listas_ia.aplicar: a IA não desfaz a correção humana).
+FILA_SQL = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') AND NOT locked AND NOT llm_pending "
+            "AND (NOT dominio_decidido(id) OR (classification = 'DESCONHECIDO' "
+            "     AND NOT EXISTS (SELECT 1 FROM whitelist_domains w WHERE w.domain = domains.name) "
+            "     AND NOT EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = domains.id AND g.status = 'allowed') "
+            "     AND NOT EXISTS (SELECT 1 FROM tenant_domains t WHERE t.domain_id = domains.id AND t.review_status = 'allowed'))) "
+            "AND (investigado_at IS NULL OR investigado_at < now() - make_interval(days => %(dias)s) "
+            "     OR investigado_at < analyzed_at)")
+FILA_ORDEM = "(investigado_at IS NULL) DESC, dominio_decidido(id) ASC, total_queries DESC"
+
+
 def _reservar(c) -> dict | None:
     return c.execute(
         "UPDATE domains SET investigacao_claimed_at = now() WHERE id = ("
-        " SELECT id FROM domains WHERE kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') "
-        "  AND NOT locked AND NOT llm_pending AND NOT dominio_decidido(id) "
+        " SELECT id FROM domains WHERE " + FILA_SQL +
         "  AND (investigacao_claimed_at IS NULL OR investigacao_claimed_at < now() - interval '30 minutes') "
-        "  AND (investigado_at IS NULL OR investigado_at < now() - make_interval(days => %s) "
-        "       OR investigado_at < analyzed_at) "
-        " ORDER BY (investigado_at IS NULL) DESC, total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *",
-        (settings().investigacao_dias,)).fetchone()
+        " ORDER BY " + FILA_ORDEM + " LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *",
+        {"dias": settings().investigacao_dias}).fetchone()
 
 
 def pode_aplicar(v: dict, ti_forte: bool, minimo: float) -> str | None:
@@ -1291,7 +1301,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     from .rules import build_evidence
     cfg = settings()
     nome, did, t0 = d["name"], d["id"], time.monotonic()
-    prazo = cfg.investigacao_tempo_max
+    prazo = cfg.investigacao_tempo_max if client.extra else cfg.investigacao_tempo_max_vm
     # veredito + revisor: com raciocínio na GPU ~1-2 min; na VM (só CPU) a pergunta de ~6 mil tokens é bem mais lenta
     reserva, custo_rodada = (150, 60) if client.extra else (420, 180)
     resta = lambda: prazo - (time.monotonic() - t0)   # noqa: E731
@@ -1324,7 +1334,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
         fontes["buscas"] = fontes.get("buscas") or []
         etapas.append({"etapa": "fontes", "segundos": round(time.monotonic() - t0, 1)})
         # o modelo OLHA o site (pedido do usuário 29/09): captura de tela pública, og:image, logotipo, ícone
-        if tem_visao(client) and resta() > reserva + 90:
+        if client.extra and tem_visao(client) and resta() > reserva + 90:   # (imagens em CPU: lento demais na VM)
             try:
                 imgs = imagens(nome, http, abre_site)
                 if imgs:
@@ -1359,6 +1369,11 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
         for rodada in range(1, MAX_RODADAS + 1):   # rodadas de investigação enquanto houver tempo
             if resta() < reserva + custo_rodada:
                 break
+            if not client.extra:   # na VM: a fase 1 voltou a ter fila -> vai direto ao veredito (libera a vaga)
+                with db.conn() as c:
+                    if c.execute(_FILA_FASE1).fetchone():
+                        etapas.append({"etapa": "fase 1 com fila: rodadas encerradas", "segundos": round(time.monotonic() - t0, 1)})
+                        break
             ev = base + novas_evidencias(len(base), fontes)
             passo, meta = _proximo_passo(client, _dossie_texto(nome, ev, d), rodada, int(resta() - reserva), feitas)
             rodadas.append(meta | {k: passo.get(k) for k in ("hipotese", "confianca", "pronto")})

@@ -610,14 +610,13 @@ def _busca_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
 
 def _investigacao_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
     """Fase 6 (29/09): investigação profunda de DESCONHECIDOS/SUSPEITOS, 1 por vez, só com a fila da fase 1 vazia —
-    SÓ na GPU de um reforço: sem GPU no ar fica parada (na VM, em CPU, levava minutos por chamada e deixava sem vez a
-    fase 1 e o atendente virtual do 2D-Suporte, que usam a VM — LLM_VM_RESERVA)."""
+    no reforço com GPU e, sem GPU no ar (ou com o reforço pausado), também na VM (30/09, pedido do usuário). Na VM a
+    investigação usa a única vaga da análise (o atendente virtual tem a dele), não olha imagens e encerra as rodadas
+    assim que a fase 1 volta a ter fila (investigacao._investigar)."""
     from . import investigacao
 
     def passo():
         cliente = reforco.cliente()
-        if not cliente.extra:
-            return "idle"
         with db.conn() as c:
             scats = site_categories(c)
         return investigacao.fase(cliente, cats, scats)

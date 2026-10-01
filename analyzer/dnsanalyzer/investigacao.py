@@ -1369,11 +1369,6 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
         for rodada in range(1, MAX_RODADAS + 1):   # rodadas de investigação enquanto houver tempo
             if resta() < reserva + custo_rodada:
                 break
-            if not client.extra:   # na VM: a fase 1 voltou a ter fila -> vai direto ao veredito (libera a vaga)
-                with db.conn() as c:
-                    if c.execute(_FILA_FASE1).fetchone():
-                        etapas.append({"etapa": "fase 1 com fila: rodadas encerradas", "segundos": round(time.monotonic() - t0, 1)})
-                        break
             ev = base + novas_evidencias(len(base), fontes)
             passo, meta = _proximo_passo(client, _dossie_texto(nome, ev, d), rodada, int(resta() - reserva), feitas)
             rodadas.append(meta | {k: passo.get(k) for k in ("hipotese", "confianca", "pronto")})

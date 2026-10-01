@@ -611,8 +611,8 @@ def _busca_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
 def _investigacao_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
     """Fase 6 (29/09): investigação profunda de DESCONHECIDOS/SUSPEITOS, 1 por vez, só com a fila da fase 1 vazia —
     no reforço com GPU e, sem GPU no ar (ou com o reforço pausado), também na VM (30/09, pedido do usuário). Na VM a
-    investigação usa a única vaga da análise (o atendente virtual tem a dele), não olha imagens e encerra as rodadas
-    assim que a fase 1 volta a ter fila (investigacao._investigar)."""
+    investigação usa a única vaga da análise (o atendente virtual tem a dele) e não olha imagens. Começada, vai até o
+    fim mesmo que a fase 1 volte a ter fila (pedido do usuário 30/09); só então a fase 1 retoma a vaga."""
     from . import investigacao
 
     def passo():

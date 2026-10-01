@@ -113,6 +113,7 @@ class Settings:
     lista_confianca_min: float
     online_confianca_min: float
     online_enabled: bool
+    online_exige_busca: bool           # (30/09) IA online só com busca na web (grounding); sem modelo com busca, a fila espera
     investigacao_enabled: bool         # fase 6: investigação profunda com a fila da IA vazia
     investigacao_dias: int             # reinvestiga depois de N dias (ou quando o domínio é reanalisado)
     investigacao_confianca_min: float  # aplica classificação/lista só com esta confiança (e serviço reconhecido)
@@ -244,6 +245,7 @@ def load_settings() -> Settings:
         # a IA online responde 0,9 quando sabe e 0,8 p/ "provável" (bem calibrada p/ lista); a local exige 0,9
         online_confianca_min=float(os.environ.get("ONLINE_CONFIANCA_MIN") or 0.8),
         online_enabled=_bool(os.environ.get("ONLINE_ENABLED"), True),   # fase 4 (só com GEMINI_API_KEY)
+        online_exige_busca=_bool(os.environ.get("ONLINE_EXIGE_BUSCA"), True),   # pedido do usuário 30/09
         # fase 6 (29/09): DESCONHECIDO/SUSPEITO investigados a fundo quando a fila da IA esvazia (até ~10 min cada)
         investigacao_enabled=_bool(os.environ.get("INVESTIGACAO_ENABLED"), False),
         investigacao_dias=_int("INVESTIGACAO_DIAS", 14),

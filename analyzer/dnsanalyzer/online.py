@@ -206,8 +206,36 @@ def cota(modelo: str, chave: int = 0) -> _Cota:
 
 
 def _com_busca(modelo: str) -> bool:
-    """Busca no Google (grounding) no plano grátis desta conta: só nos modelos 2.x/2.5 (3.x = 0/dia)."""
-    return modelo.startswith("gemini-2")
+    """O modelo aceita a busca no Google (grounding)? Gemini sim; Gemma pela API não. Se a CONTA tem cota de busca é o
+    Google que diz (429: 30/09, as 3 chaves do plano grátis davam 429 nos 3.x com busca)."""
+    return not modelo.startswith("gemma")
+
+
+BUSCA_PAUSA_S = 1800   # 429 com busca: o modelo/chave só tenta buscar de novo daqui a 30 min (não reserva domínio à toa)
+
+
+def niveis_com_busca() -> tuple[list, list]:
+    """(volume, reforço) só com modelos que fazem busca na web — ONLINE_EXIGE_BUSCA (pedido do usuário 30/09)."""
+    vol, reforco, busca = niveis()
+    vol = [m for m in (vol + busca) if _com_busca(m[0])]
+    reforco = [m for m in reforco if _com_busca(m[0])]
+    return list(dict.fromkeys(vol)), list(dict.fromkeys(reforco))
+
+
+def espera_busca(c=None) -> str | None:
+    """Motivo de a fila online esperar (exige busca na web e não há modelo/cota de busca), ou None."""
+    cfg = settings()
+    if not cfg.online_exige_busca:
+        return None
+    vol, reforco = niveis_com_busca()
+    if not (vol or reforco):
+        return "nenhum modelo com busca na web configurado"
+    agora = time.time()
+    if not any(agora >= cota(m, k).pausa_ate for m, _, _ in vol + reforco for k in range(len(_chaves()))):
+        return "sem cota de busca na web (plano grátis): aguardando"
+    if c is not None and _buscas_no_mes(c) >= cfg.gemini_grounding_month:
+        return f"limite de {cfg.gemini_grounding_month} buscas no mês atingido"
+    return None
 
 
 def _evento(d: dict, cls: str, lista: str, conf: float, servico: str, meta: dict) -> None:
@@ -386,7 +414,7 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
             ct.aprender_limite(limite)
             ct.pausar_dia()
         else:
-            ct.pausar(espera)
+            ct.pausar(BUSCA_PAUSA_S if buscar else espera)
         raise OnlineIndisponivel(f"Gemini {qual}: cota {'do dia' if dia else 'do minuto'} esgotada (429)")
     if r.status_code >= 500:   # sobrecarga do modelo
         ct.pausar(90)
@@ -516,6 +544,8 @@ def fase(categorias: list[str]) -> str:
         return "idle"
     cfg = settings()
     with db.conn() as c:
+        if espera_busca(c):   # exige busca na web e não há modelo/cota: a fila espera (sem reservar domínio)
+            return "unavailable"
         d = _reservar(c)
         pode_buscar = (d is not None and d["classification"] == "DESCONHECIDO" and cfg.gemini_grounding
                        and _buscas_no_mes(c) < cfg.gemini_grounding_month)
@@ -537,9 +567,14 @@ def fase(categorias: list[str]) -> str:
     # sobrescrita, então não dá p/ ver discordância — a segunda opinião (modelo maior) é obrigatória
     revalidar = (bool(d.get("online_resp")) and not (d.get("online_resp") or {}).get("erro")) or bool(d.get("pedido"))
     vol, reforco, busca = niveis()
+    etapas = ((vol, False), (reforco, False), (busca if pode_buscar else [], True))
+    if cfg.online_exige_busca:   # as duas etapas com busca na web (pedido do usuário 30/09)
+        vol, reforco = niveis_com_busca()
+        busca = []
+        etapas = ((vol, True), (reforco, True))
     obj = meta = None
     invalidas: list[str] = []
-    for nivel, buscar in ((vol, False), (reforco, False), (busca if pode_buscar else [], True)):
+    for nivel, buscar in etapas:
         # próximo nível (modelo maior) se não há resposta, se ela não tem certeza ou se DISCORDA da IA local
         if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")) \
                 and not (revalidar and not meta.get("nivel_reforco")) \
@@ -623,6 +658,8 @@ def status(c) -> dict:
     zera = (agora_pt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     with db.conn() as c2:
         buscas = _buscas_no_mes(c2)
-    return {**r, "habilitado": habilitado(), "modelos": modelos, "buscas_google_mes": buscas,
+    with db.conn() as c3:
+        espera = espera_busca(c3) if habilitado() else None
+    return {**r, "habilitado": habilitado(), "espera": espera, "modelos": modelos, "buscas_google_mes": buscas,
             "limite_buscas_mes": cfg.gemini_grounding_month, "chaves": len(_chaves()),
             "cota_zera_em": zera.astimezone(timezone.utc).isoformat()}

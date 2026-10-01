@@ -9,6 +9,14 @@ TOKEN = "t-lia"
 H = {"Authorization": f"Bearer {TOKEN}"}
 
 
+@pytest.fixture(autouse=True)
+def _sem_exigir_busca(monkeypatch):
+    """Os testes da IA online são do fluxo por níveis (sem a exigência de busca na web de 30/09); quem testa a
+    exigência liga de novo."""
+    from dnsanalyzer import config
+    monkeypatch.setattr(config.settings(), "online_exige_busca", False, raising=False)
+
+
 @pytest.fixture(scope="module")
 def env(tmp_path_factory):
     import os
@@ -1396,3 +1404,42 @@ def test_camuflagem_e_traducao_do_google_sem_ia(env, monkeypatch):
         wl = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'h3gu39r4.com'").fetchone()
     assert em == {("ameaca", "h3gu39r4.com"), ("apostas", "www-cassino--x-com.translate.goog")}, em
     assert not wl, "camuflagem nunca vai p/ a whitelist"
+
+
+def test_ia_online_exige_busca_na_web(env, monkeypatch):
+    """30/09 (pedido do usuário): as duas etapas da IA online só com busca na web; sem modelo/cota de busca, a fila espera
+    sem reservar domínio."""
+    import time
+    from dnsanalyzer import config, db, online
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "gemini_api_key", "k")
+    monkeypatch.setattr(cfg, "online_exige_busca", True)
+    monkeypatch.setattr(cfg, "gemini_modelos", [("gemini-3.5-flash-lite", 10, 500)])
+    monkeypatch.setattr(cfg, "gemini_reforco", [("gemma-4-31b-it", 10, 500), ("gemini-3.8-flash", 5, 20)])
+    monkeypatch.setattr(cfg, "gemini_busca", [])
+    vol, reforco = online.niveis_com_busca()
+    assert [m for m, _, _ in vol] == ["gemini-3.5-flash-lite"] and [m for m, _, _ in reforco] == ["gemini-3.8-flash"]
+    online._COTAS.clear()
+    with db.conn() as c:
+        assert online.espera_busca(c) is None
+    for m in ("gemini-3.5-flash-lite", "gemini-3.8-flash"):   # 429 com busca em todos: espera
+        for k in range(len(online._chaves())):
+            online.cota(m, k).pausar(online.BUSCA_PAUSA_S)
+    with db.conn() as c:
+        assert "sem cota de busca" in online.espera_busca(c)
+    reservou = []
+    monkeypatch.setattr(online, "_reservar", lambda c: reservou.append(1))
+    assert online.fase([]) == "unavailable" and not reservou
+    perguntas = []
+    online._COTAS.clear()
+    monkeypatch.setattr(online, "_reservar", lambda c: {"id": 0, "name": "x.com", "classification": "TRABALHO", "lista_ia": None,
+                                                        "online_resp": None, "investigado_at": None, "pedido": False, "em_infra": False})
+    monkeypatch.setattr(cfg, "web_search_url", "")
+
+    def perguntar(d, cats, buscar, modelo=None, chave=0):
+        perguntas.append((modelo, buscar))
+        raise online.OnlineIndisponivel("429")
+    monkeypatch.setattr(online, "perguntar", perguntar)
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)   # (cotas gravadas por outros testes não contam)
+    online.fase([])
+    assert perguntas and all(b for _, b in perguntas) and all(not m.startswith("gemma") for m, _ in perguntas)

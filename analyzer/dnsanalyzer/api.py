@@ -884,8 +884,9 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                           " AND whois_at IS NULL AND NOT llm_pending AND kind='public' "
                           " AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS whois FROM domains").fetchone()
         from . import listas_ia, online
-        queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": online.status(c)["fila"],
-                 "online_on": online.habilitado(),
+        st_on = online.status(c)
+        queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": st_on["fila"],
+                 "online_on": online.habilitado(), "online_espera": st_on.get("espera"),
                  "revisar": c.execute(listas.FASE5_SQL).fetchone()["n"]}
         hour = c.execute("SELECT count(*) AS done, round(avg(seconds)::numeric, 1) AS avg_seconds FROM ai_events "
                          "WHERE kind='llm_done' AND created_at > now() - interval '1 hour'").fetchone()

@@ -293,7 +293,8 @@
     <div class="eh">
       <span class="ico">{{ ico }}</span>
       <h2 title="{{ dsc }}">{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2>
-      {% if et == "e2" %}<span class="tag" :class="onlineOn ? 'on' : 'off'" x-show="onlineOn !== null" x-text="onlineOn ? 'ativa' : 'sem chave'"></span>{% endif %}
+      {% if et == "e2" %}<span class="tag" :class="onlineOn && !onlineEspera ? 'on' : 'off'" x-show="onlineOn !== null"
+            :title="onlineEspera || ''" x-text="!onlineOn ? 'sem chave' : onlineEspera ? 'aguardando busca na web' : 'ativa'"></span>{% endif %}
       <div class="lane">
         <span class="lane-h"><span class="lv"></span>Analisando <span class="cnt" x-text="lane.{{ et }}.filter(c => !c.res).length"></span></span>
         <template x-for="c in lane.{{ et }}" :key="c.key">
@@ -440,7 +441,7 @@ document.addEventListener('alpine:init', function () {
     var idx = {e1: {}, e2: {}}, lastId = 0, first = true;
     return {
       LBL: {TRABALHO: 'Trabalho', NAO_TRABALHO: 'Não trabalho', SUSPEITO: 'Suspeito', MALICIOSO: 'Malicioso', DESCONHECIDO: 'Desconhecido'},
-      ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null,
+      ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null, onlineEspera: '',
       kpis: [{v: '–', l: 'na fila local', s: ''}, {v: '–', l: 'na fila online', s: ''},
              {v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
       rows: {e1: [], e2: []}, lane: {e1: [], e2: []},
@@ -620,6 +621,7 @@ document.addEventListener('alpine:init', function () {
         var q = d.queue || {}, llm = d.llm || {};
         this.ia = {ok: d.llm ? !!llm.ok : null, model: llm.model || '?', txt: llm.ok ? 'no ar' : 'fora' + (llm.detail ? ' · ' + llm.detail : '')};
         this.onlineOn = q.online != null ? !!q.online_on : null;
+        this.onlineEspera = q.online_espera || '';
         var antigo = (q.whois || 0) + (q.busca || 0), m = d.eta_seconds ? Math.round(d.eta_seconds / 60) : 0;
         this.kpis = [
           {v: d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–', l: 'na fila local',

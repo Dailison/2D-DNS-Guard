@@ -310,15 +310,20 @@ def test_historico_do_dominio(api):
     assert api.get("/domains/nunca-visto.com/historico", headers=H).status_code == 404
 
 
-def test_dominios_inexistentes_saem_do_fluxo(api):
-    from dnsanalyzer import db, listas
+def test_dominios_inexistentes_saem_do_fluxo(api, monkeypatch):
+    """01/10 (destino único): os logs dizem que não resolve e o teste ativo confirma -> lista de bloqueio DNS Inativo
+    (antes: whitelist "Sem resposta" só pelos logs). Domínio que só recebe e-mail (MX) não é inativo."""
+    from dnsanalyzer import db, dnsativo, listas
+    mx = {"soemail-teste.com": "ip"}
+    monkeypatch.setattr(dnsativo, "consulta", lambda nome, res, tipo="A": mx.get(nome, "vazio") if tipo == "MX" else "vazio")
     with db.conn() as c:
         t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
         cl = c.execute("SELECT id FROM clients WHERE tenant_id=%s LIMIT 1", (t,)).fetchone()["id"]
         ids = {}
         # (nome, consultas, NXDOMAIN, consultas A, A sem IP, feed) — semip-teste.com = hbgamesnm.com: NoError sem IP
         for n, q, nx, ipq, semip, ti in (("naoexiste-teste.com", 10, 10, 0, 0, ""), ("existe-teste.com", 10, 1, 5, 1, ""),
-                                         ("dga-teste.com", 10, 10, 0, 0, "urlhaus"), ("semip-teste.com", 10, 0, 6, 6, "")):
+                                         ("dga-teste.com", 10, 10, 0, 0, "urlhaus"), ("semip-teste.com", 10, 0, 6, 6, ""),
+                                         ("soemail-teste.com", 10, 0, 6, 6, "")):
             ids[n] = c.execute("INSERT INTO domains (name, classification, ti_signature, llm_pending) VALUES (%s, 'DESCONHECIDO', %s, true) RETURNING id",
                                (n, ti)).fetchone()["id"]
             f = c.execute("INSERT INTO fqdns (name, domain_id) VALUES (%s, %s) RETURNING id", ("x." + n, ids[n])).fetchone()["id"]
@@ -327,14 +332,16 @@ def test_dominios_inexistentes_saem_do_fluxo(api):
         c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('para_revisar', 'naoexiste-teste.com', 'IA com dúvida (x)')")
         r = listas.marcar_inexistentes(c)
         k = {row["name"]: (row["kind"], row["llm_pending"]) for row in c.execute("SELECT name, kind, llm_pending FROM domains WHERE id = ANY(%s)", (list(ids.values()),))}
-        em = c.execute("SELECT 1 FROM category_lists WHERE domain='naoexiste-teste.com'").fetchone()
-    assert sorted(r["inexistentes"]) == ["naoexiste-teste.com", "semip-teste.com"] and not em
+        em = {row["category"] for row in c.execute("SELECT category FROM category_lists WHERE domain='naoexiste-teste.com'")}
+    assert sorted(r["inexistentes"]) == ["naoexiste-teste.com", "semip-teste.com"] and em == {"dns_inativo"}, "saiu de Para revisar"
     assert k == {"naoexiste-teste.com": ("inexistente", False), "existe-teste.com": ("public", True), "dga-teste.com": ("public", True),
-                 "semip-teste.com": ("inexistente", False)}
-    with db.conn() as c:   # vão p/ a whitelist "Sem resposta" (Domínios liberados), sem publicar
-        wl = {row["domain"]: row["publicar"] for row in c.execute("SELECT domain, publicar FROM whitelist_domains WHERE category = 'sem_resposta'")}
-        assert wl.get("naoexiste-teste.com") is False and wl.get("semip-teste.com") is False, wl
-        # voltou a resolver (≥ 3 respostas com IP no último dia): sai de "Sem resposta" e volta à fase 1
+                 "semip-teste.com": ("inexistente", False), "soemail-teste.com": ("public", True)}
+    with db.conn() as c:   # vão p/ a lista de bloqueio DNS Inativo (nada na whitelist "Sem resposta")
+        bl = {row["domain"] for row in c.execute("SELECT domain FROM category_lists WHERE category = 'dns_inativo'")}
+        assert {"naoexiste-teste.com", "semip-teste.com"} <= bl and "soemail-teste.com" not in bl, bl
+        assert not c.execute("SELECT 1 FROM whitelist_domains WHERE category = 'sem_resposta' AND domain LIKE '%%-teste.com'").fetchone()
+        assert listas.marcar_inexistentes(c)["inexistentes"] == [], "o que o teste ativo não confirmou não é testado de novo em 24 h"
+        # voltou a resolver (≥ 3 respostas com IP no último dia): volta à fase 1 (o teste da etapa 1 tira da lista)
         f = c.execute("SELECT id FROM fqdns WHERE name = 'x.semip-teste.com'").fetchone()["id"]
         c.execute("UPDATE query_agg SET ip_q = ip_q + 5 WHERE fqdn_id = %s", (f,))
         r2 = listas.marcar_inexistentes(c)
@@ -343,14 +350,16 @@ def test_dominios_inexistentes_saem_do_fluxo(api):
     assert "semip-teste.com" in r2["voltaram"] and d["kind"] == "public" and d["needs_analysis"] and not ainda
 
 
-def test_nao_resolve_nem_chega_na_ia(api):
-    """Fase A (regras, antes da IA): domínio novo cujas consultas A voltaram todas sem IP sai do fluxo na hora."""
-    from dnsanalyzer import classifier, db
+def test_nao_resolve_nem_chega_na_ia(api, monkeypatch):
+    """Fase A (regras, antes da IA): domínio novo cujas consultas A voltaram todas sem IP e que o teste ativo confirma
+    sai do fluxo na hora, p/ a lista DNS Inativo (01/10); sem confirmar (resolve no DNS público), segue a análise."""
+    from dnsanalyzer import classifier, db, dnsativo
+    monkeypatch.setattr(dnsativo, "consulta", lambda nome, res, tipo="A": "ip" if "publico" in nome and tipo == "A" else "vazio")
     with db.conn() as c:
         t = c.execute("SELECT id FROM tenants WHERE slug='a'").fetchone()["id"]
         cl = c.execute("SELECT id FROM clients WHERE tenant_id=%s LIMIT 1", (t,)).fetchone()["id"]
         ids = {}
-        for n, ipq, semip in (("novo-semip.com", 2, 2), ("novo-comip.com", 2, 0)):
+        for n, ipq, semip in (("novo-semip.com", 2, 2), ("novo-comip.com", 2, 0), ("novo-publico.com", 2, 2)):
             ids[n] = c.execute("INSERT INTO domains (name, kind, needs_analysis, total_queries) VALUES (%s, 'public', true, 2) RETURNING id",
                                (n,)).fetchone()["id"]
             f = c.execute("INSERT INTO fqdns (name, domain_id) VALUES (%s, %s) RETURNING id", (n, ids[n])).fetchone()["id"]
@@ -360,9 +369,10 @@ def test_nao_resolve_nem_chega_na_ia(api):
     with db.conn() as c:
         k = {r["name"]: (r["kind"], r["llm_pending"]) for r in c.execute("SELECT name, kind, llm_pending FROM domains WHERE id = ANY(%s)",
                                                                          (list(ids.values()),))}
-        wl = c.execute("SELECT category FROM whitelist_domains WHERE domain = 'novo-semip.com'").fetchone()
-    assert k["novo-semip.com"] == ("inexistente", False) and wl and wl["category"] == "sem_resposta", (k, wl)
-    assert k["novo-comip.com"][0] == "public"
+        bl = c.execute("SELECT category FROM category_lists WHERE domain = 'novo-semip.com'").fetchone()
+        wl = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'novo-semip.com'").fetchone()
+    assert k["novo-semip.com"] == ("inexistente", False) and bl and bl["category"] == "dns_inativo" and not wl, (k, bl)
+    assert k["novo-comip.com"][0] == "public" and k["novo-publico.com"][0] == "public", "resolve no DNS público: análise normal"
 
 
 # ---------------------------------------------------------------- fase 5

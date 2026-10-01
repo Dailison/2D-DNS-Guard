@@ -184,13 +184,20 @@ def phase_a(limit: int = 2000) -> int:
             dossier = build_dossier(c, drow, with_rdap=False)
             rule = evaluate(dossier)
             if drow["id"] in nao_resolve and drow["kind"] == "public" and not dossier.get("ti_hits") \
-                    and rule.classification not in ("SUSPEITO", "MALICIOSO"):
-                save(c, drow, dossier, rule, rules_only(rule, False), False, None)
-                c.execute("UPDATE domains SET kind = 'inexistente', llm_pending = false WHERE id = %s", (drow["id"],))
-                listas.sem_resposta(c, [drow["name"]], "não resolve no DNS (log do Technitium): fora da IA")
-                tally["não resolve (Sem resposta)"] += 1
-                n += 1
-                continue
+                    and rule.classification not in ("SUSPEITO", "MALICIOSO") and not dossier.get("catalog"):
+                # (01/10) destino único: os logs dizem que não resolve e o teste ativo confirma -> lista DNS Inativo
+                # (antes: whitelist "Sem resposta" só pelos logs). Não confirmou: análise normal.
+                try:
+                    morto = dnsativo.confirmar(c, drow)
+                except Exception:  # noqa: BLE001 — o teste nunca derruba as regras
+                    log.exception("teste de DNS de %s", drow["name"])
+                    morto = False
+                if morto:
+                    save(c, drow, dossier, rule, rules_only(rule, False), False, None)
+                    c.execute("UPDATE domains SET kind = 'inexistente', llm_pending = false WHERE id = %s", (drow["id"],))
+                    tally["não resolve (DNS Inativo)"] += 1
+                    n += 1
+                    continue
             skip_llm = (not rule.needs_llm) or (cfg.llm_skip_hosting_subdomains and dossier.get("private_suffix"))
             # IA só se for necessária E se as evidências relevantes mudaram desde a última IA
             already = drow["classified_by"] == "llm" and drow["evidence_hash"] == rule.evidence_hash

@@ -143,17 +143,16 @@ def sem_resposta(c, nomes: list[str], motivo: str) -> None:
 
 def marcar_inexistentes(c) -> dict:
     """Domínio que não resolve (7 dias, ≥ 3 consultas: ≥ 95% NXDOMAIN, ou ≥ 95% das consultas A sem IP — NoError
-    vazio, SERVFAIL; erro de digitação, site desativado, nome local vazado): kind = 'inexistente' — sai da fila da IA
-    e da Decisão Humana e vai p/ a whitelist "Sem resposta". Em feed de ameaça fica no fluxo (DGA de malware também não
-    resolve; tem o alerta dga_burst). Voltou a resolver (último dia com ≥ 3 respostas com IP) -> fase 1 de novo."""
-    from . import eventos, whitelist
-    novos = c.execute(
-        "UPDATE domains d SET kind = 'inexistente', llm_pending = false, lista_duvida = false, needs_analysis = false "
-        "WHERE d.kind = 'public' AND coalesce(d.ti_signature, '') = '' AND d.id IN (" + NAO_RESOLVE_SQL + ") "
-        "RETURNING d.id, d.name").fetchall()
+    vazio, SERVFAIL; erro de digitação, site desativado) e que o teste ativo confirma (dnsativo: DNS público, sem MX):
+    kind = 'inexistente' — sai da fila da IA e vai p/ a lista de bloqueio DNS Inativo. Em feed de ameaça fica no fluxo
+    (DGA de malware também não resolve; tem o alerta dga_burst). Voltou a resolver (último dia com ≥ 3 respostas com
+    IP) -> fase 1 de novo, onde o teste de DNS o tira da lista."""
+    from . import dnsativo, eventos, whitelist
+    # (01/10) destino único: os candidatos dos logs passam pelo teste ativo (DNS público + MX) e, confirmados, vão p/ a
+    # lista de bloqueio DNS Inativo — antes iam, só pelos logs, p/ a whitelist "Sem resposta"
+    novos = [{"name": n} for n in dnsativo.dos_logs(c)]
     if novos:
-        sem_resposta(c, [r["name"] for r in novos], "não resolve no DNS (7 dias: NXDOMAIN ou resposta sem IP)")
-        eventos.registrar("decisao", None, detail="|" + f"{len(novos)} domínio(s) que não resolvem no DNS fora da IA: "
+        eventos.registrar("decisao", None, detail="|" + f"{len(novos)} domínio(s) que não resolvem no DNS: lista DNS Inativo: "
                           + ", ".join(r["name"] for r in novos[:15]) + (" …" if len(novos) > 15 else ""), origem="regras")
     voltaram = c.execute(
         "UPDATE domains d SET kind = 'public', needs_analysis = true, revisado_at = NULL, lista_wl = NULL, "

@@ -29,7 +29,8 @@ _IP = re.compile(r"\sIN\s+(?:A|AAAA|MX)\s+\S+")
 
 
 def consulta(nome: str, resolvedor: str, tipo: str = "A") -> str:
-    """'ip' (respondeu com endereço), 'vazio' (NXDOMAIN ou resposta sem endereço) ou 'erro' (não deu p/ saber)."""
+    """'ip' (respondeu com endereço), 'vazio' (NXDOMAIN ou resposta sem endereço), 'falha' (o resolvedor respondeu
+    SERVFAIL/REFUSED: o DNS do domínio está quebrado) ou 'erro' (timeout/rede: não deu p/ saber)."""
     if not shutil.which("dig"):
         return "erro"
     try:
@@ -42,7 +43,7 @@ def consulta(nome: str, resolvedor: str, tipo: str = "A") -> str:
         return "erro"
     if _IP.search(r.stdout):
         return "ip"
-    return "vazio" if m.group(1) in ("NXDOMAIN", "NOERROR") else "erro"   # SERVFAIL/REFUSED: não dá p/ afirmar
+    return "vazio" if m.group(1) in ("NXDOMAIN", "NOERROR") else "falha"
 
 
 def resolve(nome: str) -> bool | None:
@@ -54,7 +55,8 @@ def resolve(nome: str) -> bool | None:
             r[(res, tipo)] = consulta(nome, res, tipo)
             if r[(res, tipo)] == "ip":
                 return True
-    return False if all(v == "vazio" for v in r.values()) else None
+    # sem endereço em TODAS as consultas dos dois resolvedores (vazio, ou DNS do domínio quebrado): não resolve
+    return False if all(v in ("vazio", "falha") for v in r.values()) else None
 
 
 def inativo(nomes: list[str]) -> bool:
@@ -62,7 +64,7 @@ def inativo(nomes: list[str]) -> bool:
     for n in dict.fromkeys(nomes):
         if resolve(n) is not False:   # resolveu, ou não deu p/ saber: não é inativo
             return False
-    return bool(nomes) and all(consulta(nomes[0], r, "MX") == "vazio" for r in RESOLVEDORES)
+    return bool(nomes) and all(consulta(nomes[0], r, "MX") in ("vazio", "falha") for r in RESOLVEDORES)
 
 
 def _nomes(c, drow: dict) -> list[str]:
@@ -127,6 +129,64 @@ def etapa1(drow: dict) -> bool:
         if na_lista:
             desmarcar(c, drow)
     return False
+
+
+TESTE = "dns_teste"   # lookup_cache.kind: candidato dos logs que o teste ativo NÃO confirmou (não testa de novo em 24 h)
+
+
+def confirmar(c, drow: dict) -> bool:
+    """Os logs dizem que o nome não resolve; o teste ativo (DNS público + MX) confirma? Confirmado: lista DNS Inativo.
+    (01/10, pedido do usuário: destino único — antes os logs sozinhos mandavam p/ a whitelist "Sem resposta", que nunca
+    era publicada; p/ uma lista de BLOQUEIO os logs não bastam: domínio só de e-mail tem MX e não tem site.)"""
+    if (drow.get("ti_signature") or "") or catalog.match(drow["name"]):
+        return False
+    nomes = _nomes(c, drow)
+    if not inativo(nomes):
+        c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, '{}') ON CONFLICT (kind, key) "
+                  "DO UPDATE SET fetched_at = now()", (TESTE, drow["name"]))
+        return False
+    marcar(c, drow, "não resolve no DNS (logs do Technitium e DNS público, sem IP em " + ", ".join(nomes[:3]) + ")")
+    return True
+
+
+def dos_logs(c, limite: int = 150) -> list[str]:
+    """Ciclo de manutenção: domínios que os logs dizem não resolver (7 dias) passam pelo teste ativo; os confirmados
+    vão p/ DNS Inativo. Devolve os nomes marcados."""
+    rows = c.execute(
+        "SELECT d.id, d.name, d.kind, d.classification, d.ti_signature FROM domains d "
+        "WHERE d.kind = 'public' AND NOT d.locked AND coalesce(d.ti_signature, '') = '' AND d.id IN (" + listas.NAO_RESOLVE_SQL + ") "
+        " AND NOT EXISTS (SELECT 1 FROM lookup_cache l WHERE l.kind = %s AND l.key = d.name AND l.fetched_at > now() - interval '1 day') "
+        "ORDER BY d.total_queries DESC LIMIT %s", (TESTE, limite)).fetchall()
+    return [r["name"] for r in rows if confirmar(c, r)]
+
+
+def migrar_sem_resposta(aplicar: bool = False, threads: int = 48) -> dict:
+    """Passada única (01/10): os que o mecanismo antigo pôs na whitelist "Sem resposta" pelo teste ativo — não resolve:
+    DNS Inativo; resolve (ou recebe e-mail): sai de "Sem resposta" e volta p/ a análise normal."""
+    from concurrent.futures import ThreadPoolExecutor
+    with db.conn() as c:
+        rows = c.execute("SELECT d.id, d.name, d.kind, d.classification, d.ti_signature FROM whitelist_domains w "
+                         "JOIN domains d ON d.name = w.domain WHERE w.category = 'sem_resposta' ORDER BY d.total_queries DESC").fetchall()
+        ids = [r["id"] for r in rows]
+        fq: dict[int, list[str]] = {}
+        for r in c.execute("SELECT domain_id, name FROM fqdns WHERE domain_id = ANY(%s) ORDER BY domain_id, length(name)", (ids,)):
+            if len(fq.setdefault(r["domain_id"], [])) < 4:
+                fq[r["domain_id"]].append(r["name"])
+    nomes = {r["id"]: list(dict.fromkeys([r["name"], "www." + r["name"]] + fq.get(r["id"], []))) for r in rows}
+    with ThreadPoolExecutor(threads) as pool:
+        mortos = list(pool.map(lambda r: inativo(nomes[r["id"]]) and not catalog.match(r["name"]), rows))
+    ina = [r for r, m in zip(rows, mortos) if m]
+    vivos = [r for r, m in zip(rows, mortos) if not m]
+    if aplicar:
+        with db.conn() as c:
+            listas.contexto(c, POR, "whitelist Sem resposta -> DNS Inativo (destino único)")
+            c.execute("DELETE FROM whitelist_domains WHERE category = 'sem_resposta' AND domain = ANY(%s)", ([r["name"] for r in rows],))
+            for r in ina:
+                marcar(c, r, "não resolve no DNS (logs do Technitium e DNS público, sem IP em " + ", ".join(nomes[r["id"]][:3]) + ")")
+            c.execute("UPDATE domains SET kind = 'public', needs_analysis = true, lista_wl = NULL, revisado_at = NULL "
+                      "WHERE id = ANY(%s)", ([r["id"] for r in vivos],))
+    return {"sem_resposta": len(rows), "inativos": len(ina), "voltam_p_analise": len(vivos), "aplicado": aplicar,
+            "exemplos_que_resolvem": [r["name"] for r in vivos[:12]]}
 
 
 def varrer(aplicar: bool = False, threads: int = 48) -> dict:

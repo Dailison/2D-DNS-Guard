@@ -71,6 +71,11 @@ O analisador apenas publica as listas em texto, e o Technitium as baixa.
 serviço e de todas as whitelists. O console sincroniza por *read-modify-write*: faz backup da
 configuração antes (`technitium_config_backups`) e valida depois.
 
+**Serviço liberado só para um IP** (*Domínios liberados* → serviço → *IPs que liberam…*): o IP (ou faixa)
+ganha um grupo próprio, `Empresa: <nome> · IP <ip>`, com a política da rede dele (unidade > empresa >
+padrão) mais o serviço. Os dados são os mesmos dos IPs liberados (tabela `ip_servicos`; histórico em
+`liberado_log`). Revogar apaga o grupo e o IP volta para a rede.
+
 **Rotinas de confiabilidade** ([docs/PLANO-CONFIABILIDADE.md](docs/PLANO-CONFIABILIDADE.md)):
 - **Exceção imediata**: liberar um domínio (para todos ou só para uma empresa) grava um
   `allowed` no Technitium na hora, sem esperar a atualização de 1 h das listas.

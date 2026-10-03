@@ -2,6 +2,7 @@
 {% block title %}{{ 'Domínios liberados' if modo == 'liberacao' else 'Serviço' }}{% endblock %}
 {% block content %}
 {% set rot = dict(categorias) %}
+{% from "admin/_liberado_campos.html" import sel_empresa, sel_filial, sel_tipo, script_sugestao with context %}
 <style>
   dialog.dlg{border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;background:var(--card);color:var(--txt)} dialog.dlg::backdrop{background:rgba(15,23,42,.45)}
   .mini{padding:.25rem .5rem;font-size:.8rem}
@@ -30,10 +31,14 @@
     <div class="mut" style="font-size:.85rem;flex:1;min-width:260px">
       {% if bloqueia %}<b style="color:#b91c1c">Bloqueado sozinho por:</b> {{ bloqueia|join(', ') }}<br>{% endif %}
       <b style="color:#16a34a">Liberado por:</b> {{ libera|join(', ') if libera else 'nenhuma empresa' }}
+      {% if ips %}<br><b style="color:#16a34a">Liberado só para os IPs:</b>
+        {% for r in ips %}<code>{{ r.ip|replace('/32', '') }}</code>{% set quem = [r.tenant_name, r.usuario]|select|join(' · ') %}{% if quem %} ({{ quem }}){% endif %}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
       <br>O DNS baixa a lista de novo a cada minuto.
     </div>
     <div style="display:flex;gap:.4rem">
       <button type="button" class="primary" onclick="document.getElementById('dlgLib').showModal()">Empresas que liberam…</button>
+      {% if ips is none %}<button type="button" class="primary" disabled title="precisa atualizar o analisador (rota /console/ip-servicos)" style="opacity:.5;cursor:not-allowed">IPs que liberam…</button>
+      {% else %}<button type="button" class="primary" onclick="document.getElementById('dlgIps').showModal()">IPs que liberam…{% if ips %} ({{ ips|length }}){% endif %}</button>{% endif %}
       <form method="post" action="{{ url_for('admin.servico_apagar', slug=servico.slug) }}" onsubmit="return confirm('Apagar {{ servico.name }}? Sai de todas as empresas que o usam.')"><button class="danger">Apagar</button></form>
     </div>
   </div>
@@ -74,6 +79,84 @@
       <button type="button" class="primary" id="lSalvar">Salvar e aplicar</button></div>
   </div>
 </dialog>
+{% if ips is not none %}
+{# "IPs que liberam": o serviço liberado só para um IP/faixa (mesmos dados dos IPs liberados). O IP ganha um grupo
+   próprio no Technitium: a política da rede dele mais este serviço. #}
+<dialog id="dlgIps" class="dlg" style="max-width:1100px;width:calc(100vw - 32px)">
+  <h2 style="margin:0 0 .2rem">IPs que liberam {{ servico.name }}</h2>
+  <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Libera <b>{{ servico.name }}</b> só para o IP (ou faixa), sem liberar para a empresa inteira. O resto da política da rede dele continua valendo. Para isentar o IP de todo o filtro, use <a href="{{ url_for('admin.liberados') }}">IPs liberados</a>.</p>
+  <form method="post" action="{{ url_for('admin.servico_ip_liberar', slug=servico.slug) }}" class="row" id="fIps">
+    <input type="hidden" name="voltar" value="{{ request.full_path }}#ips">
+    <div><label>IP ou faixa (CIDR)</label><input type="text" name="ip" id="ip_novo" placeholder="10.100.10.20 ou 10.100.10.0/24" required autocomplete="off"></div>
+    <div><label>Empresa</label>{{ sel_empresa(None, None) }}</div>
+    <div><label>Filial</label>{{ sel_filial(None, None, None) }}</div>
+    <div><label>Departamento</label><input type="text" name="departamento" placeholder="Ex.: Recepção"></div>
+    <div><label>Usuário</label><input type="text" name="usuario" placeholder="Ex.: João"></div>
+    <div><label>Tipo</label>{{ sel_tipo(None, None) }}</div>
+    <div><label>Autorizado por (empresa)</label><input type="text" name="autorizado_por" placeholder="Ex.: Maria, gerente" required
+      title="quem da empresa pediu/autorizou a liberação (fica no histórico junto com o seu usuário)"></div>
+    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary" id="ipsEnviar">Liberar</button></div>
+  </form>
+  <p class="mut" style="font-size:.8rem;margin:.4rem 0 .6rem">IP único vira <code>/32</code>. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro. O IP precisa ser fixo (reserva no DHCP).</p>
+  <div style="max-height:40vh;overflow:auto;border-top:1px solid var(--bd)">
+  <table>
+    <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th>Autorizado por</th><th>Liberado por</th><th></th></tr></thead>
+    <tbody>
+    {% for r in ips %}
+      <tr>
+        <td><code>{{ r.ip }}</code></td>
+        <td>{{ r.tenant_name or '—' }}{% if r.filial %} · {{ r.filial }}{% endif %}</td>
+        <td>{{ r.departamento or '—' }}</td><td>{{ r.usuario or '—' }}</td><td>{{ r.tipo or '—' }}</td>
+        <td>{{ r.autorizado_por or '—' }}</td>
+        <td class="mut" style="font-size:.8rem;white-space:nowrap"{% if r.updated_by %} title="última edição: {{ r.updated_by }} em {{ r.updated_at|dt_sp }}"{% endif %}>{{ r.created_by or '—' }}<br>{{ r.created_at|dt_sp }}</td>
+        <td style="white-space:nowrap">
+          <button type="button" class="mini" data-ip='{{ {"ip": r.ip, "tenant_id": r.tenant_id, "filial": r.filial or "", "departamento": r.departamento or "", "usuario": r.usuario or "", "tipo": r.tipo or "", "autorizado_por": r.autorizado_por or ""}|tojson }}' onclick="ipsEditar(this)">Editar</button>
+          <form method="post" action="{{ url_for('admin.servico_ip_revogar', slug=servico.slug) }}" style="display:inline" onsubmit="return confirm('Revogar {{ servico.name }} de {{ r.ip }}? Volta a valer só a política da rede dele.')">
+            <input type="hidden" name="ip" value="{{ r.ip }}"><input type="hidden" name="voltar" value="{{ request.full_path }}#ips">
+            <button class="danger mini">Revogar</button></form>
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="8" class="mut">Nenhum IP libera {{ servico.name }} sozinho.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if ips_historico %}
+  <details style="margin-top:.6rem"><summary class="mut" style="font-size:.85rem;cursor:pointer">Histórico ({{ ips_historico|length }})</summary>
+    <table>
+      <thead><tr><th>Quando</th><th>Ação</th><th>IP / Faixa</th><th>Empresa</th><th>Autorizado por</th><th>Usuário do console</th></tr></thead>
+      <tbody>
+      {% for h in ips_historico %}{% set d = h.detalhe or {} %}
+        <tr><td style="white-space:nowrap">{{ h.at|dt_sp }}</td>
+          <td>{{ {'liberar': '✅ liberou', 'editar': '✏️ editou', 'revogar': '⛔ revogou'}.get(h.acao, h.acao) }}</td>
+          <td><code>{{ h.ip }}</code>{% if d.usuario or d.departamento %}<div class="mut" style="font-size:.75rem">{{ [d.usuario, d.departamento]|select|join(' · ') }}</div>{% endif %}</td>
+          <td>{{ h.tenant_name or '—' }}{% if d.filial %} · {{ d.filial }}{% endif %}</td>
+          <td>{{ h.autorizado_por or '—' }}</td><td>{{ h.por or '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+  <div style="display:flex;justify-content:flex-end;margin-top:.7rem"><button type="button" onclick="document.getElementById('dlgIps').close()">Fechar</button></div>
+</dialog>
+{{ script_sugestao() }}
+<script>
+// Editar: joga os dados da linha no formulário (gravar o mesmo IP de novo atualiza os dados)
+function ipsEditar(b) {
+  const d = JSON.parse(b.dataset.ip), f = document.getElementById("fIps");
+  f.ip.value = d.ip;
+  f.tenant_id.value = d.tenant_id || "";
+  f.tenant_id.dispatchEvent(new Event("change"));
+  const fil = document.getElementById("fil_novo");
+  if (d.filial && ![...fil.options].some(o => o.value === d.filial || o.textContent === d.filial)) fil.add(new Option(d.filial));
+  fil.value = d.filial; if (d.filial) fil.disabled = false;
+  f.departamento.value = d.departamento; f.usuario.value = d.usuario; f.tipo.value = d.tipo;
+  f.autorizado_por.value = d.autorizado_por;
+  document.getElementById("ipsEnviar").textContent = "Salvar";
+  f.ip.focus();
+}
+if (location.hash === "#ips") document.getElementById("dlgIps").showModal();
+</script>
+{% endif %}
 <script>
 document.getElementById("lSalvar").addEventListener("click", async (ev) => {
   const b = ev.target; b.disabled = true;

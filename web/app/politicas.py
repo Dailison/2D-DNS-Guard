@@ -21,6 +21,17 @@ def por_escopo() -> dict[str, dict]:
     return {p["scope"]: p for p in lista()}
 
 
+def ips_servicos(slug: str | None = None) -> list[dict]:
+    """Serviços liberados só para um IP/faixa (todos, ou os de um serviço). Analisador antigo (sem a rota) = nenhum;
+    qualquer outra falha sobe: sincronizar sem a relação apagaria os grupos desses IPs."""
+    try:
+        return api.get("/console/ip-servicos", slug=slug)
+    except api.AnalyzerError as e:
+        if str(e).startswith("404"):
+            return []
+        raise
+
+
 def sincronizar() -> dict:
     """Aplica todas as políticas no Technitium (empresas cadastradas; as detectadas nos logs e as
     redes fora do cadastro ficam no default)."""
@@ -35,7 +46,7 @@ def sincronizar() -> dict:
         ajustes = list((api.get("/ajustes").get("escopos") or {}))
     except Exception:  # noqa: BLE001 — analisador antigo: sem ajustes
         ajustes = []
-    r = dnslib.sincronizar_politicas(empresas, lista(), por=por, ajustes=ajustes)
+    r = dnslib.sincronizar_politicas(empresas, lista(), por=por, ajustes=ajustes, ips=ips_servicos())
     current_app.logger.info("políticas -> Technitium: criados %s, apagados %s, %d rede(s)",
                             r["criados"], r["apagados"], r["redes"])
     return r

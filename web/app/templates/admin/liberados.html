@@ -4,27 +4,7 @@
 <h1>IPs liberados <span class="mut" style="font-size:.8rem">· computadores isentos do filtro DNS no Technitium</span></h1>
 <p class="mut" style="margin:-.6rem 0 1rem">IPs aqui são <b>isentos do filtro DNS</b> (grupo <code>{{ grupo }}</code> — não bloqueia nada). Revogar faz o IP voltar a filtrar pela rede dele.</p>
 
-{% macro sel_empresa(form_id, atual) -%}
-<select {% if form_id %}form="{{ form_id }}"{% endif %} name="tenant_id" class="lb-emp" data-filial="{{ form_id or 'novo' }}">
-  <option value="">—</option>
-  {% for e in empresas %}<option value="{{ e.id }}" {{ 'selected' if atual == e.id }}>{{ e.name }}</option>{% endfor %}
-</select>
-{%- endmacro %}
-{% macro sel_filial(form_id, emp_id, atual) -%}
-{% set fs = (empresas|selectattr('id', 'equalto', emp_id)|first or {}).get('filiais', []) %}
-<select {% if form_id %}form="{{ form_id }}"{% endif %} name="filial" id="fil_{{ form_id or 'novo' }}" {{ 'disabled' if not fs }}>
-  <option value="">—</option>
-  {% for f in fs %}<option {{ 'selected' if atual == f }}>{{ f }}</option>{% endfor %}
-  {% if atual and atual not in fs %}<option selected>{{ atual }}</option>{% endif %}
-</select>
-{%- endmacro %}
-{% macro sel_tipo(form_id, atual) -%}
-<select {% if form_id %}form="{{ form_id }}"{% endif %} name="tipo" {% if not form_id %}id="tipo_novo"{% endif %}>
-  <option value="">—</option>
-  {% for t in tipos %}<option {{ 'selected' if atual == t }}>{{ t }}</option>{% endfor %}
-  {% if atual and atual not in tipos %}<option selected>{{ atual }}</option>{% endif %}
-</select>
-{%- endmacro %}
+{% from "admin/_liberado_campos.html" import sel_empresa, sel_filial, sel_tipo, script_sugestao with context %}
 
 <div class="card">
   <h2>Liberar IP</h2>
@@ -111,53 +91,5 @@
   </table>
 </div>
 
-<script>
-(function () {
-  var EMP = {{ empresas|tojson }};
-  var porId = {};
-  EMP.forEach(function (e) { porId[e.id] = e; });
-
-  function preencherFiliais(sel, filialAtual) {
-    var e = porId[sel.value], fil = document.getElementById('fil_' + sel.dataset.filial);
-    if (!fil) return;
-    fil.innerHTML = '<option value="">—</option>';
-    (e ? e.filiais : []).forEach(function (f) {
-      var o = document.createElement('option'); o.textContent = f; o.selected = f === filialAtual; fil.appendChild(o);
-    });
-    fil.disabled = !(e && e.filiais.length);
-  }
-  document.querySelectorAll('select.lb-emp').forEach(function (s) {
-    s.addEventListener('change', function () { preencherFiliais(s, null); });
-  });
-
-  // IP digitado -> empresa/filial pela rede mais específica do cadastro; faixa -> tipo "Faixa de IP"
-  function ipNum(ip) {
-    var p = ip.split('.'); if (p.length !== 4) return null;
-    var n = 0;
-    for (var i = 0; i < 4; i++) { var v = +p[i]; if (!(v >= 0 && v <= 255) || p[i] === '') return null; n = n * 256 + v; }
-    return n;
-  }
-  function contem(cidr, n, prefIp) {
-    var a = cidr.split('/'), base = ipNum(a[0]), len = +(a[1] || 32);
-    if (base === null || len > prefIp) return false;
-    var tam = Math.pow(2, 32 - len);
-    return Math.floor(n / tam) === Math.floor(base / tam);
-  }
-  var ipIn = document.getElementById('ip_novo'), empSel = document.querySelector('select.lb-emp[data-filial="novo"]'),
-      tipoSel = document.getElementById('tipo_novo');
-  ipIn.addEventListener('input', function () {
-    var v = ipIn.value.trim().split('/'), n = ipNum(v[0]), pref = +(v[1] || 32);
-    if (n === null || !(pref >= 0 && pref <= 32)) return;
-    var melhor = null;
-    EMP.forEach(function (e) {
-      e.redes.forEach(function (r) {
-        var len = +(r.cidr.split('/')[1] || 32);
-        if (contem(r.cidr, n, pref) && (!melhor || len > melhor.len)) melhor = {e: e, unit: r.unit, len: len};
-      });
-    });
-    if (melhor) { empSel.value = melhor.e.id; preencherFiliais(empSel, melhor.unit); }
-    if (pref < 32 && !tipoSel.value) tipoSel.value = 'Faixa de IP';
-  });
-})();
-</script>
+{{ script_sugestao() }}
 {% endblock %}

@@ -535,14 +535,22 @@ def nome_grupo(empresa: str, unidade: str | None = None) -> str:
     return PREFIXO_GRUPO + empresa + (f" · {unidade}" if unidade else "")
 
 
-def plano_politicas(empresas, politicas, ajustes=()):
+def nome_grupo_ip(empresa: str | None, ip: str) -> str:
+    """Grupo de um IP (ou faixa) com serviço liberado só para ele: "Empresa: <nome> · IP 10.1.2.3"."""
+    return nome_grupo(empresa or "(sem cadastro)") + " · IP " + (ip[:-3] if ip.endswith("/32") else ip)
+
+
+def plano_politicas(empresas, politicas, ajustes=(), ips=()):
     """-> (grupos {nome: {"lists", "services", "blocked", "escopo"}}, mapa {cidr: grupo}, default {...}).
     Rede de empresa sem política (nem da unidade nem da empresa) e sem ajuste fica sem mapeamento: vale o default.
     `ajustes` = escopos com ajuste próprio das listas (01/10: listas por empresa/unidade): a unidade com ajuste ganha
-    grupo próprio (com as listas da empresa) e cada grupo assina as listas de ajuste do escopo dele ("escopo")."""
+    grupo próprio (com as listas da empresa) e cada grupo assina as listas de ajuste do escopo dele ("escopo").
+    `ips` = [{"ip", "slug"}] serviços liberados só para um IP/faixa (03/10): o IP ganha grupo próprio com a política
+    da rede mais específica que o contém (sem rede no cadastro: a padrão) mais esses serviços."""
     pol = {p["scope"]: p for p in politicas}
     ajustes = set(ajustes or ())
     grupos, mapa = {}, {}
+    redes = []   # (rede, empresa, política que vale nela ou None, escopo dos ajustes) p/ achar a rede de cada IP
     for e in empresas:
         te = f"tenant:{e['id']}"
         pe = pol.get(te)
@@ -556,6 +564,10 @@ def plano_politicas(empresas, politicas, ajustes=()):
             proprio = bool(tu) and (bool(pu) or tu in ajustes)       # unidade com política ou ajuste: grupo dela
             escopo = tu if tu in ajustes else te if te in ajustes else None
             p = pu or pe or (pol.get("default") if escopo else None)   # só ajuste, sem política: listas do padrão
+            try:
+                redes.append((ipaddress.ip_network(cidr), e["name"], p, escopo))
+            except ValueError:
+                pass
             if not p:
                 continue
             nome = nome_grupo(e["name"], unidade) if proprio else nome_grupo(e["name"])
@@ -563,6 +575,20 @@ def plano_politicas(empresas, politicas, ajustes=()):
                             "blocked": sorted(p.get("services_blocked") or []), "escopo": escopo}
             mapa[cidr] = nome
     d = pol.get("default") or {}
+    por_ip: dict[str, set] = {}
+    for x in ips or ():
+        ipn = norm_ip(x.get("ip"))
+        if ipn and x.get("slug"):
+            por_ip.setdefault(ipn, set()).add(x["slug"])
+    for ipn, slugs in por_ip.items():
+        alvo = ipaddress.ip_network(ipn)
+        dona = max((r for r in redes if r[0].version == alvo.version and alvo.subnet_of(r[0])),
+                   key=lambda r: r[0].prefixlen, default=None)
+        p = (dona[2] if dona else None) or d
+        nome = nome_grupo_ip(dona[1] if dona else None, ipn)
+        grupos[nome] = {"lists": sorted(p.get("lists") or []), "services": sorted(set(p.get("services") or []) | slugs),
+                        "blocked": sorted(p.get("services_blocked") or []), "escopo": dona[3] if dona else None}
+        mapa[ipn] = nome
     return grupos, mapa, {"lists": sorted(d.get("lists") or []), "services": sorted(d.get("services") or []),
                           "blocked": sorted(d.get("services_blocked") or [])}
 
@@ -649,7 +675,8 @@ def _valida_sincronizacao(antes: dict, depois: dict, lib: str) -> None:
         raise RuntimeError(f"a sincronização mexeria em redes isentas ({', '.join(mudou[:5])}); nada foi gravado")
 
 
-def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", motivo="sincronizar políticas", ajustes=()):
+def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", motivo="sincronizar políticas", ajustes=(),
+                          ips=()):
     """Deixa o Technitium igual às políticas: cria/atualiza/apaga os grupos "Empresa: …", aponta
     as redes das empresas para eles e aplica a política default no grupo default. Não mexe no
     grupo Liberados nem em redes/IPs mapeados para ele. Valida o resultado antes de gravar (ver
@@ -659,15 +686,15 @@ def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", moti
 
     def muda(cfg):
         antes = json.loads(_canon(cfg))
-        r = _sincroniza(cfg, empresas, politicas, lib, ajustes)
+        r = _sincroniza(cfg, empresas, politicas, lib, ajustes, ips)
         _valida_sincronizacao(antes, cfg, lib)
         return r, aplicar
     return _read_modify_write(muda, por, motivo)
 
 
-def _sincroniza(cfg, empresas, politicas, lib, ajustes=()):
+def _sincroniza(cfg, empresas, politicas, lib, ajustes=(), ips=()):
     """Aplica as políticas no config (em memória)."""
-    grupos, mapa, default = plano_politicas(empresas, politicas, ajustes)
+    grupos, mapa, default = plano_politicas(empresas, politicas, ajustes, ips)
     existentes = {g.get("name"): g for g in cfg.get("groups", [])}
     criados, atualizados, apagados = [], [], []
     for nome, p in grupos.items():

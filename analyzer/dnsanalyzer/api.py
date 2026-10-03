@@ -1046,13 +1046,16 @@ def liberados_meta_list():
 
 
 @app.get("/console/liberados-log", dependencies=[Depends(auth)])
-def liberados_log(ip: Optional[str] = None, limit: int = Query(50, le=500)):
-    """Histórico dos IPs liberados: quem do console liberou/editou/revogou e quem da empresa autorizou."""
+def liberados_log(ip: Optional[str] = None, servico: Optional[str] = None, limit: int = Query(50, le=500)):
+    """Histórico dos IPs liberados: quem do console liberou/editou/revogou e quem da empresa autorizou.
+    Sem `servico`: só as isenções (IPs liberados); com `servico`: só as liberações desse serviço por IP."""
     with db.conn() as c:
         return c.execute("SELECT l.at, l.ip, l.acao, l.por, l.autorizado_por, l.tenant_id, t.name AS tenant_name, l.detalhe "
                          "FROM liberado_log l LEFT JOIN tenants t ON t.id = l.tenant_id "
-                         "WHERE %(ip)s::text IS NULL OR l.ip = %(ip)s ORDER BY l.at DESC, l.id DESC LIMIT %(n)s",
-                         {"ip": ip, "n": limit}).fetchall()
+                         "WHERE (%(ip)s::text IS NULL OR l.ip = %(ip)s) "
+                         "AND (l.detalhe->>'servico') IS NOT DISTINCT FROM %(s)s::text "
+                         "ORDER BY l.at DESC, l.id DESC LIMIT %(n)s",
+                         {"ip": ip, "s": servico, "n": limit}).fetchall()
 
 
 @app.put("/console/liberados-meta", dependencies=[Depends(auth)])
@@ -1091,6 +1094,72 @@ def liberados_meta_delete(ip: str, by: str = ""):
                   (ip, by or None, (r or {}).get("autorizado_por"), (r or {}).get("tenant_id"),
                    Jsonb({k: r[k] for k in ("filial", "departamento", "usuario", "tipo") if r and r[k]})))
         return {"ok": True, "removed": 1 if r else 0}
+
+
+# ------------------------------------------------------------------ serviço liberado só para um IP (console)
+class IpServicoIn(BaseModel):
+    ip: str
+    slug: str
+    tenant_id: Optional[int] = None
+    filial: Optional[str] = None
+    departamento: Optional[str] = None
+    usuario: Optional[str] = None
+    tipo: Optional[str] = None
+    autorizado_por: Optional[str] = None   # quem da empresa autorizou (vazio na edição = mantém)
+    by: str = ""
+
+
+_IPS_META = ("filial", "departamento", "usuario", "tipo")
+
+
+@app.get("/console/ip-servicos", dependencies=[Depends(auth)])
+def ip_servicos_list(slug: Optional[str] = None):
+    """IPs (ou faixas) com serviço liberado só para eles. Sem `slug`: todos (o console monta os grupos do Technitium)."""
+    with db.conn() as c:
+        return c.execute("SELECT s.ip, s.slug, s.tenant_id, t.name AS tenant_name, s.filial, s.departamento, s.usuario, "
+                         "s.tipo, s.autorizado_por, s.created_at, s.created_by, s.updated_at, s.updated_by "
+                         "FROM ip_servicos s LEFT JOIN tenants t ON t.id = s.tenant_id "
+                         "WHERE %(s)s::text IS NULL OR s.slug = %(s)s ORDER BY s.ip::inet, s.slug", {"s": slug}).fetchall()
+
+
+@app.put("/console/ip-servicos", dependencies=[Depends(auth)])
+def ip_servicos_upsert(body: IpServicoIn):
+    def s(v, n):
+        return ((v or "").strip()[:n]) or None
+    ip = _cidr(body.ip)
+    with db.conn() as c:
+        if not c.execute("SELECT 1 FROM allow_lists WHERE slug=%s", (body.slug,)).fetchone():
+            raise HTTPException(404, "serviço/lista de liberação desconhecido")
+        if body.tenant_id is not None:
+            _tenant(c, body.tenant_id)
+        existia = c.execute("SELECT 1 FROM ip_servicos WHERE ip=%s AND slug=%s", (ip, body.slug)).fetchone() is not None
+        r = c.execute(
+            "INSERT INTO ip_servicos (ip, slug, tenant_id, filial, departamento, usuario, tipo, autorizado_por, created_by) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (ip, slug) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, "
+            "filial=EXCLUDED.filial, departamento=EXCLUDED.departamento, usuario=EXCLUDED.usuario, tipo=EXCLUDED.tipo, "
+            "autorizado_por=COALESCE(EXCLUDED.autorizado_por, ip_servicos.autorizado_por), "
+            "updated_at=now(), updated_by=EXCLUDED.created_by "
+            "RETURNING tenant_id, filial, departamento, usuario, tipo, autorizado_por",
+            (ip, body.slug, body.tenant_id, s(body.filial, 150) if body.tenant_id else None, s(body.departamento, 255),
+             s(body.usuario, 255), s(body.tipo, 20), s(body.autorizado_por, 255), body.by or None)).fetchone()
+        c.execute("INSERT INTO liberado_log (ip, acao, por, autorizado_por, tenant_id, detalhe) VALUES (%s,%s,%s,%s,%s,%s)",
+                  (ip, "editar" if existia else "liberar", body.by or None, r["autorizado_por"], r["tenant_id"],
+                   Jsonb({"servico": body.slug} | {k: r[k] for k in _IPS_META if r[k]})))
+        return {"ok": True, "ip": ip, "slug": body.slug, "novo": not existia}
+
+
+@app.delete("/console/ip-servicos", dependencies=[Depends(auth)])
+def ip_servicos_delete(ip: str, slug: str, by: str = ""):
+    ip = _cidr(ip)
+    with db.conn() as c:
+        r = c.execute("DELETE FROM ip_servicos WHERE ip=%s AND slug=%s RETURNING tenant_id, autorizado_por, filial, "
+                      "departamento, usuario, tipo", (ip, slug)).fetchone()
+        if r:
+            c.execute("INSERT INTO liberado_log (ip, acao, por, autorizado_por, tenant_id, detalhe) "
+                      "VALUES (%s,'revogar',%s,%s,%s,%s)",
+                      (ip, by or None, r["autorizado_por"], r["tenant_id"],
+                       Jsonb({"servico": slug} | {k: r[k] for k in _IPS_META if r[k]})))
+        return {"ok": True, "ip": ip, "removed": 1 if r else 0}
 
 
 # ------------------------------------------------------------------ logs agrupados (console)

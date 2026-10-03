@@ -32,7 +32,6 @@ TIPOS_LIBERADO = ["Computador", "Celular", "Roteador", "Faixa de IP"]
 def liberados():
     if not current_app.config.get("TECHNITIUM_ENABLED"):
         return render_template("admin/nao_configurado.html", oque="Technitium (TECHNITIUM_URL/TECHNITIUM_TOKEN)")
-    from app import empresas as emp
     q = (request.args.get("q") or "").strip().lower()
     f_emp = request.args.get("empresa", type=int)
     rows = []
@@ -60,12 +59,18 @@ def liberados():
         historico = api.get("/console/liberados-log", limit=50)
     except AnalyzerError:
         historico = []
-    empresas = sorted(({"id": e["id"], "name": e["name"],
-                        "filiais": sorted({n["unit"] for n in e.get("networks", []) if n.get("unit")}),
-                        "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
-                       for e in emp.lista()), key=lambda e: e["name"].lower())
-    return render_template("admin/liberados.html", rows=rows, q=q, f_emp=f_emp, empresas=empresas, historico=historico,
+    return render_template("admin/liberados.html", rows=rows, q=q, f_emp=f_emp, empresas=_empresas_liberado(),
+                           historico=historico,
                            tipos=TIPOS_LIBERADO, grupo=current_app.config.get("TECHNITIUM_LIBERADOS_GROUP"))
+
+
+def _empresas_liberado() -> list[dict]:
+    """Empresas (com filiais e redes) p/ os campos de um IP liberado: selects e sugestão pelo IP digitado."""
+    from app import empresas as emp
+    return sorted(({"id": e["id"], "name": e["name"],
+                    "filiais": sorted({n["unit"] for n in e.get("networks", []) if n.get("unit")}),
+                    "redes": [{"cidr": n["cidr"], "unit": n.get("unit") or ""} for n in e.get("networks", [])]}
+                   for e in emp.lista()), key=lambda e: e["name"].lower())
 
 
 def _liberado_meta_upsert(ip, acao):
@@ -974,7 +979,24 @@ def _servico_ctx(slug: str) -> dict:
     empresas_pol = sorted(({"id": e["id"], "nome": e["name"], "tem": slug in ((por.get(f"tenant:{e['id']}") or {}).get("services") or [])}
                            for e in emp.lista() if not e.get("auto_created")), key=lambda x: x["nome"].lower())
     return {"servico": s, "todas": todas, "doms": doms, "libera": libera, "bloqueia": bloqueia,
-            "empresas_pol": empresas_pol, "default_tem": slug in ((por.get("default") or {}).get("services") or [])}
+            "empresas_pol": empresas_pol, "default_tem": slug in ((por.get("default") or {}).get("services") or []),
+            **_ips_servico_ctx(slug)}
+
+
+def _ips_servico_ctx(slug: str) -> dict:
+    """"IPs que liberam": IPs/faixas com este serviço liberado só para eles (mesmos dados dos IPs liberados).
+    `ips` None = analisador ainda sem a rota (botão desligado)."""
+    try:
+        ips = api.get("/console/ip-servicos", slug=slug)
+    except AnalyzerError as e:
+        if not str(e).startswith("404"):
+            flash(f"IPs que liberam indisponíveis (analisador): {e}", "erro")
+        return {"ips": None, "ips_historico": [], "empresas": [], "tipos": TIPOS_LIBERADO}
+    try:
+        historico = api.get("/console/liberados-log", servico=slug, limit=30)
+    except AnalyzerError:
+        historico = []
+    return {"ips": ips, "ips_historico": historico, "empresas": _empresas_liberado(), "tipos": TIPOS_LIBERADO}
 
 
 @admin_bp.get("/listas-liberacao")
@@ -1090,6 +1112,58 @@ def servico_apagar(slug):
     except Exception as e:  # noqa: BLE001
         flash(f"Falha: {e}", "erro")
     return redirect(url_for("admin.listas_liberacao"))
+
+
+@admin_bp.post("/servicos/<slug>/ips")
+@login_required
+def servico_ip_liberar(slug):
+    """Libera o serviço só para um IP/faixa (ou atualiza os dados de um já liberado) e aplica no Technitium:
+    o IP ganha um grupo próprio com a política da rede dele mais este serviço."""
+    from app import politicas as pol
+    ip = dnslib.norm_ip(request.form.get("ip"))
+    if not ip:
+        flash("IP ou CIDR inválido (ex.: 10.100.10.20 ou 10.100.10.0/24).", "erro")
+        return _volta_servico(slug)
+    try:
+        novo = ip not in {x["ip"] for x in pol.ips_servicos(slug)}
+        if novo and not (request.form.get("autorizado_por") or "").strip():
+            flash("Informe quem da empresa autorizou a liberação.", "erro")
+            return _volta_servico(slug)
+        api.put("/console/ip-servicos", {"ip": ip, "slug": slug, "by": admin_atual().email,
+                                         "tenant_id": request.form.get("tenant_id", type=int),
+                                         **{k: request.form.get(k) or "" for k in
+                                            ("filial", "departamento", "usuario", "tipo", "autorizado_por")}})
+    except AnalyzerError as e:
+        flash(f"Falha ao liberar: {e}", "erro")
+        return _volta_servico(slug)
+    if not novo:
+        flash(f"{ip} atualizado.", "ok")
+        return _volta_servico(slug)
+    try:
+        pol.sincronizar()
+        isento = ip in dnslib.listar()
+        current_app.logger.info("DNS: %s liberou %s só para o IP %s", admin_atual().email, slug, ip)
+        flash(f"{slug} liberado para {ip}." + (" Atenção: este IP já está em IPs liberados (isento de todo o filtro)."
+                                                if isento else " O DNS aplica em até 2 min."), "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"{ip} gravado, mas não foi aplicado no Technitium: {e}. Entra na próxima sincronização das políticas.", "erro")
+    return _volta_servico(slug)
+
+
+@admin_bp.post("/servicos/<slug>/ips/revogar")
+@login_required
+def servico_ip_revogar(slug):
+    from app import politicas as pol
+    ip = dnslib.norm_ip(request.form.get("ip"))
+    try:
+        if ip:
+            api.delete("/console/ip-servicos", ip=ip, slug=slug, by=admin_atual().email)
+            pol.sincronizar()
+            current_app.logger.info("DNS: %s revogou %s do IP %s", admin_atual().email, slug, ip)
+            flash(f"{slug} revogado de {ip} (volta a valer só a política da rede dele).", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(f"Falha ao revogar: {e}", "erro")
+    return _volta_servico(slug)
 
 
 @admin_bp.post("/servicos/<slug>/dominios")

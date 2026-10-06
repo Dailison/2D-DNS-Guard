@@ -390,6 +390,23 @@ def parse_chain(answer):
     return doms
 
 
+def cadeia_cname(nome: str) -> list[str]:
+    """Nomes para onde `nome` aponta por CNAME, na ordem, resolvidos pelo próprio Technitium (o bloqueio também vale
+    para eles: um destino numa lista bloqueia o nome consultado). Sem CNAME ou sem resposta = []."""
+    try:
+        r = _api_get("dnsClient/resolve?" + urllib.parse.urlencode(
+            {"server": "this-server", "domain": nome, "type": "A", "protocol": "Udp"}), timeout=6)
+    except Exception:  # noqa: BLE001 — é só um complemento da busca
+        return []
+    out = []
+    for x in (r.get("result") or {}).get("Answer") or []:
+        if str(x.get("Type") or "").upper() == "CNAME":
+            d = str((x.get("RDATA") or {}).get("Domain") or "").strip().rstrip(".").lower()
+            if d and d not in out:
+                out.append(d)
+    return out
+
+
 def culpados(qname, answer, union):
     """Dado o nome consultado + a cadeia CNAME, retorna as entradas da lista
     `union` que causam o bloqueio (o próprio nome ou um ancestral de qualquer

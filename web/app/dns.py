@@ -569,11 +569,11 @@ def listas_categoria():
         servicos = api.get("/liberacao")
     except AnalyzerError:
         servicos = []
-    busca = (request.args.get("busca") or "").strip().lower()
-    achados = None
+    busca = (request.args.get("busca") or "").strip().lower().rstrip(".")
+    achados, cadeia = None, []
     if len(busca) >= 3:   # procura em TODAS as listas de bloqueio (não só na aberta)
         try:
-            achados = api.get("/listas-busca", q=busca)
+            achados, cadeia = _busca_listas(busca)
         except AnalyzerError as e:
             flash(f"Falha na busca: {e}", "erro")
             achados = []
@@ -586,7 +586,42 @@ def listas_categoria():
                            total_bloqueados=_total_bloqueados(resumo),
                            scats=_site_cats(), pag_url=_pag_url,
                            categorias=dnslib.CATEGORIAS_LISTA, empresas_pol=empresas_pol,
-                           default_tem=default_tem, servicos=servicos, busca=busca, achados=achados, **aj)
+                           default_tem=default_tem, servicos=servicos, busca=busca, achados=achados, cadeia=cadeia, **aj)
+
+
+_NOME_COMPLETO = re.compile(r"^[a-z0-9_-]+(\.[a-z0-9_-]+)+$")
+
+
+def _na_whitelist(nome: str, wl: set[str]) -> str | None:
+    """Entrada da whitelist publicada (o próprio nome ou um domínio-pai) que libera `nome`."""
+    p = nome.split(".")
+    return next((c for c in (".".join(p[i:]) for i in range(len(p) - 1)) if c in wl), None)
+
+
+def _busca_listas(busca: str) -> tuple[list[dict], list[str]]:
+    """Busca em todas as listas de bloqueio -> (achados, cadeia de CNAME do nome buscado).
+    Um nome completo também é procurado pela cadeia de CNAME (06/10: estacio.saladeavaliacoes.com.br era bloqueado
+    pelo destino dele, d102xe4mjihvqq.cloudfront.net, na lista Adulto, e a busca pelo nome não achava nada): a entrada
+    que bloqueia um elo da cadeia vem primeiro, com `via` = o elo. `wl` = whitelist publicada que vence aquele
+    bloqueio (a do nome buscado, para o que veio por CNAME, ou a da própria entrada)."""
+    achados = api.get("/listas-busca", q=busca)
+    cadeia = []
+    if _NOME_COMPLETO.match(busca) and current_app.config.get("TECHNITIUM_ENABLED"):
+        cadeia = [x for x in dnslib.cadeia_cname(busca) if x != busca]
+    vistos = {a["domain"] for a in achados}
+    por_cname = []
+    for elo in cadeia:
+        for a in api.get("/listas-busca", q=elo):
+            if (a["domain"] == elo or elo.endswith("." + a["domain"])) and a["domain"] not in vistos:
+                vistos.add(a["domain"])
+                por_cname.append({**a, "via": elo, "pai": a["domain"] != elo})
+    achados = por_cname + achados
+    if achados:
+        wl = dnslib.dominios_whitelist()
+        do_nome = _na_whitelist(busca, wl) if cadeia else None
+        for a in achados:
+            a["wl"] = (do_nome if a.get("via") else None) or _na_whitelist(a["domain"], wl)
+    return achados, cadeia
 
 
 def _total_bloqueados(resumo: dict) -> int:

@@ -1630,3 +1630,52 @@ def test_tld_abusado_sozinho_nao_impede_abrir_o_site(env, monkeypatch):
             d = classifier.build_dossier(c, row, with_web=True)
             assert d["abused_tld"], "o TLD continua contando como sinal de risco nas regras"
     assert visto == {"espelho-t.life": True, "golpe-t.life": False}
+
+
+def test_dns_inativo_aproveita_a_resposta_do_technitium(env, monkeypatch):
+    """07/10 (pedido do usuário): o que o Technitium acabou de responder vale antes de perguntar de novo. Nome com
+    NXDOMAIN no log não é consultado outra vez; nome que recebeu IP = o domínio resolve, sem consulta nenhuma — mesmo
+    estando numa lista de bloqueio (a resposta de verdade vem de um grupo que não aplica a lista). Resposta de
+    bloqueio (0.0.0.0) não conta. Raiz, www e MX continuam testados fora."""
+    from datetime import datetime, timedelta, timezone
+
+    from dnsanalyzer import collector, db, dnsativo
+    consultados = []
+    monkeypatch.setattr(dnsativo, "consulta", lambda nome, res, tipo="A": consultados.append((nome, tipo)) or "vazio")
+    agora = datetime.now(timezone.utc)
+    with db.conn() as c:
+        collector.ensure_log_partitions(c, agora - timedelta(days=1), agora)
+        tid = c.execute("INSERT INTO tenants (slug, name) VALUES ('t-dnslog', 'T') RETURNING id").fetchone()["id"]
+        ids = {n: c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES (%s, 'public', 'DESCONHECIDO', true) "
+                            "RETURNING id, name, kind, classification, ti_signature", (n,)).fetchone()
+               for n in ("morto-log.com", "voltou-log.com", "bloqueado-log.com", "velho-log.com")}
+
+        def log(dom, qname, rtype, rcode, answer, ha=timedelta(minutes=3), qtype="A"):
+            c.execute("INSERT INTO fqdns (domain_id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING", (ids[dom]["id"], qname))
+            c.execute("INSERT INTO query_log (ts, tenant_id, client_ip, domain_id, qname, qtype, rtype, rcode, answer) "
+                      "VALUES (%s, %s, '10.9.0.1', %s, %s, %s, %s, %s, %s)", (agora - ha, tid, ids[dom]["id"], qname, qtype, rtype, rcode, answer))
+        log("morto-log.com", "api.morto-log.com", "Recursive", "NxDomain", None)
+        log("morto-log.com", "api.morto-log.com", "Cached", "NxDomain", None, qtype="AAAA")
+        log("voltou-log.com", "voltou-log.com", "Blocked", "NoError", "A 0.0.0.0")
+        log("voltou-log.com", "voltou-log.com", "Cached", "NoError", "CNAME x.cdn.net., A 203.0.113.9")
+        log("bloqueado-log.com", "bloqueado-log.com", "Blocked", "NoError", "A 0.0.0.0")
+        log("velho-log.com", "app.velho-log.com", "Recursive", "NxDomain", None, ha=timedelta(hours=5))
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('dns_inativo', 'voltou-log.com', %s), "
+                  "('nao_identificado', 'bloqueado-log.com', 'IA automática (nao_identificado)')", (dnsativo.POR,))
+        assert dnsativo.pelos_logs(c, [r["id"] for r in ids.values()]) == {
+            ids["morto-log.com"]["id"]: {"api.morto-log.com": False}, ids["voltou-log.com"]["id"]: {"voltou-log.com": True}}
+    # NXDOMAIN no log: só a raiz, o www e o MX são consultados fora
+    assert dnsativo.etapa1(ids["morto-log.com"]) is True
+    assert {n for n, _ in consultados} == {"morto-log.com", "www.morto-log.com"} and ("morto-log.com", "MX") in consultados
+    # recebeu IP há pouco (de quem não aplica a lista): sai de DNS Inativo sem consulta nenhuma
+    consultados.clear()
+    assert dnsativo.etapa1(ids["voltou-log.com"]) is False and consultados == []
+    # só resposta de bloqueio, ou NXDOMAIN antigo: o log não diz nada — teste ativo completo
+    assert dnsativo.etapa1(ids["bloqueado-log.com"]) is True and ("bloqueado-log.com", "A") in consultados
+    consultados.clear()
+    assert dnsativo.etapa1(ids["velho-log.com"]) is True and ("app.velho-log.com", "A") in consultados
+    with db.conn() as c:
+        em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain LIKE '%%-log.com'")}
+        motivo = c.execute("SELECT lista_motivo FROM domains WHERE name = 'morto-log.com'").fetchone()["lista_motivo"]
+    assert em == {("dns_inativo", "morto-log.com"), ("dns_inativo", "bloqueado-log.com"), ("dns_inativo", "velho-log.com")}
+    assert "NXDOMAIN no log do Technitium: api.morto-log.com" in motivo

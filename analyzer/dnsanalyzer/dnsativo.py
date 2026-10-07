@@ -10,6 +10,11 @@ Cuidados (um nome só é "inativo" com TODOS):
 - o domínio não tem MX: domínio só de e-mail não tem site, e bloqueá-lo quebraria o envio de e-mail p/ ele;
 - sem lista de ameaça (DGA de malware também não resolve: fica no fluxo normal) e fora do catálogo.
 Quem voltar a ser consultado passa pelo teste de novo; resolvendo, sai da lista e segue a análise normal.
+
+(07/10, pedido do usuário) O que o próprio Technitium acabou de responder vale antes de perguntar de novo: com a cópia
+dos logs (query_log), nome que recebeu IP há pouco = o domínio resolve (nenhuma consulta externa); nome que recebeu
+NXDOMAIN há pouco não é consultado de novo. Fora do log continuam a raiz e o www quando ninguém os consultou (o
+bloqueio vale p/ o domínio inteiro) e o MX (domínio só de e-mail).
 """
 
 from __future__ import annotations
@@ -61,12 +66,41 @@ def resolve(nome: str) -> bool | None:
     return False if all(v in ("vazio", "falha") for v in r.values()) else None
 
 
-def inativo(nomes: list[str]) -> bool:
-    """Nenhum dos nomes resolve, o domínio (1º nome) não recebe e-mail (MX) e deu p/ testar tudo."""
+def pelos_logs(c, ids: list[int]) -> dict[int, dict[str, bool]]:
+    """O que o Technitium respondeu há pouco, por domínio e nome consultado: True = devolveu IP, False = NXDOMAIN (o
+    nome não existe). Só respostas resolvidas na internet (Recursive/Cached): bloqueio e zona local não dizem se o nome
+    resolve. Resposta vazia e SERVFAIL ficam p/ o teste ativo (pode ser site só IPv6 ou falha passageira). Janela
+    curta: NXDOMAIN velho não pode segurar na lista um domínio que voltou."""
+    out: dict[int, dict[str, bool]] = {}
+    if not ids:
+        return out
+    for r in c.execute(
+            "SELECT domain_id, qname, bool_or(rcode = 'NoError' AND answer ~ '(^|, )(A|AAAA) ') AS ip, "
+            " bool_or(rcode = 'NxDomain') AS nx FROM query_log WHERE domain_id = ANY(%s) AND ts > now() - interval '2 hours' "
+            "AND rtype IN ('Recursive', 'Cached') AND qtype IN ('A', 'AAAA') GROUP BY 1, 2", (list(ids),)):
+        if r["ip"] or r["nx"]:
+            out.setdefault(r["domain_id"], {})[r["qname"]] = bool(r["ip"])
+    return out
+
+
+def inativo(nomes: list[str], sabidos: dict[str, bool] | None = None) -> bool:
+    """Nenhum dos nomes resolve, o domínio (1º nome) não recebe e-mail (MX) e deu p/ testar tudo. `sabidos` = o que os
+    logs já responderam (pelos_logs): algum nome com IP = resolve; nome com NXDOMAIN não é consultado de novo."""
+    sabidos = sabidos or {}
+    if any(sabidos.values()):
+        return False
     for n in dict.fromkeys(nomes):
+        if sabidos.get(n) is False:
+            continue
         if resolve(n) is not False:   # resolveu, ou não deu p/ saber: não é inativo
             return False
     return bool(nomes) and all(consulta(nomes[0], r, "MX") in ("vazio", "falha") for r in RESOLVEDORES)
+
+
+def _motivo(nomes: list[str], sabidos: dict[str, bool] | None, resto: str = "") -> str:
+    pelo_log = [n for n in nomes if (sabidos or {}).get(n) is False]
+    return ("não resolve no DNS (sem IP em " + ", ".join(nomes[:3]) + ")" + resto
+            + (f"; NXDOMAIN no log do Technitium: {', '.join(pelo_log[:3])}" if pelo_log else ""))
 
 
 def _nomes(c, drow: dict) -> list[str]:
@@ -117,16 +151,17 @@ def etapa1(drow: dict) -> bool:
         com_ip = _com_ip(c, drow["id"])
         em = {r["category"] for r in c.execute("SELECT category FROM category_lists WHERE domain = %s", (nome,))}
         nomes = _nomes(c, drow)
+        sabidos = pelos_logs(c, [drow["id"]]).get(drow["id"], {})
     na_lista, bloqueado = listas.DNS_INATIVO in em, bool(em)
     # fora de lista de bloqueio os logs valem: o cliente recebe IP (nome interno, ou resolve mesmo) = não é inativo.
-    # Numa lista de bloqueio o Technitium responde 0.0.0.0 e os logs não dizem nada: vale só o DNS público.
+    # Numa lista de bloqueio o Technitium responde 0.0.0.0 a quem a aplica: aí só vale a resposta de verdade que
+    # alguém recebeu há pouco (`sabidos`: grupo que não aplica a lista) ou o DNS público.
     if com_ip > 0 and not bloqueado:
         return False
-    morto = inativo(nomes)
+    morto = inativo(nomes, sabidos)
     with db.conn() as c:
         if morto:
-            marcar(c, drow, "não resolve no DNS público (sem IP em " + ", ".join(nomes[:3]) + ")"
-                   + ("" if bloqueado else " nem nos logs em 7 dias"))
+            marcar(c, drow, _motivo(nomes, sabidos, "" if bloqueado else " nem nos logs em 7 dias"))
             return True
         if na_lista:
             desmarcar(c, drow)
@@ -143,11 +178,12 @@ def confirmar(c, drow: dict) -> bool:
     if (drow.get("ti_signature") or "") or catalog.match(drow["name"]):
         return False
     nomes = _nomes(c, drow)
-    if not inativo(nomes):
+    sabidos = pelos_logs(c, [drow["id"]]).get(drow["id"], {})
+    if not inativo(nomes, sabidos):
         c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, '{}') ON CONFLICT (kind, key) "
                   "DO UPDATE SET fetched_at = now()", (TESTE, drow["name"]))
         return False
-    marcar(c, drow, "não resolve no DNS (logs do Technitium e DNS público, sem IP em " + ", ".join(nomes[:3]) + ")")
+    marcar(c, drow, _motivo(nomes, sabidos, " — logs do Technitium e DNS público"))
     return True
 
 
@@ -162,12 +198,13 @@ def dos_logs(c, limite: int = 150) -> list[str]:
         "ORDER BY d.total_queries DESC LIMIT %s", (TESTE, limite)).fetchall()
     rows = [r for r in rows if not catalog.match(r["name"])]
     nomes = {r["id"]: _nomes(c, r) for r in rows}
+    sabidos = pelos_logs(c, [r["id"] for r in rows])
     with ThreadPoolExecutor(24) as pool:   # os testes em paralelo (nenhuma linha fica presa: só leitura até aqui)
-        mortos = list(pool.map(lambda r: inativo(nomes[r["id"]]), rows))
+        mortos = list(pool.map(lambda r: inativo(nomes[r["id"]], sabidos.get(r["id"])), rows))
     out = []
     for r, morto in zip(rows, mortos):
         if morto:
-            marcar(c, r, "não resolve no DNS (logs do Technitium e DNS público, sem IP em " + ", ".join(nomes[r["id"]][:3]) + ")")
+            marcar(c, r, _motivo(nomes[r["id"]], sabidos.get(r["id"]), " — logs do Technitium e DNS público"))
             out.append(r["name"])
         else:
             c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, '{}') ON CONFLICT (kind, key) "

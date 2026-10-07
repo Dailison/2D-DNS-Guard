@@ -154,6 +154,10 @@ def test_pagina_vazia_no_cache_e_reaberta(monkeypatch):
     webintel.lookup(C({"fetched": datetime.now(timezone.utc).isoformat(), "site": None}), "vazio-recente.com", fetch=True, allow_site=True)
     webintel.lookup(C({"fetched": antigo, "site": None}), "so-cache.com", fetch=False, allow_site=True)
     assert abertas == ["jiluio3u500.com"]
+    # (07/10) "site" ausente = nunca foi aberto (o TLD abusado impedia): abre já, sem esperar as 6 h
+    webintel.lookup(C({"fetched": datetime.now(timezone.utc).isoformat(), "cert": None}), "nunca-aberto.life", fetch=True, allow_site=True)
+    webintel.lookup(C({"fetched": datetime.now(timezone.utc).isoformat(), "cert": None}), "com-ameaca.life", fetch=True, allow_site=False)
+    assert abertas == ["jiluio3u500.com", "nunca-aberto.life"]
 
 
 def test_pagina_segue_redirecionamento_por_script_e_marca_sinais(monkeypatch):

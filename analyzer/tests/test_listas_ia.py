@@ -1000,7 +1000,7 @@ def test_chave_formato_novo_vai_na_url(monkeypatch):
     monkeypatch.setattr(cfg, "gemini_api_key", "AIza-k1")
     monkeypatch.setattr(cfg, "gemini_api_keys_extra", ["AQ.k2"])
     monkeypatch.setattr(online, "contexto_completo", lambda d: "")
-    monkeypatch.setattr(online, "cota", lambda m, chave=0: None)
+    monkeypatch.setattr(online, "cota", lambda m, chave=0: online._Cota(m, 10 ** 6, 10 ** 6))
     chamadas = []
 
     class Resp:
@@ -1569,3 +1569,64 @@ def test_teste_de_dns_desiste_no_primeiro_timeout(monkeypatch):
     monkeypatch.setattr(dnsativo, "consulta", lambda nome, res, tipo="A": feitas.append((nome, res, tipo)) or "erro")
     assert dnsativo.resolve("mudo.com") is None and len(feitas) == 1
     assert dnsativo.inativo(["mudo.com", "www.mudo.com", "a.mudo.com"]) is False and len(feitas) == 2
+
+
+def test_pedido_sem_resposta_nao_gasta_a_cota(env, monkeypatch):
+    """07/10: a conta sobe antes do pedido; 503 e tempo esgotado gastavam os 19/dia de cada Flash completo sem o Google
+    ter respondido (~205 de 228 num dia). Sem resposta: o pedido volta p/ a cota e o modelo descansa cada vez mais."""
+    import time
+    from types import SimpleNamespace
+
+    from dnsanalyzer import online
+    monkeypatch.setattr(online, "_COTAS", {})
+    monkeypatch.setattr(online, "_PERSIST_ATE", 0.0)
+    ct = online.cota("gemini-3.7-flash")
+    ct.rpm = 10 ** 6
+    respostas = iter([503, "tempo", 200])
+
+    def post(url, **kw):
+        r = next(respostas)
+        if r == "tempo":
+            raise online.httpx.ReadTimeout("t")
+        return SimpleNamespace(status_code=r, text="", json=lambda: {"candidates": [{"content": {"parts": [
+            {"text": '{"lista": "jogos", "confianca": 0.9}'}]}}]})
+    monkeypatch.setattr(online.httpx, "post", post)
+    monkeypatch.setattr(online, "contexto_completo", lambda d: "contexto")
+
+    def no_banco():
+        with online.db.conn() as c:
+            return c.execute("SELECT n FROM online_cota WHERE modelo = 'gemini-3.7-flash' AND chave = %s", (ct.chave,)).fetchone()["n"]
+    pausas = []
+    for _ in range(2):
+        ct.pausa_ate = 0.0
+        assert ct.esperar() and ct.n == 1 and no_banco() == 1
+        with pytest.raises(online.OnlineIndisponivel):
+            online.perguntar({"name": "x.com"}, [], False, "gemini-3.7-flash")
+        assert ct.n == 0 and no_banco() == 0, "pedido sem resposta não conta"
+        pausas.append(ct.pausa_ate - time.time())
+    assert 80 < pausas[0] < 95 and 170 < pausas[1] < 185 and ct.falhas == 2, "descanso dobra a cada falha seguida"
+    ct.pausa_ate = 0.0
+    assert ct.esperar()
+    obj, _ = online.perguntar({"name": "x.com"}, [], False, "gemini-3.7-flash")
+    assert obj["lista"] == "jogos" and ct.n == 1 and no_banco() == 1 and ct.falhas == 0, "respondido conta"
+
+
+def test_tld_abusado_sozinho_nao_impede_abrir_o_site(env, monkeypatch):
+    """07/10: 1wcpdd.life (espelho de casa de apostas; o título da página diz "Cassino e Apostas") ficou "não
+    identificado" porque o site nunca era aberto em TLD da lista de abusados. Só a lista de ameaça impede."""
+    from dnsanalyzer import classifier, db, webintel
+    visto = {}
+    monkeypatch.setattr(webintel, "lookup", lambda c, name, fetch, allow_site: visto.__setitem__(name, allow_site))
+    monkeypatch.setattr(webintel, "search", lambda *a, **k: None)
+    with db.conn() as c:
+        sid = c.execute("INSERT INTO ti_sources (name, label, kind, url, threat, confidence, weight) VALUES "
+                        "('tlds-t', 'TLDs abusados', 'tld_adblock', 'u', 'abused_tld', 'low', 10) RETURNING id").fetchone()["id"]
+        amea = c.execute("INSERT INTO ti_sources (name, label, kind, url, threat, confidence, weight) VALUES "
+                         "('ameaca-t', 'Ameaças', 'plain', 'u', 'malware', 'high', 80) RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO ti_indicators (source_id, domain) VALUES (%s, 'life'), (%s, 'golpe-t.life')", (sid, amea))
+        for n in ("espelho-t.life", "golpe-t.life"):
+            row = c.execute("INSERT INTO domains (name, kind, tld) VALUES (%s, 'public', 'life') RETURNING *", (n,)).fetchone()
+            c.execute("INSERT INTO fqdns (name, domain_id, candidates) VALUES (%s, %s, %s)", (n, row["id"], [n]))
+            d = classifier.build_dossier(c, row, with_web=True)
+            assert d["abused_tld"], "o TLD continua contando como sinal de risco nas regras"
+    assert visto == {"espelho-t.life": True, "golpe-t.life": False}

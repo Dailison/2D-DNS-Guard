@@ -34,6 +34,16 @@ def test_botao_fila_ao_lado_do_pausar(cli):
     assert 'x-ref="fila"' in html and "/analise/ia/fila" in html
 
 
+def test_nome_do_dominio_abre_o_site_em_nova_aba(cli):
+    """07/10 (pedido do usuário): o primeiro passo de quem analisa é abrir o site. Sem referer: o site não fica
+    sabendo de onde veio o clique."""
+    html = cli.c.get("/analise/ia").get_data(as_text=True)
+    # fila, detalhes e — uma vez por etapa (local e online) — os cartões em análise e a tabela
+    assert html.count(':href="urlSite(') == 6 and html.count('target="_blank" rel="noopener noreferrer"') == 6
+    assert '@click.stop x-text="r.name"' in html, "na tabela, o clique no nome não abre os detalhes da linha"
+    assert "Abrir domínio" in html, "a página interna do domínio continua nos detalhes"
+
+
 def test_rota_da_fila_repassa_o_analisador(cli):
     r = cli.c.get("/analise/ia/fila")
     assert r.status_code == 200 and r.get_json()["e2"]["itens"][0]["entrada"] == "investigacao"

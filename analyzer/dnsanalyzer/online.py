@@ -120,6 +120,7 @@ class _Cota:
         self.modelo, self.rpm, self.rpd = modelo, max(rpm, 1), max(rpd, 1)
         self.base, self.chave = base or modelo, chave     # nome do modelo p/ a API e nº da chave (1 = principal)
         self.lock, self.ultimo, self.dia, self.n, self.pausa_ate = threading.Lock(), 0.0, None, 0, 0.0
+        self.falhas = 0   # pedidos seguidos sem resposta (erro do Google/tempo esgotado): a pausa cresce
 
     @staticmethod
     def _hoje():
@@ -171,6 +172,29 @@ class _Cota:
 
     def pausar(self, segundos: float):
         self.pausa_ate = max(self.pausa_ate, time.time() + segundos)
+
+    def devolver(self):
+        """O pedido não foi atendido (erro do Google, tempo esgotado, 429): não gasta a cota do dia. 07/10: a conta
+        sobe ANTES do pedido e ~205 dos 228 pedidos diários aos Flash completos terminavam em 503/tempo esgotado —
+        o analisador dava a cota por esgotada sem o Google ter respondido. Se o Google contou mesmo assim, o 429 do
+        dia avisa (aprender_limite + pausar_dia)."""
+        with self.lock:
+            if self.n <= 0 or self.dia is None:
+                return
+            self.n -= 1
+            dia = self.dia
+        _sql(lambda c: c.execute("UPDATE online_cota SET n = greatest(n - 1, 0), atualizado_at = now() "
+                                 "WHERE chave = %s AND modelo = %s AND dia = %s", (self.chave, self.base, dia)))
+
+    def falhou(self):
+        """Sem resposta: devolve o pedido à cota e descansa o modelo nesta chave — 90 s, dobrando a cada falha seguida
+        (até 30 min), p/ não martelar um modelo sobrecarregado agora que a falha não gasta a cota."""
+        self.devolver()
+        self.falhas += 1
+        self.pausar(min(90 * 2 ** (self.falhas - 1), 1800))
+
+    def respondeu(self):
+        self.falhas = 0
 
     def aprender_limite(self, valor: int | None):
         """Limite do dia informado pelo Google no 429 (quotaValue): passa a valer, com margem de 1."""
@@ -395,10 +419,12 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
     auth = {"params": {"key": k}} if k.startswith("AQ.") else {"headers": {"x-goog-api-key": k}}
     try:
         r = httpx.post(URL.format(model=modelo), json=corpo, timeout=150 if modelo.startswith("gemma") else 60, **auth)
-    except httpx.HTTPError as e:
+    except httpx.HTTPError as e:   # tempo esgotado/conexão: sem resposta
+        ct.falhou()
         raise OnlineIndisponivel(f"Gemini {qual}: {e.__class__.__name__}") from e
     if r.status_code == 429:
         dia, espera, limite = _limite_429(r)
+        ct.devolver()   # pedido recusado
         if dia:
             ct.aprender_limite(limite)
             ct.pausar_dia()
@@ -406,11 +432,13 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
             ct.pausar(BUSCA_PAUSA_S if buscar else espera)
         raise OnlineIndisponivel(f"Gemini {qual}: cota {'do dia' if dia else 'do minuto'} esgotada (429)")
     if r.status_code >= 500:   # sobrecarga do modelo
-        ct.pausar(90)
+        ct.falhou()
         raise OnlineIndisponivel(f"Gemini {qual}: HTTP {r.status_code}")
     if r.status_code != 200:
+        ct.devolver()
         ct.pausar(600)   # chave inválida/modelo inexistente: não martela
         raise OnlineIndisponivel(f"Gemini {qual}: HTTP {r.status_code}: {r.text[:200]}")
+    ct.respondeu()
     j = r.json()
     partes = ((j.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
     texto = "".join(p.get("text", "") for p in partes if not p.get("thought"))

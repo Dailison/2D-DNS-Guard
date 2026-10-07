@@ -379,8 +379,10 @@ def lookup(c, domain: str, fetch: bool, allow_site: bool) -> dict | None:
     row = c.execute("SELECT value, fetched_at FROM lookup_cache WHERE kind='web' AND key=%s", (domain,)).fetchone()
     if row and row["fetched_at"] > datetime.now(timezone.utc) - timedelta(days=cfg.web_cache_days):
         v = row["value"] or {}
+        # ("site" ausente = nunca foi aberto — antes o TLD abusado impedia: abre já, sem esperar as 6 h)
         if (fetch and allow_site and cfg.web_intel_enabled and cfg.web_fetch_site and not site_com_conteudo(v.get("site"))
-                and v.get("site_at", v.get("fetched") or "") < (datetime.now(timezone.utc) - SITE_VAZIO_REABRE).isoformat()):
+                and ("site" not in v or v.get("site_at", v.get("fetched") or "")
+                     < (datetime.now(timezone.utc) - SITE_VAZIO_REABRE).isoformat())):
             try:
                 v["site"] = homepage(domain)
             except Exception as e:  # noqa: BLE001 — site fora do ar não trava a análise

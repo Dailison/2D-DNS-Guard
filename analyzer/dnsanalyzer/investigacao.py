@@ -1044,7 +1044,7 @@ def coleta(did: int, limite_s: float = 45) -> dict | None:
         if feita is not None:
             return feita
         dossie = build_dossier(c, row)   # só o cache (fases 1-3): sinais de ameaça e o WHOIS
-    abre_site = not dossie.get("ti_hits") and not dossie.get("abused_tld")
+    abre_site = not dossie.get("ti_hits")
     with httpx.Client(timeout=20, follow_redirects=True, headers={"User-Agent": webintel.UA}) as http:
         fontes = _rodar(_tarefas_rede(nome, http, abre_site, False,
                                       (dossie.get("fqdn_stats") or {}).get("sample")), limite_s, nome)
@@ -1526,7 +1526,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     # na GPU) e uma margem — o que sobrar do contexto é o quanto o dossiê pode crescer
     tokens_veredito = 3_500 + (1_800 if client.extra else 700) + 300
     ti_forte = any(h.get("confidence") in ("high", "medium") for h in (dossie.get("ti_hits") or []))
-    abre_site = not dossie.get("ti_hits") and not dossie.get("abused_tld")   # como as outras fases: sem sinal de ameaça
+    abre_site = not dossie.get("ti_hits")   # como as outras fases: sem lista de ameaça (TLD abusado sozinho não impede)
     fqdns = (dossie.get("fqdn_stats") or {}).get("sample") or [nome]
     marca = nome.split(".")[0]
     fontes: dict = {}

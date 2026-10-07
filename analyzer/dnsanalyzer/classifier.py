@@ -85,11 +85,12 @@ def build_dossier(c, drow: dict, with_rdap: bool = False, with_web: bool = False
     d["abused_tld"] = ti.abused_tld(c, d["tld"])
 
     # identificação por fontes públicas (Wikidata / certificado / página do site).
-    # Fase A só lê o cache; a Fase B busca. Site só é aberto sem sinal de ameaça.
+    # Fase A só lê o cache; a Fase B busca. Site só é aberto sem lista de ameaça. (07/10) TLD "abusado" sozinho NÃO
+    # impede mais: é onde vivem os espelhos de aposta/pirataria, e sem a página o 1wcpdd.life (título "Cassino e
+    # Apostas Esportivas Online | 1win") ficou "não identificado" — 724 domínios estavam assim.
     if not d["catalog"]:
         from . import webintel
-        d["web"] = webintel.lookup(c, name, fetch=with_web,
-                                   allow_site=not d["ti_hits"] and not d["abused_tld"])
+        d["web"] = webintel.lookup(c, name, fetch=with_web, allow_site=not d["ti_hits"])
         # etapa 2: resultados de busca (só busca na rede quando with_search; senão usa o cache)
         d["search"] = webintel.search(c, name, fetch=with_search and not (pular_conhecido and _pular_busca(d)))
         # etapa 3: WHOIS do domínio registrável (na rede só com with_whois; senão o cache).

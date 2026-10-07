@@ -113,7 +113,9 @@
   .tb .h{color:var(--mu)!important;font-variant-numeric:tabular-nums;font-size:.82rem;width:5rem}
   .tb .dm{max-width:30rem;overflow:hidden}
   .tb .dm .n{display:flex;align-items:center;gap:9px;min-width:0}
-  .tb .dm .n b{font-size:1rem;font-weight:600;color:var(--dom);letter-spacing:.01em;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+  .tb .dm .n b,.tb .dm .n a.st{font-size:1rem;font-weight:600;color:var(--dom);letter-spacing:.01em;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;text-decoration:none}
+  .tb .dm .n a.st:hover,.lc .n:hover,.mdl .hd h3 a:hover{text-decoration:underline}
+  .mdl .hd h3 a{color:inherit;text-decoration:none}
   .tb .dm .n i{font-style:normal;font-size:.82rem;color:var(--mu);overflow:hidden;text-overflow:ellipsis;flex:1 1 0;min-width:0}
   .tb .ds{max-width:22rem;overflow:hidden}
   .tb .ds i{font-style:normal;font-size:.8rem;color:var(--mu);margin-left:6px}
@@ -274,7 +276,7 @@
               <tr :class="{an: r.analisando}">
                 <td class="num" x-text="r.analisando ? '' : i + 1"></td>
                 <td class="dm"><span class="spin" x-show="r.analisando" title="em análise agora"></span>
-                  <a :href="urlDom(r.name)" x-text="r.name"></a></td>
+                  <a :href="urlSite(r.name)" target="_blank" rel="noopener noreferrer" :title="'abrir ' + r.name + ' em nova aba'" x-text="r.name"></a></td>
                 <td><span class="eb" :class="r.entrada" x-text="FENT[r.entrada] || r.entrada"></span>
                   <small x-show="r.pouco_acesso" title="pouco acesso: no fim da fila"> · pouco acesso</small>
                   <small x-show="r.aguardando" title="resposta inválida da IA online: tenta de novo em 10 min"> · aguardando</small></td>
@@ -305,7 +307,7 @@
           <div class="lc" :class="{done: c.res}" :data-k="c.key" :style="c.res ? '--cc:' + c.res.cor : ''"
                :title="[entSub('{{ et }}', c), c.q != null ? c.q + ' consultas' : ''].filter(Boolean).join(' · ')">
             <span class="spin" x-show="!c.res"></span>
-            <a class="n" :href="urlDom(c.name)" x-text="c.name"></a>
+            <a class="n" :href="urlSite(c.name)" target="_blank" rel="noopener noreferrer" :title="'abrir ' + c.name + ' em nova aba'" x-text="c.name"></a>
             <span class="eb" x-show="c.entrada" :class="c.entrada" x-text="ENT['{{ et }}'][c.entrada]"></span>
             <span class="t" x-show="!c.res" x-text="dur((agora - c.t0) / 1000)"></span>
             <template x-if="c.res">
@@ -329,7 +331,7 @@
         <template x-for="r in visiveis('{{ et }}')" :key="r.name">
           <tr :data-n="r.name" :class="{espera: r._espera, chegando: r._chegando}" @click="sel = r">
             <td class="h" x-text="hora(r.at)"></td>
-            <td class="dm"><div class="n"><b x-text="r.name"></b><span class="eb" x-show="r.entrada" :class="r.entrada" x-text="ENT['{{ et }}'][r.entrada]"></span><i x-text="r.servico || ''" :title="r.servico"></i></div></td>
+            <td class="dm"><div class="n"><a class="st" :href="urlSite(r.name)" target="_blank" rel="noopener noreferrer" :title="'abrir ' + r.name + ' em nova aba'" @click.stop x-text="r.name"></a><span class="eb" x-show="r.entrada" :class="r.entrada" x-text="ENT['{{ et }}'][r.entrada]"></span><i x-text="r.servico || ''" :title="r.servico"></i></div></td>
             <td><span class="pill" :class="r.cls || 'PENDENTE'" x-text="LBL[r.cls] || r.cls || '—'"></span></td>
             <td class="rk"><span class="num" :class="fr(r.risco)" x-text="r.risco != null ? r.risco : '—'"></span></td>
             <td><span class="num" :class="fc(r.conf)" x-text="r.conf != null ? r.conf + '%' : '—'"></span></td>
@@ -346,7 +348,7 @@
   <div class="mdl" x-show="sel" x-transition.opacity @click.self="sel = null" @keydown.escape.window="sel = null">
     <template x-if="sel">
       <div class="cx">
-        <div class="hd"><div><h3 x-text="sel.name"></h3><small x-text="sel.servico || ''"></small></div>
+        <div class="hd"><div><h3><a :href="urlSite(sel.name)" target="_blank" rel="noopener noreferrer" :title="'abrir ' + sel.name + ' em nova aba'" x-text="sel.name"></a></h3><small x-text="sel.servico || ''"></small></div>
           <button type="button" class="x" @click="sel = null" aria-label="Fechar">×</button></div>
         <div class="bd">
           <div class="gr">
@@ -474,6 +476,7 @@ document.addEventListener('alpine:init', function () {
 
       // ------------------------------------------------------------ formatação
       urlDom(n) { return URL_DOM.replace('__N__', encodeURIComponent(n)); },
+      urlSite(n) { return 'http://' + encodeURIComponent(n); },
       clsK(c) { return c || 'PENDENTE'; },
       hora(iso) { return iso ? new Date(iso).toLocaleTimeString('pt-BR', {timeZone: 'America/Sao_Paulo'}) : ''; },
       dur(s) { s = Math.max(0, Math.round(s)); var m = Math.floor(s / 60); return m ? m + 'min ' + (s % 60) + 's' : s + 's'; },

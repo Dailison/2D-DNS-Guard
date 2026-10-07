@@ -1251,25 +1251,91 @@ Como raciocinar:
 # caracteres (~2,2 mil tokens): o veredito leva ~3,8 mil tokens fixos (regras de lista, categorias) + o dossiê +
 # ~1,8 mil de raciocínio/resposta — tudo dentro do num_ctx de 8k
 MAX_DOSSIE = 7_500
+# quanto o dossiê pode CRESCER além disso nas rodadas seguintes, quando sobra contexto (VM: resposta curta, sem
+# raciocínio): a evidência nova entra no fim sem recortar as antigas
+FOLGA_DOSSIE = 3_000
 
 
 _LONGAS = {"websearch", "pagina", "subdominio", "site"}   # muitas e longas: cortadas antes das fontes curtas
 
 
-def _dossie_texto(nome: str, ev: list[dict], atual: dict) -> str:
-    linhas = "\n".join(f"{e['id']}: {e['text']}" for e in ev)
-    if len(linhas) > MAX_DOSSIE:   # corta o texto das evidências mais longas, nunca a lista delas
-        longas = sum(1 for e in ev if e.get("kind") in _LONGAS)
-        fixo = sum(min(len(e["text"]), 400) + 6 for e in ev if e.get("kind") not in _LONGAS)
-        corte_longas = (MAX_DOSSIE - fixo) // max(longas, 1)
-        if corte_longas >= 150:   # fontes curtas até 400 caracteres; buscas/páginas dividem o resto
-            cortes = {True: corte_longas, False: 400}
-        else:                     # nem assim cabe: corte igual p/ todas
-            cortes = dict.fromkeys((True, False), max(120, MAX_DOSSIE // max(len(ev), 1)))
-        linhas = "\n".join(f"{e['id']}: {e['text'][:cortes[e.get('kind') in _LONGAS]]}" for e in ev)
+def _conf(v) -> float:
+    """Confiança que o modelo devolve fora de 0–1 não vale nada (07/10: o esquema não segura o número — em 2% das
+    rodadas vieram valores de -104797 a 360, e 3 delas encerraram a investigação como "certeza")."""
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 else 0.0
+
+
+def _cortes(ev: list[dict], sala: int) -> tuple[dict, bool]:
+    """Caracteres de cada evidência (por id) para caberem em `sala` — corta o texto das mais longas, nunca a lista
+    delas: fontes curtas até 400 e buscas/páginas dividem o resto; se nem assim cabe (False), corte igual p/ todas."""
+    longas = sum(1 for e in ev if e.get("kind") in _LONGAS)
+    fixo = sum(min(len(e["text"]), 400) + 6 for e in ev if e.get("kind") not in _LONGAS)
+    corte_longas = (sala - fixo) // max(longas, 1)
+    if corte_longas >= 150:
+        return {e["id"]: corte_longas if e.get("kind") in _LONGAS else 400 for e in ev}, True
+    return dict.fromkeys((e["id"] for e in ev), max(120, sala // max(len(ev), 1))), False
+
+
+def _linhas(ev: list[dict], cortes: dict) -> str:
+    return "\n".join(f"{e['id']}: {e['text'][:cortes.get(e['id'])]}" for e in ev)
+
+
+def _cabecalho(nome: str, atual: dict) -> str:
     return (f"Domínio: {nome}\nHoje: {atual.get('classification') or '?'} / categoria {atual.get('category') or '?'} "
             f"/ lista {atual.get('lista_ia') or atual.get('lista_wl') or '—'} ({atual.get('lista_fonte') or 'sem fonte'})"
-            f"\n\nEvidências:\n{linhas}")
+            "\n\nEvidências:\n")
+
+
+def _dossie_texto(nome: str, ev: list[dict], atual: dict) -> str:
+    linhas = _linhas(ev, {})
+    if len(linhas) > MAX_DOSSIE:
+        linhas = _linhas(ev, _cortes(ev, MAX_DOSSIE)[0])
+    return _cabecalho(nome, atual) + linhas
+
+
+class Dossie:
+    """Dossiê que só CRESCE NO FIM entre as rodadas (07/10). Cada evidência ganha id e tamanho na primeira vez em que
+    aparece e não muda mais: a pergunta de cada rodada, do veredito e do revisor começa igual à anterior e o modelo
+    reaproveita a leitura — só lê o que entrou. Antes cada rodada renumerava e recortava tudo, e a VM (só CPU, ~40
+    tokens/s) relia o dossiê inteiro: ~70 s por pergunta, 4,9 perguntas por domínio. (O reaproveitamento exige que a
+    pergunta nova CONTINUE a anterior: o modelo usa atenção em janela e o servidor só retoma de perto do fim de uma
+    pergunta já lida — por isso um trecho fixo no começo, igual entre domínios, não é reaproveitado.)
+    Sem espaço para a evidência nova, recorta tudo como antes (e aquela pergunta é relida)."""
+
+    def __init__(self, nome: str, atual: dict, base: list[dict]):
+        self.nome, self.atual, self.ev = nome, atual, list(base)
+        self.teto = MAX_DOSSIE
+        self._vistas = {(e.get("kind"), e["text"]) for e in base}
+        self._corte: dict = {}   # id -> caracteres mostrados (None = inteira)
+
+    def juntar(self, fontes: dict) -> None:
+        """Acrescenta as evidências inéditas das fontes, na ordem de chegada."""
+        for e in novas_evidencias(0, fontes):
+            if (e["kind"], e["text"]) not in self._vistas:
+                self._vistas.add((e["kind"], e["text"]))
+                self.ev.append(e | {"id": f"E{len(self.ev)}"})
+
+    @staticmethod
+    def _tam(e: dict, corte) -> int:
+        return (len(e["text"]) if corte is None else min(len(e["text"]), corte)) + len(e["id"]) + 3
+
+    def folga(self, tokens_livres: int) -> None:
+        """Quanto ainda cabe no contexto do veredito (medido na pergunta anterior): o dossiê pode crescer até aí.
+        2,5 caracteres por token: URLs e códigos das evidências rendem mais tokens que texto corrido."""
+        usado = sum(self._tam(e, self._corte.get(e["id"])) for e in self.ev)
+        self.teto = max(MAX_DOSSIE, min(MAX_DOSSIE + FOLGA_DOSSIE, usado + int(max(tokens_livres, 0) * 2.5)))
+
+    def texto(self) -> str:
+        novas = [e for e in self.ev if e["id"] not in self._corte]
+        if novas:
+            sala = self.teto - sum(self._tam(e, self._corte[e["id"]]) for e in self.ev if e["id"] in self._corte)
+            if sum(self._tam(e, None) for e in novas) <= sala:
+                self._corte |= dict.fromkeys((e["id"] for e in novas))
+            else:
+                cortes, coube = _cortes(novas, sala) if len(novas) < len(self.ev) else ({}, False)
+                # as novas não cabem com um tamanho útil: recorta tudo (como era em toda rodada)
+                self._corte = (self._corte | cortes) if coube else _cortes(self.ev, self.teto)[0]
+        return _cabecalho(self.nome, self.atual) + _linhas(self.ev, self._corte)
 
 
 def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> tuple[dict, dict]:
@@ -1285,9 +1351,12 @@ def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> 
         r = httpx.post(f"{client.url}/api/chat", json=payload, timeout=900)
     r.raise_for_status()
     d = r.json()
+    ns = lambda k: round(d[k] / 1e9, 1) if isinstance(d.get(k), (int, float)) else None   # noqa: E731
     return json.loads((d.get("message") or {}).get("content") or "{}"), {
         "segundos": round(time.monotonic() - t0, 1), "tokens": d.get("eval_count"),
-        "tokens_pergunta": d.get("prompt_eval_count"), "modelo": client.model, "gpu": bool(client.extra)}
+        "tokens_pergunta": d.get("prompt_eval_count"), "modelo": client.model, "gpu": bool(client.extra),
+        # leitura da pergunta x escrita da resposta: é aqui que se vê o reaproveitamento entre as rodadas
+        "leitura_s": ns("prompt_eval_duration"), "escrita_s": ns("eval_duration")}
 
 
 def _proximo_passo(client, texto: str, rodada: int, restante: int, feitas: list[str]) -> tuple[dict, dict]:
@@ -1452,6 +1521,10 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     resta = lambda: prazo - (time.monotonic() - t0)   # noqa: E731
     event("investigacao_start", nome, did, detail=f"fase 6 · investigação profunda · {d['total_queries']} consultas")
     base = [e.as_dict() for e in build_evidence(dossie)]
+    dos = Dossie(nome, d, base)
+    # o que o veredito põe DEPOIS do dossiê: regras de lista e categorias (~3,3 mil tokens), a resposta (com raciocínio
+    # na GPU) e uma margem — o que sobrar do contexto é o quanto o dossiê pode crescer
+    tokens_veredito = 3_500 + (1_800 if client.extra else 700) + 300
     ti_forte = any(h.get("confidence") in ("high", "medium") for h in (dossie.get("ti_hits") or []))
     abre_site = not dossie.get("ti_hits") and not dossie.get("abused_tld")   # como as outras fases: sem sinal de ameaça
     fqdns = (dossie.get("fqdn_stats") or {}).get("sample") or [nome]
@@ -1515,10 +1588,13 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
         for rodada in range(1, MAX_RODADAS + 1):   # rodadas de investigação enquanto houver tempo
             if resta() < reserva + custo_rodada:
                 break
-            ev = base + novas_evidencias(len(base), fontes)
-            passo, meta = _proximo_passo(client, _dossie_texto(nome, ev, d), rodada, int(resta() - reserva), feitas)
+            dos.juntar(fontes)
+            passo, meta = _proximo_passo(client, dos.texto(), rodada, int(resta() - reserva), feitas)
+            passo["confianca"] = _conf(passo.get("confianca"))
             rodadas.append(meta | {k: passo.get(k) for k in ("hipotese", "confianca", "pronto")})
-            if passo.get("pronto") and (passo.get("confianca") or 0) >= cfg.investigacao_confianca_min:
+            if meta.get("tokens_pergunta"):   # o veredito repete esta pergunta + as regras de lista + a resposta
+                dos.folga(client.num_ctx - meta["tokens_pergunta"] - tokens_veredito)
+            if passo.get("pronto") and passo["confianca"] >= cfg.investigacao_confianca_min:
                 break
             novas = list(dict.fromkeys(q.strip() for q in passo.get("buscas") or []
                                        if q.strip() and _chave(q) not in {_chave(x) for x in feitas}))
@@ -1540,9 +1616,12 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
                 fontes["cnpjs"] += cnpjs(c, cns)
             feitas += novas + pags + sds + [re.sub(r"\D", "", x) for x in cns]
             etapas.append({"etapa": f"rodada {rodada}", "segundos": round(time.monotonic() - t0, 1)})
-    ev = base + novas_evidencias(len(base), fontes)
-    texto = _dossie_texto(nome, ev, d)
+    dos.juntar(fontes)
+    ev, texto = dos.ev, dos.texto()
     v, meta_v = _veredito(client, texto, cats, scats)
+    for k in ("confidence", "lista_confianca"):
+        if k in v:
+            v[k] = _conf(v[k])
     etapas.append({"etapa": "veredito", "segundos": round(time.monotonic() - t0, 1)})
     motivo_nao = pode_aplicar(v, ti_forte, cfg.investigacao_confianca_min)
     revisao, meta_r = None, None

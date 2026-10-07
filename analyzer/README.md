@@ -223,6 +223,14 @@ E `LLAMA_ARG_CTX_CHECKPOINTS=4` (`ollama.service.d/checkpoints.conf`): o llama-s
 "context checkpoints" de ~200 MiB por vaga; com a investigação na VM a RAM (26 GB) encheu e o kernel matou o servidor
 (OOM em 30/09). Com 4 por vaga o servidor fica em ~19-21 GB.
 
+**Reaproveitamento da leitura (07/10).** O modelo usa atenção em janela (SWA): o servidor só retoma uma pergunta já
+lida a partir de um desses checkpoints, que ficam perto do FIM de cada pergunta. Medido na VM (~40 tokens/s lendo):
+pergunta que CONTINUA a anterior (mesmo começo + 300 tokens novos) leva 11 s em vez de ~118 s; pergunta com o mesmo
+texto fixo no começo e outro dossiê depois relê tudo. Por isso o dossiê da investigação (`investigacao.Dossie`) só
+cresce no fim — cada evidência mantém id e tamanho da primeira vez em que apareceu — e as regras de lista ficam no
+fim, só no veredito: as rodadas seguintes, o veredito e o revisor leem só o que entrou. Pôr texto fixo no começo
+"para o modelo guardar" NÃO funciona aqui. `leitura_s`/`escrita_s` de cada chamada ficam em `domains.investigacao`.
+
 ### Reforço com GPU (PC da rede)
 
 Um PC com GPU acelera a fila: a VM o usa enquanto ele responde e volta sozinha para a própria IA

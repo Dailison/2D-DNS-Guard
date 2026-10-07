@@ -114,7 +114,7 @@ class _Cli:
     extra, model, keep_alive, num_ctx, url = True, "gemma4:26b", "60m", 8192, "http://gpu"
 
 
-def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bool = False):
+def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bool = False, passos=None):
     """Fontes e IA simuladas; devolve (gravado no domínio, aplicou?, passos pedidos)."""
     from types import SimpleNamespace
     from dnsanalyzer import classifier, config, db
@@ -132,7 +132,7 @@ def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bo
     monkeypatch.setattr(inv, "subdominios", lambda ns, http: [])
     monkeypatch.setattr(inv, "paginas_dos_resultados", lambda *a: [])
     monkeypatch.setattr(inv, "tem_visao", lambda c: False)
-    passos = iter([{"hipotese": "ERP", "confianca": 0.6, "pronto": False, "buscas": ["x erp"], "paginas": [],
+    passos = passos or iter([{"hipotese": "ERP", "confianca": 0.6, "pronto": False, "buscas": ["x erp"], "paginas": [],
                     "subdominios": [], "cnpjs": []},
                    {"hipotese": "ERP X", "confianca": 0.9, "pronto": True, "buscas": [], "paginas": [],
                     "subdominios": [], "cnpjs": []}])
@@ -516,3 +516,71 @@ def test_cadeia_de_cname_dos_nomes_dos_logs(monkeypatch):
     txt = " | ".join(e["text"] for e in inv.novas_evidencias(0, {"dns": d}))
     assert "1.ssiloc.com (consultado pelos computadores) aponta para 1.ssiloc.com.edgesuite.net → a79.w39.akamai.net" in txt
     assert "Akamai" in txt
+
+
+def _fontes_grandes(n_buscas: int) -> dict:
+    return {"dns": {"mx": ["1 aspmx.l.google.com."], "ns": ["ns1.x.com."]},
+            "buscas": [{"consulta": f"q{i}", "resultados": [{"host": f"h{i}.com", "title": "t", "snippet": "s" * 650}]}
+                       for i in range(n_buscas)]}
+
+
+def test_dossie_so_cresce_no_fim_entre_as_rodadas():
+    """07/10: a pergunta de cada rodada tem de COMEÇAR igual à anterior — é o que deixa o modelo reaproveitar a leitura
+    (na VM, reler o dossiê custava ~70 s por pergunta). Evidência já mostrada mantém id e texto; a nova entra no fim."""
+    base = [{"id": "E0", "kind": "resumo", "text": "domínio novo", "risk": False, "data": {}}]
+    f = _fontes_grandes(3)
+    dos = inv.Dossie("a.com", {"classification": "DESCONHECIDO"}, base)
+    dos.juntar(f)
+    t1, ids1 = dos.texto(), [e["id"] for e in dos.ev]
+    assert dos.texto() == t1, "sem evidência nova, a mesma pergunta"
+    # 2ª rodada: uma busca nova e um CNPJ — nas fontes eles ficam NO MEIO (ordem por tipo), no dossiê vão p/ o fim
+    f["buscas"].append({"consulta": "nova", "resultados": []})
+    f["cnpjs"] = [{"cnpj": "11222333000181", "razao_social": "X LTDA"}]
+    dos.juntar(f)
+    t2 = dos.texto()
+    assert t2.startswith(t1) and len(t2) > len(t1)
+    assert [e["id"] for e in dos.ev][:len(ids1)] == ids1 and len(dos.ev) == len(ids1) + 2
+    assert "busca 'nova'" in t2.splitlines()[-1] or "busca 'nova'" in t2.splitlines()[-2]
+    dos.juntar(f)
+    assert dos.texto() == t2, "juntar as mesmas fontes de novo não repete evidência"
+
+
+def test_dossie_cheio_cresce_na_folga_e_so_recorta_sem_espaco():
+    base = [{"id": "E0", "kind": "resumo", "text": "domínio novo", "risk": False, "data": {}}]
+    f = _fontes_grandes(14)   # ~10 mil caracteres: passa do limite já na 1ª rodada
+    dos = inv.Dossie("a.com", {}, base)
+    dos.juntar(f)
+    t1 = dos.texto()
+    assert len(t1) < inv.MAX_DOSSIE + 300 and all(f"E{i}:" in t1 for i in range(len(dos.ev))), "corta o texto, não a lista"
+    assert t1 == inv._dossie_texto("a.com", dos.ev, {}), "1ª rodada: o mesmo recorte de sempre"
+    nova = {"consulta": "nova", "resultados": [{"host": "z.com", "title": "t", "snippet": "z" * 650}]}
+    # com folga no contexto (VM, resposta curta): a nova entra inteira e nada do que já foi lido muda
+    dos.folga(1000)
+    f["buscas"].append(nova)
+    dos.juntar(f)
+    t2 = dos.texto()
+    assert t2.startswith(t1) and "z" * 650 in t2 and len(t2) <= inv.MAX_DOSSIE + inv.FOLGA_DOSSIE + 300
+    # sem folga (GPU com raciocínio): recorta tudo p/ caber, como era em toda rodada
+    sem = inv.Dossie("a.com", {}, base)
+    sem.juntar(_fontes_grandes(14))
+    s1 = sem.texto()
+    sem.folga(-500)
+    sem.juntar(f)
+    s2 = sem.texto()
+    assert not s2.startswith(s1) and len(s2) < inv.MAX_DOSSIE + 300 and all(f"E{i}:" in s2 for i in range(len(sem.ev)))
+
+
+def test_confianca_fora_da_faixa_nao_vale(monkeypatch):
+    """07/10: o modelo devolveu confiança de -104797 a 360 em 2% das rodadas; "pronto" com 360 encerrava a
+    investigação como se fosse certeza. Fora de 0–1 conta como 0 — na rodada e no veredito."""
+    assert [inv._conf(x) for x in (0.9, 1, 0, 360, -104797, None, "0.9", True)] == [0.9, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    passos = iter([{"hipotese": "ERP", "confianca": 360, "pronto": True, "buscas": ["x erp"], "paginas": [],
+                    "subdominios": [], "cnpjs": []},
+                   {"hipotese": "ERP X", "confianca": 0.9, "pronto": True, "buscas": [], "paginas": [],
+                    "subdominios": [], "cnpjs": []}])
+    monkeypatch.setattr(inv, "_veredito", lambda *a: ({**V_OK, "confidence": 97, "service": "X", "motivo": "m", "evidencias": []},
+                                                      {"modelo": "gemma4:26b", "segundos": 1}))
+    g, aplicou, buscas_feitas = _simula(monkeypatch, revisor_ok=True, veredito_ja=True, passos=passos)
+    assert "x erp" in buscas_feitas, "a 1ª rodada não encerrou a investigação: seguiu buscando"
+    assert [r.get("confianca") for r in g["rodadas"][:2]] == [0.0, 0.9]
+    assert not aplicou and g["veredito"]["confidence"] == 0.0 and "abaixo de" in g["sem_aplicar"]

@@ -48,6 +48,16 @@ def is_public_suffix(name: str) -> bool:
     return not ext.domain and bool(ext.suffix)
 
 
+def is_icann_suffix(name: str) -> bool:
+    """True se o nome é um sufixo público de REGISTRO (com.br, gov.br, co.uk, br) — sem os sufixos privados da PSL
+    (cloudfront.net, blogspot.com), que são plataformas de uma empresa só."""
+    name = normalize(name)
+    if not name:
+        return False
+    ext = _EXTRACT_ICANN(name)
+    return not ext.domain and bool(ext.suffix)
+
+
 def analyze_name(name: str, internal_suffixes: list[str] | None = None) -> NameInfo:
     fqdn = normalize(name)
     internal_suffixes = internal_suffixes or []

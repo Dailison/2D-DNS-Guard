@@ -136,9 +136,20 @@ def _compartilhado(nome: str, evidencia: list | None) -> bool:
     return any(nome == s or nome.endswith("." + s) for s in _COMPARTILHADOS)
 
 
+_MAX_POR_PAI = 20   # um domínio-pai bloqueado que tiraria mais entradas que isso da whitelist: ninguém sai (pessoa revisa)
+
+
+def _bloqueador(nome: str, em: set[str]) -> str | None:
+    """Entrada das listas de bloqueio que pega o nome: ele mesmo ou um domínio-pai."""
+    p = nome.split(".")
+    return next((x for x in (".".join(p[i:]) for i in range(len(p) - 1)) if x in em), None)
+
+
 def _bloqueio(c) -> tuple[set[str], set[str]]:
-    """(domínios nas listas de bloqueio, os pais de cada um) — p/ as travas de conflito."""
+    """(domínios nas listas de bloqueio, os pais de cada um) — p/ as travas de conflito. Sufixo público numa lista
+    (com.br) não conta: é erro de quem pôs, não conflito de cada site sob ele (ver listas.sufixo_publico)."""
     em = {r["domain"] for r in c.execute("SELECT DISTINCT domain FROM category_lists WHERE category <> 'para_revisar'")}
+    em = {d for d in em if not listas.sufixo_publico(d)}
     pais = set()
     for d in em:
         p = d.split(".")
@@ -172,8 +183,23 @@ def aplicar(c) -> dict:
     out = {"entrou": [], "saiu": []}
     em, pais = _bloqueio(c)
     # 1) saídas
-    for r in c.execute("SELECT w.category, w.domain, w.added_by, w.publicar, d.ti_hits, d.classification FROM whitelist_domains w "
-                       "LEFT JOIN domains d ON d.name = w.domain").fetchall():
+    linhas = c.execute("SELECT w.category, w.domain, w.added_by, w.publicar, d.ti_hits, d.classification FROM whitelist_domains w "
+                       "LEFT JOIN domains d ON d.name = w.domain").fetchall()
+    # (07/10) um domínio-pai bloqueado não derruba a whitelist em massa: com com.br numa lista, 2.308 entradas saíram
+    # num ciclo só. Acima de _MAX_POR_PAI, ninguém sai por causa daquele pai — fica o aviso p/ uma pessoa revisar.
+    por_pai: dict[str, int] = {}
+    for r in linhas:
+        if (r["added_by"] or "").startswith(("IA", CATALOGO_BY)):
+            b = _bloqueador(r["domain"], em)
+            if b and b != r["domain"]:
+                por_pai[b] = por_pai.get(b, 0) + 1
+    em_massa = {b for b, n in por_pai.items() if n > _MAX_POR_PAI}
+    for b in sorted(em_massa):
+        log.error("whitelist: %s numa lista de bloqueio tiraria %d entradas da whitelist — nada removido; revise %s",
+                  b, por_pai[b], b)
+        eventos.registrar("lista_recusada", b, origem="regras", detail=f"wl|{b} está numa lista de bloqueio e tiraria "
+                          f"{por_pai[b]} domínios da whitelist: nada foi removido — confira se a entrada está certa")
+    for r in linhas:
         nome, auto = r["domain"], (r["added_by"] or "").startswith(("IA", CATALOGO_BY))
         amea, sinal = _sinais(r["ti_hits"])
         # (27/09, sem fase 5) SUSPEITO não tira da whitelist: só deixa de valer no DNS — a entrada da IA já não vai ao
@@ -186,7 +212,7 @@ def aplicar(c) -> dict:
             motivo = risco
         elif r["publicar"] and (risco or suspeito or (auto and sinal)):
             so_lista = risco or suspeito or f"sinal de baixa confiança em subdomínio ({', '.join(sinal)})"
-        elif auto and listas._em_lista(nome, em):
+        elif auto and _bloqueador(nome, em) and _bloqueador(nome, em) not in em_massa:
             motivo = "está numa lista de bloqueio"
         elif auto and nome in pais and r["publicar"]:
             # pai de algo bloqueado (amazonaws.com, fastly.net): no DNS liberaria o subdomínio; fica só na lista. Antes

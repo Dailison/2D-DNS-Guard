@@ -47,10 +47,23 @@ DINAMICA_SQL = (
     "                 AND (td.review_status = 'allowed' OR td.override_classification = 'TRABALHO'))")
 
 
+def sufixo_publico(nome: str) -> bool:
+    """O nome é um sufixo público de registro (com.br, gov.br, co.uk, br): numa lista de bloqueio valeria p/ TODOS os
+    sites sob ele. (07/10: a regra DNS Inativo pôs com.br na lista — o nome "com.br" não resolve mesmo —, todo *.com.br
+    ficou bloqueado por meia hora e a trava da whitelist apagou 2.308 domínios .com.br.)"""
+    from .features import is_icann_suffix
+    return is_icann_suffix(nome)
+
+
 def itens(c, cat: str) -> list[dict]:
     """Conteúdo da lista: entradas gravadas (bloqueio automático / manual) + as da classificação
-    (listas dinâmicas). Sem repetir domínio; a entrada gravada prevalece."""
+    (listas dinâmicas). Sem repetir domínio; a entrada gravada prevalece.
+    Sufixo público nunca sai daqui (rede de segurança: é o que vai p/ o DNS e p/ o índice do console), venha de onde vier."""
     rows = c.execute("SELECT domain, added_by, added_at FROM category_lists WHERE category=%s", (cat,)).fetchall()
+    ruins = [r["domain"] for r in rows if sufixo_publico(r["domain"])]
+    if ruins:
+        log.error("lista %s tem sufixo público (%s): ignorado na publicação — tire da lista", cat, ", ".join(ruins[:5]))
+        rows = [r for r in rows if r["domain"] not in set(ruins)]
     # domínios dos serviços da categoria (Instagram em Redes sociais...) também fazem parte da lista
     vistos = {r["domain"] for r in rows}
     rows += [r for r in c.execute(

@@ -33,6 +33,14 @@ _STATUS = re.compile(r"status: (\w+)")
 _IP = re.compile(r"\sIN\s+(?:A|AAAA|MX)\s+\S+")
 
 
+def testavel(nome: str) -> bool:
+    """Só domínio de alguém passa pelo teste. Sufixo público (com.br, gov.br) e raiz de plataforma (cloudfront.net,
+    blogspot.com) não têm IP na raiz e NUNCA são "inativos": na lista, bloqueariam tudo o que está sob eles (07/10:
+    com.br entrou aqui e todo *.com.br ficou bloqueado). Nome sem ponto é nome de máquina, não domínio."""
+    from .features import is_public_suffix
+    return "." in nome and not is_public_suffix(nome)
+
+
 def consulta(nome: str, resolvedor: str, tipo: str = "A") -> str:
     """'ip' (respondeu com endereço), 'vazio' (NXDOMAIN ou resposta sem endereço), 'falha' (o resolvedor respondeu
     SERVFAIL/REFUSED: o DNS do domínio está quebrado) ou 'erro' (timeout/rede: não deu p/ saber)."""
@@ -119,6 +127,9 @@ def _com_ip(c, domain_id: int) -> int:
 def marcar(c, drow: dict, motivo: str) -> None:
     """Põe na lista DNS Inativo e tira das filas da IA (kind = 'inexistente', como o "Sem resposta" dos logs)."""
     nome = drow["name"]
+    if not testavel(nome):   # última barreira: quem chama já filtra
+        log.error("DNS Inativo: %s é sufixo público/raiz de plataforma — não entra na lista", nome)
+        return
     listas.contexto(c, POR, motivo)
     c.execute("DELETE FROM category_lists WHERE domain = %s AND category IN ('para_revisar', 'nao_identificado') "
               "AND coalesce(added_by, '') NOT LIKE '%%@%%'", (nome,))   # (o que uma pessoa pôs fica)
@@ -145,7 +156,7 @@ def desmarcar(c, drow: dict) -> bool:
 def etapa1(drow: dict) -> bool:
     """Teste da etapa 1, antes da IA: True = não resolve e foi p/ a lista DNS Inativo (a IA não é chamada)."""
     nome = drow["name"]
-    if drow.get("kind") != "public" or (drow.get("ti_signature") or "") or catalog.match(nome):
+    if drow.get("kind") != "public" or (drow.get("ti_signature") or "") or catalog.match(nome) or not testavel(nome):
         return False
     with db.conn() as c:
         com_ip = _com_ip(c, drow["id"])
@@ -175,7 +186,7 @@ def confirmar(c, drow: dict) -> bool:
     """Os logs dizem que o nome não resolve; o teste ativo (DNS público + MX) confirma? Confirmado: lista DNS Inativo.
     (01/10, pedido do usuário: destino único — antes os logs sozinhos mandavam p/ a whitelist "Sem resposta", que nunca
     era publicada; p/ uma lista de BLOQUEIO os logs não bastam: domínio só de e-mail tem MX e não tem site.)"""
-    if (drow.get("ti_signature") or "") or catalog.match(drow["name"]):
+    if (drow.get("ti_signature") or "") or catalog.match(drow["name"]) or not testavel(drow["name"]):
         return False
     nomes = _nomes(c, drow)
     sabidos = pelos_logs(c, [drow["id"]]).get(drow["id"], {})
@@ -196,7 +207,7 @@ def dos_logs(c, limite: int = 150) -> list[str]:
         "WHERE d.kind = 'public' AND NOT d.locked AND coalesce(d.ti_signature, '') = '' AND d.id IN (" + listas.NAO_RESOLVE_SQL + ") "
         " AND NOT EXISTS (SELECT 1 FROM lookup_cache l WHERE l.kind = %s AND l.key = d.name AND l.fetched_at > now() - interval '1 day') "
         "ORDER BY d.total_queries DESC LIMIT %s", (TESTE, limite)).fetchall()
-    rows = [r for r in rows if not catalog.match(r["name"])]
+    rows = [r for r in rows if not catalog.match(r["name"]) and testavel(r["name"])]
     nomes = {r["id"]: _nomes(c, r) for r in rows}
     sabidos = pelos_logs(c, [r["id"] for r in rows])
     with ThreadPoolExecutor(24) as pool:   # os testes em paralelo (nenhuma linha fica presa: só leitura até aqui)
@@ -226,7 +237,7 @@ def migrar_sem_resposta(aplicar: bool = False, threads: int = 48) -> dict:
                 fq[r["domain_id"]].append(r["name"])
     nomes = {r["id"]: list(dict.fromkeys([r["name"], "www." + r["name"]] + fq.get(r["id"], []))) for r in rows}
     with ThreadPoolExecutor(threads) as pool:
-        mortos = list(pool.map(lambda r: inativo(nomes[r["id"]]) and not catalog.match(r["name"]), rows))
+        mortos = list(pool.map(lambda r: testavel(r["name"]) and inativo(nomes[r["id"]]) and not catalog.match(r["name"]), rows))
     ina = [r for r, m in zip(rows, mortos) if m]
     vivos = [r for r, m in zip(rows, mortos) if not m]
     if aplicar:
@@ -265,7 +276,8 @@ def varrer(aplicar: bool = False, threads: int = 48) -> dict:
             "AND domain_id = ANY(%s) GROUP BY 1", (ids,))}
     nomes = {r["id"]: list(dict.fromkeys([r["name"], "www." + r["name"]] + fq.get(r["id"], []))) for r in rows}
     # fora de lista de bloqueio, os logs valem: resposta com IP em 7 dias = não testa (resolve p/ o cliente)
-    alvo = [r for r in rows if not catalog.match(r["name"]) and (r["em_lista"] or (com_ip.get(r["id"]) or 0) <= 0)]
+    alvo = [r for r in rows if not catalog.match(r["name"]) and testavel(r["name"])
+            and (r["em_lista"] or (com_ip.get(r["id"]) or 0) <= 0)]
     with ThreadPoolExecutor(threads) as pool:
         mortos = list(pool.map(lambda r: inativo(nomes[r["id"]]), alvo))
     ina = [r for r, m in zip(alvo, mortos) if m]

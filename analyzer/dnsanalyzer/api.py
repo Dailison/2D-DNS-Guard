@@ -1611,6 +1611,8 @@ def listas_mover(body: MoverIn):
     ruins = [x for x in [body.de, *body.para] if x not in listas.CATEGORIAS]
     if ruins:
         raise HTTPException(422, f"lista inexistente: {', '.join(ruins)}")
+    if body.para:
+        _sem_sufixo_publico(doms)
     with db.conn() as c:
         listas.contexto(c, body.by or "manual", (f"pôs em {', '.join(body.para)}" if body.para else "manter liberado")
                         + f" (saiu de {body.de})")
@@ -1663,7 +1665,7 @@ def listas_aprovar(body: AprovarIn):
                 out["sem_sugestao"].append(d)
                 continue
             alvo = r["lista_ia"]
-            if alvo and alvo in listas.CATEGORIAS and alvo != body.de:
+            if alvo and alvo in listas.CATEGORIAS and alvo != body.de and not listas.sufixo_publico(d):
                 _tira_da_whitelist(c, [d], body.by)
                 c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                           (alvo, d, body.by or None))
@@ -2230,6 +2232,7 @@ def lista_add(categoria: str, body: ListaIn):
     d = body.domain.strip().lower().rstrip(".")
     if not d or "." not in d:
         raise HTTPException(400, "domínio inválido")
+    _sem_sufixo_publico([d])
     with db.conn() as c:
         listas.contexto(c, body.by or "manual", f"pôs em {categoria}")
         _tira_da_whitelist(c, [d], body.by)
@@ -2250,6 +2253,13 @@ def _dom_ok(d: str) -> str:
     return d if d and "." in d and " " not in d else ""
 
 
+def _sem_sufixo_publico(doms: list[str]) -> None:
+    """Sufixo público (com.br, gov.br) numa lista de bloqueio bloquearia todos os sites sob ele: recusa (400)."""
+    ruins = [d for d in doms if listas.sufixo_publico(d)]
+    if ruins:
+        raise HTTPException(400, f"sufixo público não pode ir para uma lista de bloqueio: {', '.join(ruins[:5])}")
+
+
 @app.post("/listas-lote", dependencies=[Depends(auth)])
 def listas_lote(body: ListasLoteIn):
     """Põe vários domínios em várias listas de uma vez (Decisões, Domínios, migração)."""
@@ -2257,6 +2267,7 @@ def listas_lote(body: ListasLoteIn):
     if ruins or not body.cats:
         raise HTTPException(400, f"lista inválida: {', '.join(ruins) or '(nenhuma)'}")
     doms = sorted({x for x in map(_dom_ok, body.domains) if x})
+    _sem_sufixo_publico(doms)
     with db.conn() as c, c.cursor() as cur:
         listas.contexto(c, body.by or "manual", f"pôs em {', '.join(body.cats)}")
         _tira_da_whitelist(c, doms, body.by)

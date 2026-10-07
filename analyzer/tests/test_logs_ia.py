@@ -554,3 +554,80 @@ def test_cota_do_virustotal_por_uso_e_gravada(api, monkeypatch):
         assert inv.virustotal("d.com", cli, "k") is None
     assert inv.vt_resta("investigacao") <= 0 and inv.vt_resta("verificacao") <= 0
     assert not inv.RITMO["virustotal"].pode(), "pausado até a virada do dia"
+
+
+def test_query_log_copia_linha_a_linha_e_detalhe(api):
+    """07/10: o coletor guarda cada consulta (query_log, partição por dia, 7 dias) na mesma transação do agregado; a
+    vista Detalhado lê daqui com os filtros da tela."""
+    from dnsanalyzer import collector, db
+    t0 = AGORA.replace(minute=10)
+    ents = [{"timestamp": (t0 + timedelta(seconds=i)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "clientIpAddress": ip, "qname": q,
+             "qtype": "A", "responseType": rt, "rcode": "NoError", "answer": "1.2.3.4"}
+            for i, (ip, q, rt) in enumerate([("10.35.0.9", "www.exemplo-log.com", "Recursive"), ("10.35.0.9", "ads.rastreio-log.com", "Blocked"),
+                                             ("10.51.0.7", "www.exemplo-log.com", "Cached"), ("10.35.0.9", "Outro.Exemplo-Log.com.", "Recursive")])]
+    ini, fim = t0 - timedelta(seconds=5), t0 + timedelta(seconds=60)
+    with db.conn() as c:
+        st = collector.store(c, collector.aggregate(ents, ini, fim))
+        n = collector.store_log(c, ents, ini, fim, st.pop("_ip_tenant"), st.pop("_fq_dom"))
+        assert n == 4 and c.execute("SELECT count(*) AS n FROM query_log WHERE qname LIKE '%%-log.com'").fetchone()["n"] == 4
+        tid = c.execute("SELECT tenant_id FROM query_log WHERE client_ip = '10.35.0.9' LIMIT 1").fetchone()["tenant_id"]
+    q = {"start": ini.isoformat(), "end": fim.isoformat()}
+    d = api.get("/logs/detalhe", params={**q, "dominio": "-log.com"}, headers=H).json()
+    assert [r["dominio"] for r in d["rows"]] == ["outro.exemplo-log.com", "www.exemplo-log.com", "ads.rastreio-log.com", "www.exemplo-log.com"]
+    assert not d["cap"] and d["mais_antigos"] is None and d["disponivel_desde"]
+    so = api.get("/logs/detalhe", params={**q, "dominio": "-log.com", "tid": tid}, headers=H).json()["rows"]
+    assert {r["ip"] for r in so} == {"10.35.0.9"} and len(so) == 3
+    bl = api.get("/logs/detalhe", params={**q, "dominio": "-log.com", "resposta": "Blocked"}, headers=H).json()["rows"]
+    assert [r["dominio"] for r in bl] == ["ads.rastreio-log.com"]
+    pg = api.get("/logs/detalhe", params={**q, "dominio": "-log.com", "limit": 2}, headers=H).json()
+    assert len(pg["rows"]) == 2 and pg["cap"] and pg["mais_antigos"]
+    resto = api.get("/logs/detalhe", params={"start": q["start"], "end": pg["mais_antigos"], "dominio": "-log.com"}, headers=H).json()["rows"]
+    assert len(resto) == 2, "continua de onde parou, sem repetir nem pular"
+    # retenção: só as partições inteiras fora dos 7 dias saem
+    with db.conn() as c:
+        velho = AGORA - timedelta(days=12)
+        collector.ensure_log_partitions(c, velho, velho)
+        assert collector.purge_log(c, 7) == [f"query_log_{velho:%Y%m%d}"]
+        assert c.execute("SELECT count(*) AS n FROM query_log WHERE qname LIKE '%%-log.com'").fetchone()["n"] == 4
+
+
+def test_backfill_da_copia_dos_logs(api):
+    """07/10: a cópia começa vazia; o backfill relê o Technitium para trás da linha mais antiga, sem mexer nos
+    agregados nem criar empresa/domínio, e rodar de novo não duplica."""
+    from dnsanalyzer import collector, db
+
+    def ent(ts, ip, q):
+        return {"timestamp": ts.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "clientIpAddress": ip, "qname": q, "qtype": "A",
+                "responseType": "Recursive", "rcode": "NoError", "answer": "1.2.3.4"}
+
+    agora = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = agora - timedelta(minutes=30)
+    vivo = [ent(t0, "10.35.0.9", "www.exemplo-bf.com")]
+    velhos = [ent(t0 - timedelta(minutes=m), ip, q) for m, ip, q in [
+        (3, "10.35.0.9", "www.exemplo-bf.com"), (14, "10.51.0.7", "api.exemplo-bf.com"),
+        (25, "10.35.0.9", "nunca-agregado-bf.com"), (90, "10.35.0.9", "www.exemplo-bf.com")]]
+    with db.conn() as c:
+        c.execute("TRUNCATE query_log")
+        # o que a coleta normal já tinha feito: agregados de tudo (menos do nome nunca visto) e a cópia só do "vivo"
+        collector.store(c, collector.aggregate(velhos[:2] + velhos[3:], t0 - timedelta(hours=2), t0))
+        st = collector.store(c, collector.aggregate(vivo, t0, t0 + timedelta(minutes=1)))
+        collector.store_log(c, vivo, t0, t0 + timedelta(minutes=1), st.pop("_ip_tenant"), st.pop("_fq_dom"))
+        agg = c.execute("SELECT sum(queries) AS n FROM query_agg").fetchone()["n"]
+        doms = c.execute("SELECT count(*) AS n FROM domains").fetchone()["n"]
+
+    class Tech:
+        pedidos = []
+
+        def iter_logs(self, start, end, page_size=5000):
+            self.pedidos.append((start, end))
+            return iter(vivo + velhos)   # devolve de tudo: o filtro da janela é do coletor
+
+    r = collector.backfill_log(Tech(), dias=1 / 24, pausa=0)   # 1 hora para trás
+    assert r["rows"] == 2, "só o que cai na última hora e já tem domínio/empresa; o de 90 min atrás fica de fora"
+    assert Tech.pedidos[0][1] == t0 and Tech.pedidos[0][0] == t0 - timedelta(minutes=10)
+    with db.conn() as c:
+        q = c.execute("SELECT qname FROM query_log WHERE qname LIKE '%%-bf.com' ORDER BY ts DESC").fetchall()
+        assert [x["qname"] for x in q] == ["www.exemplo-bf.com", "www.exemplo-bf.com", "api.exemplo-bf.com"]
+        assert c.execute("SELECT sum(queries) AS n FROM query_agg").fetchone()["n"] == agg
+        assert c.execute("SELECT count(*) AS n FROM domains").fetchone()["n"] == doms
+    assert collector.backfill_log(Tech(), dias=1 / 24, pausa=0)["rows"] == 0

@@ -64,7 +64,9 @@ def test_mais_antigos_continua_de_onde_parou(logs):
     a, _, _, desde = dnslib.consultar_logs({}, inicio=ini, limite=100, scan_max=100, por_pagina=100)
     fim2 = dnslib.local_para_utc_iso(desde)
     b, _, _, _ = dnslib.consultar_logs({}, inicio=ini, fim=fim2, limite=100, scan_max=100, por_pagina=100)
-    assert b and max(l["timestamp"] for l in b) <= min(l["timestamp"] for l in a)
+    ta, tb = {l["timestamp"] for l in a}, {l["timestamp"] for l in b}
+    assert b and max(tb) >= min(ta), "sem buraco entre as páginas"
+    assert len(ta & tb) <= 2, "só a borda (1 s) pode repetir"
 
 
 def test_orcamento_de_tempo_encerra_a_busca(logs, monkeypatch):
@@ -76,3 +78,49 @@ def test_orcamento_de_tempo_encerra_a_busca(logs, monkeypatch):
     linhas, scanned, cap, desde = dnslib.consultar_logs({}, dominio="nao-existe", inicio=ini, limite=1000, scan_max=10**9,
                                                         por_pagina=5000, orcamento_s=20)
     assert not linhas and desde and len(chamadas) <= 3, "sem achar nada, para pelo tempo e diz até onde foi"
+
+
+# ---------------------------------------------------------------- vista Detalhado pelo analisador (query_log)
+@pytest.fixture()
+def tela(app, monkeypatch):
+    from types import SimpleNamespace
+    from app import analyzer_client as api
+    from app import empresas, technitium as dnslib
+    chamadas = []
+    resp = {"rows": [{"ts": "2026-10-07T14:40:02+00:00", "ip": "10.7.0.5", "tenant_id": 7, "dominio": "site.com", "tipo": "A",
+                      "resposta": "Recursive", "rcode": "NoError", "answer": "1.2.3.4", "classificacao": "TRABALHO",
+                      "ajustada": False, "categoria": "produtividade"}],
+            "cap": True, "coletado_ate": "2026-10-07T14:41:00+00:00", "disponivel_desde": "2026-10-07T09:00:00+00:00",
+            "mais_antigos": "2026-10-07T14:40:02+00:00"}
+
+    def get(path, **p):
+        chamadas.append((path, p))
+        return resp if path == "/logs/detalhe" else []
+    monkeypatch.setattr(api, "get", get)
+    monkeypatch.setattr(dnslib, "networkgroupmap", lambda: {})
+    monkeypatch.setattr(dnslib, "zonas_locais", lambda: ["2d.local"])
+    monkeypatch.setattr(dnslib, "consultar_logs", lambda *a, **k: chamadas.append(("technitium", k)) or ([], 0, False, None))
+    monkeypatch.setattr(empresas, "lista", lambda: [{"id": 7, "name": "Moral", "networks": [{"cidr": "10.7.0.0/24", "unit": ""}]}])
+    monkeypatch.setattr(empresas, "resolver", lambda ips: {"10.7.0.5": {"tenant_id": 7, "tenant": "Moral"}})
+    monkeypatch.setattr(empresas, "rotulo", lambda i: (i or {}).get("tenant"))
+    monkeypatch.setattr("app.auth.admin_atual", lambda: SimpleNamespace(email="ti@2d", is_super=True, ativo=True))
+    app.config.update(TECHNITIUM_ENABLED=True, ANALYZER_ENABLED=True)
+    return app.test_client(), chamadas
+
+
+def test_detalhado_le_do_analisador(tela):
+    c, chamadas = tela
+    html = c.get("/logs-dns?empresa=7&inicio=2026-10-07T00%3A00&fim=2026-10-07T23%3A59&vista=detalhado").get_data(as_text=True)
+    path, p = next(x for x in chamadas if x[0] == "/logs/detalhe")
+    assert p["tid"] == 7 and p["start"] == "2026-10-07T03:00:00+00:00" and p["excluir"] == ["2d.local"]
+    assert not [x for x in chamadas if x[0] == "technitium"], "o Technitium não é consultado"
+    assert "site.com" in html and "11:40:02" in html and "Moral" in html, "horário no fuso de São Paulo"
+    assert "fonte: analisador" in html and "mais antigos" in html and "fim=2026-10-07T11:40:03" in html, "ao segundo, +1 s"
+    assert "guardado desde 07/10 06:00" in html and "fonte=technitium" in html
+
+
+def test_ao_vivo_consulta_o_technitium(tela):
+    c, chamadas = tela
+    html = c.get("/logs-dns?empresa=7&inicio=2026-10-07T00%3A00&fim=2026-10-07T23%3A59&vista=detalhado&fonte=technitium").get_data(as_text=True)
+    assert [x for x in chamadas if x[0] == "technitium"] and not [x for x in chamadas if x[0] == "/logs/detalhe"]
+    assert "voltar ao analisador" in html

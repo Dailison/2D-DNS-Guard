@@ -10,6 +10,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -278,7 +279,9 @@ def store(c, aggs: dict[tuple, Agg]) -> dict:
             [(v[0], v[1], d) for d, v in dom_tot.items()],
         )
     return {"rows": len(qa), "clients": len(firsts), "domains": len(dom_rows), "fqdns": len(infos),
-            "tenants": len(set(ip_tenant.values())), "at": now.isoformat()}
+            "tenants": len(set(ip_tenant.values())), "at": now.isoformat(),
+            # p/ a cópia linha a linha (store_log): tenant de cada IP e domínio de cada nome
+            "_ip_tenant": ip_tenant, "_fq_dom": {fq: dom_id[i.registrable] for fq, i in infos.items()}}
 
 
 # erros do Technitium causados por UMA entrada do log (não pelo pedido): o app Query Logs não
@@ -323,6 +326,9 @@ def collect_once(client: TechnitiumClient | None = None) -> dict:
     aggs = aggregate(entries, start, end, cfg.exclude_clients)
     with db.conn() as c:
         stats = store(c, aggs)
+        # cópia linha a linha (query_log), na mesma transação do agregado e do cursor
+        stats["log_rows"] = store_log(c, entries, start, end, stats.pop("_ip_tenant", {}), stats.pop("_fq_dom", {}),
+                                      cfg.exclude_clients)
         c.execute(
             "INSERT INTO ingest_state (key, value) VALUES (%s, %s) "
             "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()",
@@ -331,6 +337,96 @@ def collect_once(client: TechnitiumClient | None = None) -> dict:
     stats.update({"entries": len(entries), "window_start": start.isoformat(), "window_end": end.isoformat(),
                   "caught_up": end >= limit, **({"skipped_seconds": pulados} if pulados else {})})
     return stats
+
+
+def ensure_log_partitions(c, start: datetime, end: datetime) -> None:
+    """Partições DIÁRIAS (UTC) de query_log cobrindo [start, end]."""
+    d = start.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    while d <= end:
+        nxt = d + timedelta(days=1)
+        c.execute(f"CREATE TABLE IF NOT EXISTS query_log_{d:%Y%m%d} PARTITION OF query_log "
+                  f"FOR VALUES FROM ('{d:%Y-%m-%d} 00:00:00+00') TO ('{nxt:%Y-%m-%d} 00:00:00+00')")
+        d = nxt
+
+
+def store_log(c, entries, start: datetime, end: datetime, ip_tenant: dict, fq_dom: dict, excluded=()) -> int:
+    """Cópia linha a linha das consultas (query_log), na MESMA transação do cursor da coleta (nada duplica nem falta
+    numa repetição). Mesmos filtros do agregado: start <= ts < end, IP e nome válidos, fora dos excluídos, com tenant."""
+    linhas = []
+    for e in entries:
+        ts = parse_ts(e.get("timestamp", ""))
+        if ts is None or ts < start or ts >= end:
+            continue
+        ip = (e.get("clientIpAddress") or "").strip()
+        qname = _sem_controle((e.get("qname") or "").strip().rstrip(".").lower())
+        tid, did = ip_tenant.get(ip), fq_dom.get(qname)
+        if not ip or not qname or tid is None or did is None:
+            continue
+        if excluded:
+            try:
+                a = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if any(a in n for n in excluded):
+                continue
+        ans = e.get("answer")
+        linhas.append((ts, tid, ip, did, qname[:255], e.get("qtype"), e.get("responseType"), e.get("rcode"),
+                       _sem_controle(str(ans))[:300] if ans else None))
+    if not linhas:
+        return 0
+    ensure_log_partitions(c, min(x[0] for x in linhas), max(x[0] for x in linhas))
+    with c.cursor() as cur:
+        with cur.copy("COPY query_log (ts, tenant_id, client_ip, domain_id, qname, qtype, rtype, rcode, answer) FROM STDIN") as cp:
+            for x in linhas:
+                cp.write_row(x)
+    return len(linhas)
+
+
+def backfill_log(client: TechnitiumClient, dias: int, passo_min: int = 10, pausa: float = 0.5, parar=lambda: False) -> dict:
+    """Preenche query_log para TRÁS da linha mais antiga já copiada, até `dias` atrás, relendo o Technitium em janelas
+    curtas (as mais recentes primeiro). Só a cópia: os agregados daquele período já foram coletados, então empresa e
+    domínio vêm do cadastro existente (nada é criado nem somado de novo). Cada janela entra numa transação; rodar de
+    novo continua de onde parou."""
+    cfg = settings()
+    with db.conn() as c:
+        fim = c.execute("SELECT min(ts) AS t FROM query_log").fetchone()["t"]
+    if fim is None:
+        return {"rows": 0, "windows": 0, "motivo": "query_log vazia: a coleta ainda não gravou nada"}
+    inicio = datetime.now(timezone.utc) - timedelta(days=dias)
+    total = {"rows": 0, "windows": 0, "ate": fim.isoformat()}
+    while fim > inicio and not parar():
+        ws = max(inicio, fim - timedelta(minutes=passo_min))
+        entries = _buscar_logs(client, ws, fim, cfg.ingest_page_size, [])
+        ips = {(e.get("clientIpAddress") or "").strip() for e in entries} - {""}
+        nomes = {_sem_controle((e.get("qname") or "").strip().rstrip(".").lower()) for e in entries} - {""}
+        with db.conn() as c:
+            resolver = load_resolver(c)
+            ip_tenant = {ip: t for ip in ips if (t := resolver.resolve(ip)) is not None}
+            fq_dom = {r["name"]: r["domain_id"] for r in c.execute(
+                "SELECT name, domain_id FROM fqdns WHERE name = ANY(%s)", (list(nomes),)).fetchall()} if nomes else {}
+            total["rows"] += store_log(c, entries, ws, fim, ip_tenant, fq_dom, cfg.exclude_clients)
+        total["windows"] += 1
+        total["ate"] = (fim := ws).isoformat()
+        if total["windows"] % 30 == 0:
+            log.info("backfill da cópia dos logs: %d linhas, até %s", total["rows"], total["ate"])
+        time.sleep(pausa)
+    return total
+
+
+def purge_log(c, dias: int) -> list[str]:
+    """Apaga as partições diárias de query_log inteiramente fora da retenção."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=dias)
+    dropped = []
+    for r in c.execute("SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid "
+                       "JOIN pg_class p ON p.oid = i.inhparent WHERE p.relname = 'query_log'").fetchall():
+        try:
+            d = datetime.strptime(r["relname"].rsplit("_", 1)[1], "%Y%m%d").replace(tzinfo=timezone.utc)
+        except (ValueError, IndexError):
+            continue
+        if d + timedelta(days=1) <= cutoff:
+            c.execute(f"DROP TABLE IF EXISTS {r['relname']}")
+            dropped.append(r["relname"])
+    return dropped
 
 
 def purge_old(c, retention_days: int) -> list[str]:

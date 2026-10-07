@@ -96,14 +96,50 @@ def cmd_backfill_corp() -> None:
     print(f"recomendação corporativa preenchida: {n}")
 
 
-def run_collector() -> None:
+def _tarefas_coletor() -> None:
+    """Feeds de TI/Tranco/listas, comportamento e retenção, em thread própria: os feeds chegam a levar minutos
+    e o comportamento ~20 s — no laço da coleta, atrasavam a cópia dos logs (que é de 1 em 1 minuto)."""
     from . import adlists, behavior, collector, enrich, ti
+    cfg = settings()
+    last_behavior = last_purge = last_ti = 0.0
+    while not _STOP:
+        now = time.monotonic()
+        # feeds de TI e Tranco (cada fonte tem seu intervalo)
+        if now - last_ti > 900:
+            _run_step("ti_refresh", ti.refresh_due)
+            _run_step("tranco_refresh", enrich.refresh_tranco)
+            _run_step("adlist_refresh", adlists.refresh)
+            last_ti = now
+        # comportamento
+        if now - last_behavior > cfg.behavior_interval:
+            since = datetime.fromtimestamp(time.time() - cfg.behavior_interval - 300, tz=timezone.utc)
+            res = _run_step("behavior", behavior.run, since)
+            if res and any(res.values()):
+                log.info("alertas novos: %s", res)
+            last_behavior = now
+        # retenção (diária)
+        if now - last_purge > 86400:
+            def _purge():
+                with db.conn() as c:
+                    ev = c.execute("DELETE FROM ai_events WHERE created_at < now() - interval '7 days'").rowcount
+                    return {"dropped": collector.purge_old(c, cfg.retention_days), "ai_events_removed": ev,
+                            "log_dropped": collector.purge_log(c, cfg.log_retencao_dias)}
+            _run_step("purge", _purge)
+            last_purge = now
+        time.sleep(5)
+
+
+def run_collector() -> None:
+    import threading
+    from . import collector
     from .technitium import TechnitiumClient
     cfg = settings()
     client = TechnitiumClient()
-    last_behavior = last_purge = last_ti = 0.0
+    # daemon: no stop do serviço, um feed de TI no meio do download não segura a saída do processo
+    threading.Thread(target=_tarefas_coletor, name="tarefas-coletor", daemon=True).start()
     while not _STOP:
-        # 1) coleta: processa janelas até alcançar o "agora - lag" (limite por ciclo)
+        inicio = time.monotonic()
+        # coleta: processa janelas até alcançar o "agora - lag" (limite por ciclo)
         total = {"entries": 0, "rows": 0, "windows": 0}
         caught_up = True
         rid = db.begin_run("collect")
@@ -130,34 +166,9 @@ def run_collector() -> None:
             db.end_run(rid, False, total, str(e))
             caught_up = True
 
-        now = time.monotonic()
-        # 2) feeds de TI e Tranco (cada fonte tem seu intervalo)
-        if now - last_ti > 900:
-            _run_step("ti_refresh", ti.refresh_due)
-            _run_step("tranco_refresh", enrich.refresh_tranco)
-            _run_step("adlist_refresh", adlists.refresh)
-            last_ti = now
-        # 3) comportamento
-        if now - last_behavior > cfg.behavior_interval:
-            since = datetime.fromtimestamp(time.time() - cfg.behavior_interval - 300, tz=timezone.utc)
-            res = _run_step("behavior", behavior.run, since)
-            if res and any(res.values()):
-                log.info("alertas novos: %s", res)
-            last_behavior = now
-        # 4) retenção (diária)
-        if now - last_purge > 86400:
-            def _purge():
-                with db.conn() as c:
-                    ev = c.execute("DELETE FROM ai_events WHERE created_at < now() - interval '7 days'").rowcount
-                    return {"dropped": collector.purge_old(c, cfg.retention_days), "ai_events_removed": ev}
-            _run_step("purge", _purge)
-            last_purge = now
-
-        if caught_up:
-            for _ in range(cfg.ingest_interval):
-                if _STOP:
-                    break
-                time.sleep(1)
+        # o intervalo conta do início do ciclo: a duração da coleta não empurra a próxima
+        while caught_up and not _STOP and time.monotonic() - inicio < cfg.ingest_interval:
+            time.sleep(1)
     client.close()
 
 
@@ -169,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     it.add_argument("path")
     it.add_argument("--replace", action="store_true")
     sub.add_parser("collect")
+    bl = sub.add_parser("backfill-log", help="preenche a cópia dos logs (query_log) para trás, a partir do Technitium")
+    bl.add_argument("--dias", type=int, default=None)
     tr = sub.add_parser("ti-refresh")
     tr.add_argument("--force", action="store_true")
     tr.add_argument("--source")
@@ -203,6 +216,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "collect":
         from .collector import collect_once
         print(json.dumps(collect_once(), default=str, indent=2))
+    elif args.cmd == "backfill-log":
+        from . import collector
+        from .technitium import TechnitiumClient
+        print(json.dumps(collector.backfill_log(TechnitiumClient(), args.dias or settings().log_retencao_dias,
+                                                parar=lambda: _STOP), ensure_ascii=False))
     elif args.cmd == "ti-refresh":
         from .ti import refresh_due
         print(json.dumps(refresh_due(force=args.force, only=args.source), indent=2))

@@ -45,6 +45,14 @@ A IA trabalha por **domínio** (com cache), não por consulta: se os logs cresce
 100×, o custo da IA acompanha só os **domínios inéditos**. As consultas são agregadas
 por hora (`query_agg`, particionada por mês — retenção = `DROP` de partição).
 
+**Cópia dos logs (07/10).** Além do agregado, o coletor guarda cada consulta em `query_log` (partição por dia,
+`LOG_RETENCAO_DIAS`, padrão 7) na mesma transação do cursor, de 1 em 1 minuto (`INGEST_INTERVAL_SECONDS=60`,
+`INGEST_LAG_SECONDS=60`). A vista **Detalhado** do console lê daqui (`GET /logs/detalhe`) em vez do SQLite do
+Technitium, que não aguentava o dia inteiro; "ao vivo" na tela ainda consulta o Technitium (último minuto). Feeds de
+TI, comportamento e retenção rodam em thread própria para não atrasar a coleta. Para preencher o período anterior à
+primeira coleta: `python -m dnsanalyzer backfill-log [--dias N]` (só a cópia, não soma os agregados de novo; pode
+ser interrompido e repetido). Volume: ~310 bytes por consulta com os índices (~1,8 GB num dia cheio, ~9 GB na semana).
+
 ## Como a classificação funciona
 
 1. **Catálogo** (`dnsanalyzer/data/catalog.yaml`): domínios conhecidos (Microsoft,

@@ -1246,6 +1246,66 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
     return {"rows": rows[:limit], "cap": len(rows) > limit, "coletado_ate": cursor}
 
 
+@app.get("/logs/detalhe", dependencies=[Depends(auth)])
+def logs_detalhe(start: datetime, end: datetime, tid: int = 0, ip: Optional[str] = None,
+                 cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
+                 dominio: Optional[str] = None, resposta: Optional[str] = None,
+                 cls: list[str] = Query(default=[]), categoria: Optional[str] = None,
+                 sem_locais: bool = False, excluir: list[str] = Query(default=[]),
+                 limit: int = Query(1000, le=5000)):
+    """Logs DNS linha a linha (query_log: cópia dos logs do Technitium feita pelo coletor a cada minuto, 7 dias), com
+    os filtros da tela Logs DNS — os mais recentes primeiro. `disponivel_desde` = a consulta mais antiga guardada;
+    `mais_antigos` = horário da última linha quando há mais além do limite (a tela continua dali)."""
+    where = ["l.ts >= %(s)s", "l.ts < %(e)s"]
+    p: dict = {"s": start, "e": end, "lim": limit + 1}
+    if tid:
+        where.append("l.tenant_id = %(t)s"); p["t"] = tid
+    if ip:
+        where.append("l.client_ip = %(ip)s::inet"); p["ip"] = ip.strip()
+    if cidr:
+        try:
+            p["cidrs"] = [str(ipaddress.ip_network(c, strict=False)) for c in cidr]
+        except ValueError:
+            raise HTTPException(400, "CIDR inválido")
+        where.append("l.client_ip <<= ANY(%(cidrs)s::cidr[])")
+    if ip_like:
+        where.append("host(l.client_ip) LIKE %(ipl)s"); p["ipl"] = f"%{ip_like.strip()}%"
+    if dominio:
+        where.append("l.qname LIKE %(dom)s"); p["dom"] = f"%{dominio.strip().lower()}%"
+    if resposta:
+        where.append("l.rtype = %(rt)s"); p["rt"] = resposta.strip()
+    if sem_locais:   # nomes locais (zonas locais do Technitium, INTERNAL_SUFFIXES, sem ponto, reversos) fora
+        where.append("d.kind NOT IN ('internal', 'reverse')")
+        suf = [x.strip().lower().strip(".") for x in excluir if x and x.strip()]
+        if suf:
+            where.append("NOT (l.qname = ANY(%(suf)s) OR l.qname LIKE ANY(%(sufl)s))")
+            p["suf"], p["sufl"] = suf, ["%." + x for x in suf]
+    cls = [x.strip().upper() for x in cls if x and x.strip()]
+    if cls:
+        p["cls"] = [x for x in cls if x != "PENDENTE"]
+        cond = [f"{_CLS_EFETIVA} = ANY(%(cls)s)"] if p["cls"] else []
+        if "PENDENTE" in cls:
+            cond.append(f"{_CLS_EFETIVA} IS NULL")
+        where.append("(" + " OR ".join(cond) + ")")
+    if categoria:
+        where.append("d.category = %(cat)s"); p["cat"] = categoria
+    sql = ("SELECT l.ts, host(l.client_ip) AS ip, l.tenant_id, l.qname AS dominio, l.qtype AS tipo, l.rtype AS resposta, "
+           " l.rcode, l.answer, " + _CLS_EFETIVA + " AS classificacao, (td.override_classification IS NOT NULL) AS ajustada, "
+           " d.category AS categoria "
+           "FROM query_log l JOIN domains d ON d.id = l.domain_id "
+           "LEFT JOIN tenant_domains td ON td.tenant_id = l.tenant_id AND td.domain_id = l.domain_id "
+           f"WHERE {' AND '.join(where)} ORDER BY l.ts DESC LIMIT %(lim)s")
+    with db.conn() as c:
+        c.execute("SET LOCAL statement_timeout = '25s'")   # filtro raro num período longo: erro claro, não a tela presa
+        rows = c.execute(sql, p).fetchall()
+        cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
+        desde = c.execute("SELECT min(ts) AS t FROM query_log").fetchone()["t"]
+    cap = len(rows) > limit
+    rows = rows[:limit]
+    return {"rows": rows, "cap": cap, "coletado_ate": cursor, "disponivel_desde": desde,
+            "mais_antigos": rows[-1]["ts"] if cap and rows else None}
+
+
 class ClassificarIn(BaseModel):
     nomes: list[str]
 

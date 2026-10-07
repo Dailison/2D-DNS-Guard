@@ -546,7 +546,9 @@ def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
         if not ini_dt and fim_dt - cursor > timedelta(days=31):   # sem início: não volta além de um mês
             break
     cap = len(linhas) >= limite or scanned >= scan_max
-    desde = cursor.astimezone(TZ_LOCAL).strftime("%Y-%m-%dT%H:%M") if parou and (not ini_dt or cursor > ini_dt) else None
+    # (ao segundo, +1 s: "mais antigos" continua daqui — repetir um registro da borda é melhor que pular até 1 min)
+    desde = ((cursor + timedelta(seconds=1)).astimezone(TZ_LOCAL).strftime("%Y-%m-%dT%H:%M:%S")
+             if parou and (not ini_dt or cursor > ini_dt) else None)
     return linhas, scanned, cap, desde
 
 

@@ -261,6 +261,62 @@ def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, r
         coletado_ate=dnslib.utc_para_local(coletado) if coletado else None, **_ctx_cls(cls_f, categoria))
 
 
+def _logs_detalhe_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, resposta, redes, ip_like,
+                             mapa, grupos, lista_empresas, cls_f="", categoria="", locais=False):
+    """Vista Detalhado pelo analisador (07/10): cada consulta está em query_log (cópia dos logs do Technitium feita
+    pelo coletor a cada minuto, 7 dias) — filtro por empresa, IP, domínio e classificação no banco, em menos de 1 s.
+    O Technitium (tempo real, lento) fica no link "ao vivo" (?fonte=technitium)."""
+    from app import empresas as emp
+
+    def utc(v):
+        iso = dnslib.local_para_utc_iso(v)
+        return iso + "+00:00" if iso and len(iso) == 19 else iso
+    linhas, cap, coletado, mais_antigos, desde = [], False, None, None, None
+    hoje = dnslib.agora_local().date()
+    inicio, fim = inicio or f"{hoje}T00:00", fim or f"{hoje}T23:59"
+    try:
+        d = api.get("/logs/detalhe", start=utc(inicio), end=utc(fim),
+                    tid=int(empresa) if empresa else 0, ip=ip or None, ip_like=ip_like,
+                    cidr=[str(n) for n in redes] if (redes is not None and not empresa) else None,
+                    dominio=dominio or None, resposta=resposta or None,
+                    cls=_cls_lista(cls_f) or None, categoria=categoria or None, limit=LOGS_LIMITE,
+                    sem_locais=None if locais else "true", excluir=None if locais else dnslib.zonas_locais())
+        cap, coletado, mais_antigos, desde = d.get("cap"), d.get("coletado_ate"), d.get("mais_antigos"), d.get("disponivel_desde")
+        info = emp.resolver(r["ip"] for r in d["rows"])
+        union = None
+        if any(r.get("resposta") == "Blocked" for r in d["rows"]):
+            union, _ = dnslib.blocked_index()
+        for r in d["rows"]:
+            l = {"timestamp": dnslib.utc_para_local(r["ts"]), "ip": r["ip"], "dominio": r["dominio"], "tipo": r.get("tipo"),
+                 "resposta": r.get("resposta"), "rcode": r.get("rcode"), "answer": r.get("answer"),
+                 "grupo": dnslib.resolver_empresa(r["ip"], mapa) or "—", "empresa": emp.rotulo(info.get(r["ip"])) or "—",
+                 "cls": r.get("classificacao"), "ajustada": r.get("ajustada"), "categoria": r.get("categoria")}
+            if l["resposta"] == "Blocked" and union is not None:
+                l["culpados"] = dnslib.culpados(l["dominio"], l["answer"], union)
+            linhas.append(l)
+    except Exception as e:  # noqa: BLE001
+        flash(f"Não foi possível consultar os logs no analisador: {e}", "erro")
+    args = request.args.to_dict()
+    local = lambda ts, n=16: (dnslib.utc_para_local(ts) or "")[:n].replace(" ", "T") if ts else None   # noqa: E731
+    guardado = local(desde)
+    antigos = None
+    if mais_antigos:   # ao segundo, +1 s: repetir um registro da borda é melhor que pular
+        from datetime import timedelta
+        dt = dnslib._parse_utc(mais_antigos)
+        antigos = local((dt + timedelta(seconds=1)).isoformat(), 19) if dt else None
+    return render_template(
+        "admin/logs_dns.html", linhas=linhas, agrupado=[], agrupar=False, vista="detalhado", locais=locais,
+        grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
+        cidr=cidr, ip=ip, dominio=dominio, resposta=resposta, respostas=dnslib.RESPONSE_TYPES,
+        inicio=inicio, fim=fim, scanned=None, cap=cap, voltar=request.full_path,
+        fonte_detalhe=True, coletado_ate=dnslib.utc_para_local(coletado) if coletado else None,
+        coberto_desde=antigos, url_antigos=url_for("admin.logs_dns", **{**args, "inicio": inicio, "fim": antigos}) if antigos else None,
+        # período pedido começa antes do que está guardado: o que falta só existe no Technitium
+        guardado_desde=guardado if guardado and guardado > inicio[:16] else None,
+        url_aovivo=url_for("admin.logs_dns", **{**args, "vista": "detalhado", "fonte": "technitium"}),
+        **_ctx_cls(cls_f, categoria))
+
+
 def _ctx_cls(cls_f: str, categoria: str) -> dict:
     cats = _site_categorias()
     return {"cls_f": cls_f, "categoria": categoria, "cls_filtros": CLS_FILTROS, "cls_label": CLS_LABEL,
@@ -328,6 +384,10 @@ def logs_dns():
         # milhões de linhas). Sem filtro feito aqui = 1 chamada; com filtro de domínio/
         # empresa/faixa (a API não faz) varre até 5000 p/ achar os 1000 resultados.
         filtro_local = bool(dominio or redes is not None or ip_like)
+        if current_app.config.get("ANALYZER_ENABLED") and vista == "detalhado" and request.args.get("fonte") != "technitium":
+            return _logs_detalhe_analisador(
+                inicio, fim, empresa, grupo, cidr, ip, dominio, resposta, redes, ip_like, mapa, grupos,
+                lista_empresas, cls_f, categoria, locais)
         # (07/10) a busca anda p/ trás em janelas curtas (o custo no Technitium é a contagem do período pedido: o
         # dia inteiro levava 28 s por chamada e a tela dava timeout). Com filtro feito aqui (a API não filtra por
         # empresa/faixa/parte do domínio) varre até 60 mil registros dentro do tempo; sem filtro, só os 1000.
@@ -398,7 +458,9 @@ def logs_dns():
         respostas=dnslib.RESPONSE_TYPES,
         inicio=inicio, fim=fim, scanned=scanned, cap=cap, voltar=request.full_path, coberto_desde=coberto_desde,
         url_antigos=(url_for("admin.logs_dns", **{**request.args.to_dict(), "inicio": inicio, "fim": coberto_desde})
-                     if coberto_desde else None), **_ctx_cls(cls_f, categoria))
+                     if coberto_desde else None),
+        url_analisador=(url_for("admin.logs_dns", **{k: v for k, v in request.args.to_dict().items() if k != "fonte"})
+                        if request.args.get("fonte") == "technitium" else None), **_ctx_cls(cls_f, categoria))
 
 
 # ------------------------------------------------- Gráficos (analisador: query_agg + classificação da IA)

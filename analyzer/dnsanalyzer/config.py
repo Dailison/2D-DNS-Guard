@@ -136,6 +136,7 @@ class Settings:
 
     reanalyze_days: int
     retention_days: int
+    log_retencao_dias: int             # query_log (cópia linha a linha dos logs): dias guardados
     classify_batch: int
     behavior_interval: int
 
@@ -159,8 +160,9 @@ def load_settings() -> Settings:
         technitium_token=os.environ.get("TECHNITIUM_TOKEN", ""),
         technitium_logs_app=os.environ.get("TECHNITIUM_LOGS_APP", "Query Logs (Sqlite)"),
         technitium_logs_class=os.environ.get("TECHNITIUM_LOGS_CLASS", "QueryLogsSqlite.App"),
-        ingest_interval=_int("INGEST_INTERVAL_SECONDS", 300),
-        ingest_lag=_int("INGEST_LAG_SECONDS", 120),
+        # (07/10) coleta a cada 1 min: a vista Detalhado dos Logs passou a ler daqui (query_log)
+        ingest_interval=_int("INGEST_INTERVAL_SECONDS", 60),
+        ingest_lag=_int("INGEST_LAG_SECONDS", 60),
         ingest_backfill_hours=_int("INGEST_BACKFILL_HOURS", 168),
         ingest_page_size=_int("INGEST_PAGE_SIZE", 5000),
         ingest_max_window_minutes=_int("INGEST_MAX_WINDOW_MINUTES", 60),
@@ -284,6 +286,7 @@ def load_settings() -> Settings:
         lists_allowed_ips=_list("LISTS_ALLOWED_IPS", "10.100.10.15,127.0.0.1"),
         reanalyze_days=_int("REANALYZE_DAYS", 30),
         retention_days=_int("RETENTION_DAYS", 180),
+        log_retencao_dias=_int("LOG_RETENCAO_DIAS", 7),   # (07/10, pedido do usuário)
         classify_batch=_int("CLASSIFY_BATCH", 10),
         behavior_interval=_int("BEHAVIOR_INTERVAL_SECONDS", 300),
         api_host=os.environ.get("API_HOST", "127.0.0.1"),

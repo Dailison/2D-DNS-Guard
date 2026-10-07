@@ -298,7 +298,7 @@ def logs_dns():
         inicio = f"{hoje}T00:00"
         fim = f"{hoje}T23:59"
 
-    linhas, agrupado, grupos, scanned, cap = [], [], [], 0, False
+    linhas, agrupado, grupos, scanned, cap, coberto_desde = [], [], [], 0, False, None
     lista_empresas = emp.lista()
     try:
         mapa = dnslib.networkgroupmap()
@@ -328,14 +328,16 @@ def logs_dns():
         # milhões de linhas). Sem filtro feito aqui = 1 chamada; com filtro de domínio/
         # empresa/faixa (a API não faz) varre até 5000 p/ achar os 1000 resultados.
         filtro_local = bool(dominio or redes is not None or ip_like)
-        # 1 chamada só: o custo de cada página é o COUNT do Technitium (~15-30 s), não o
-        # tamanho — com filtro local pede 5000 de uma vez em vez de 5 páginas de 1000.
-        lim, smax = LOGS_LIMITE, (LOGS_LIMITE * 5 if filtro_local else LOGS_LIMITE)
-        linhas, scanned, cap = dnslib.consultar_logs(
+        # (07/10) a busca anda p/ trás em janelas curtas (o custo no Technitium é a contagem do período pedido: o
+        # dia inteiro levava 28 s por chamada e a tela dava timeout). Com filtro feito aqui (a API não filtra por
+        # empresa/faixa/parte do domínio) varre até 60 mil registros dentro do tempo; sem filtro, só os 1000.
+        lim, smax = LOGS_LIMITE, (LOGS_LIMITE * 60 if filtro_local else LOGS_LIMITE)
+        linhas, scanned, cap, coberto_desde = dnslib.consultar_logs(
             mapa, redes=redes, ip_like=ip_like,
             inicio=dnslib.local_para_utc_iso(inicio), fim=dnslib.local_para_utc_iso(fim),
             dominio=dominio or None, ip_exato=ip or None,
-            resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=smax, sem_locais=not locais)
+            resposta=resposta or None, limite=lim, scan_max=smax, por_pagina=5000 if filtro_local else lim,
+            sem_locais=not locais)
         # empresa/unidade pelo cadastro (o "empresa" do Technitium é o grupo interno)
         info = emp.resolver(l.get("ip") for l in linhas)
         for l in linhas:
@@ -394,7 +396,9 @@ def logs_dns():
         grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
         cidr=cidr, ip=ip, dominio=dominio, resposta=resposta,
         respostas=dnslib.RESPONSE_TYPES,
-        inicio=inicio, fim=fim, scanned=scanned, cap=cap, voltar=request.full_path, **_ctx_cls(cls_f, categoria))
+        inicio=inicio, fim=fim, scanned=scanned, cap=cap, voltar=request.full_path, coberto_desde=coberto_desde,
+        url_antigos=(url_for("admin.logs_dns", **{**request.args.to_dict(), "inicio": inicio, "fim": coberto_desde})
+                     if coberto_desde else None), **_ctx_cls(cls_f, categoria))
 
 
 # ------------------------------------------------- Gráficos (analisador: query_agg + classificação da IA)

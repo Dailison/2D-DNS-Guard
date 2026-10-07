@@ -452,18 +452,22 @@ def resolver_empresa(ip_str, mapa):
 
 def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
                    ip_exato=None, ip_like=None, resposta=None, rcode=None,
-                   limite=300, scan_max=6000, por_pagina=500, orcamento_s=25, sem_locais=False):
+                   limite=300, scan_max=6000, por_pagina=500, orcamento_s=20, sem_locais=False):
     """Consulta os query logs do Technitium (período/IP/tipo-de-resposta/rcode
     empurrados para a API); resolve a empresa e filtra por `redes` (CIDR),
     `dominio` (substring, %dominio%) e `ip_like` (parte do IP, ex.: '10.100') no
     app, pois a API não faz range nem match parcial. Retorna (linhas, scaneados,
-    atingiu_cap). Os timestamps voltam já convertidos para o fuso de São Paulo."""
+    atingiu_cap, coberto_desde). Os timestamps voltam já convertidos para o fuso de São Paulo.
+
+    (07/10) Anda PARA TRÁS em janelas curtas de tempo, do fim do período até juntar `limite` linhas, varrer
+    `scan_max`, chegar ao início ou gastar `orcamento_s`: no Technitium cada chamada custa a CONTAGEM do período
+    pedido (SQLite com milhões de linhas — o dia inteiro, 2,5 M de registros, levava 28 s por chamada e a tela dava
+    timeout); uma janela de minutos responde em décimos de segundo. `coberto_desde` = até onde a busca chegou
+    (horário local) quando parou antes do início — a tela oferece "mais antigos" a partir dali; None = período todo."""
+    import time
+    from datetime import timedelta
     base = {"name": "Query Logs (Sqlite)", "classPath": "QueryLogsSqlite.App",
             "descendingOrder": "true"}
-    if inicio:
-        base["start"] = inicio
-    if fim:
-        base["end"] = fim
     if ip_exato:
         base["clientIpAddress"] = ip_exato.strip()
     if resposta:
@@ -473,46 +477,77 @@ def consultar_logs(mapa, redes=None, inicio=None, fim=None, dominio=None,
     dom_like = (dominio or "").strip().lower()
     ip_sub = (ip_like or "").strip()
     zonas = zonas_locais() if sem_locais else []
-    import time
+    fmt = lambda dt: dt.strftime("%Y-%m-%dT%H:%M:%S")   # noqa: E731
+    agora = datetime.now(timezone.utc)
+    ini_dt = _parse_utc(inicio) if inicio else None
+    fim_dt = min(_parse_utc(fim) or agora, agora + timedelta(minutes=1)) if fim else agora + timedelta(minutes=1)
     t0 = time.monotonic()
-    linhas, scanned, page = [], 0, 1
-    while len(linhas) < limite and scanned < scan_max:
-        if page > 1 and time.monotonic() - t0 > orcamento_s:
-            break                      # cada página custa segundos no Technitium: não estoura o timeout
-        r = _api_get("logs/query?" + urllib.parse.urlencode(
-            {**base, "pageNumber": page, "entriesPerPage": por_pagina}), timeout=60)
-        ents = r.get("entries", [])
-        if not ents:
+    linhas, scanned, vistos, chamadas = [], 0, set(), 0
+    cursor, janela = fim_dt, timedelta(seconds=120)
+    JANELA_MAX = timedelta(hours=6)
+    parou = False   # parou antes de cobrir o período (limite, varredura ou tempo)
+    while not ini_dt or cursor > ini_dt:
+        if len(linhas) >= limite or scanned >= scan_max or (chamadas and time.monotonic() - t0 > orcamento_s):
+            parou = True
             break
-        for e in ents:
-            scanned += 1
-            cip = e.get("clientIpAddress", "")
-            if dom_like and dom_like not in (e.get("qname") or "").lower():
-                continue
-            if sem_locais and nome_local(e.get("qname"), zonas):
-                continue
-            if ip_sub and ip_sub not in cip:
-                continue
-            if redes is not None:
-                try:
-                    ipo = ipaddress.ip_address(cip)
-                except ValueError:
+        a = max(ini_dt, cursor - janela) if ini_dt else cursor - janela
+        page, total, ult, meio = 1, 0, None, False
+        while True:
+            chamadas += 1
+            r = _api_get("logs/query?" + urllib.parse.urlencode(
+                {**base, "start": fmt(a), "end": fmt(cursor), "pageNumber": page, "entriesPerPage": por_pagina}),
+                timeout=max(8, orcamento_s - (time.monotonic() - t0) + 10))
+            ents = r.get("entries", [])
+            total = r.get("totalEntries") or len(ents)
+            for e in ents:
+                cip = e.get("clientIpAddress", "")
+                chave = (e.get("timestamp"), cip, e.get("qname"), e.get("qtype"))
+                if chave in vistos:   # (a borda de duas janelas pode trazer o mesmo registro)
                     continue
-                if not any(ipo in n for n in redes):
+                vistos.add(chave)
+                scanned += 1
+                ult = e.get("timestamp")
+                if dom_like and dom_like not in (e.get("qname") or "").lower():
                     continue
-            linhas.append({
-                "timestamp": utc_para_local(e.get("timestamp")), "ip": cip,
-                "empresa": resolver_empresa(cip, mapa) or "—",
-                "dominio": e.get("qname"), "tipo": e.get("qtype"),
-                "resposta": e.get("responseType"), "rcode": e.get("rcode"),
-                "answer": e.get("answer"),
-            })
-            if len(linhas) >= limite:
+                if sem_locais and nome_local(e.get("qname"), zonas):
+                    continue
+                if ip_sub and ip_sub not in cip:
+                    continue
+                if redes is not None:
+                    try:
+                        ipo = ipaddress.ip_address(cip)
+                    except ValueError:
+                        continue
+                    if not any(ipo in n for n in redes):
+                        continue
+                linhas.append({
+                    "timestamp": utc_para_local(e.get("timestamp")), "ip": cip,
+                    "empresa": resolver_empresa(cip, mapa) or "—",
+                    "dominio": e.get("qname"), "tipo": e.get("qtype"),
+                    "resposta": e.get("responseType"), "rcode": e.get("rcode"),
+                    "answer": e.get("answer"),
+                })
+                if len(linhas) >= limite:
+                    meio = e is not ents[-1]   # parou no meio da página
+                    break
+            if len(ents) < por_pagina and not meio:   # a janela foi lida até o fim
                 break
-        if len(ents) < por_pagina:
+            if meio or len(linhas) >= limite or scanned >= scan_max or time.monotonic() - t0 > orcamento_s:
+                parou = True   # a janela NÃO foi lida até o fim: a busca vai até o último registro lido
+                break
+            page += 1
+        if parou:
+            cursor = _parse_utc(ult) or a
             break
-        page += 1
-    return linhas, scanned, (len(linhas) >= limite or scanned >= scan_max)
+        # próxima janela: do tamanho que traz ~1 página (o custo da chamada é o nº de registros da janela)
+        seg = max(janela.total_seconds(), 1)
+        janela = min(JANELA_MAX, timedelta(seconds=max(30, seg * 0.8 * por_pagina / total)) if total else janela * 4)
+        cursor = a
+        if not ini_dt and fim_dt - cursor > timedelta(days=31):   # sem início: não volta além de um mês
+            break
+    cap = len(linhas) >= limite or scanned >= scan_max
+    desde = cursor.astimezone(TZ_LOCAL).strftime("%Y-%m-%dT%H:%M") if parou and (not ini_dt or cursor > ini_dt) else None
+    return linhas, scanned, cap, desde
 
 
 # ------------------------------------------------ nomes locais (fora dos Logs por padrão)

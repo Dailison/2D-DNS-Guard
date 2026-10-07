@@ -124,3 +124,23 @@ def test_ao_vivo_consulta_o_technitium(tela):
     html = c.get("/logs-dns?empresa=7&inicio=2026-10-07T00%3A00&fim=2026-10-07T23%3A59&vista=detalhado&fonte=technitium").get_data(as_text=True)
     assert [x for x in chamadas if x[0] == "technitium"] and not [x for x in chamadas if x[0] == "/logs/detalhe"]
     assert "voltar ao analisador" in html
+
+
+def test_pedaco_de_ip_no_campo_ip_exato_vale_como_faixa(tela):
+    """07/10: "10.24." no campo IP exato ia como IP exato e o analisador respondia 500. Passa a valer como parte do IP."""
+    c, chamadas = tela
+    html = c.get("/logs-dns?ip=10.24.&resposta=Blocked&inicio=2026-10-07T00%3A00&fim=2026-10-07T23%3A59&vista=agrupado").get_data(as_text=True)
+    path, p = next(x for x in chamadas if x[0] == "/logs/grouped")
+    assert p["ip"] is None and p["ip_like"] == "10.24." and p["cidr"] is None
+    assert 'name="cidr" value="10.24."' in html and 'name="ip" value=""' in html, "o formulário mostra onde o filtro ficou"
+    chamadas.clear()
+    c.get("/logs-dns?ip=10.7.0.0/24&vista=agrupado")                      # faixa no campo IP exato
+    assert next(p for path, p in chamadas if path == "/logs/grouped")["cidr"] == ["10.7.0.0/24"]
+    chamadas.clear()
+    c.get("/logs-dns?ip=10.7.0.5&vista=agrupado")                         # IP completo: segue exato
+    p = next(p for path, p in chamadas if path == "/logs/grouped")
+    assert p["ip"] == "10.7.0.5" and p["ip_like"] is None
+    chamadas.clear()
+    html = c.get("/logs-dns?ip=abc&cidr=10.7.0.0/24&vista=agrupado").get_data(as_text=True)   # os dois: ignora o inválido
+    p = next(p for path, p in chamadas if path == "/logs/grouped")
+    assert p["ip"] is None and p["cidr"] == ["10.7.0.0/24"] and "não é um IP completo" in html

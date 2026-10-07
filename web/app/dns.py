@@ -265,6 +265,23 @@ def _classificar_linhas(linhas: list[dict], info: dict) -> bool:
     return True
 
 
+def _ip_exato_ou_faixa(ip: str, cidr: str) -> tuple[str, str]:
+    """"IP exato" só vale com um IP completo. Pedaço de IP ou faixa digitado ali (07/10: "10.24." ia como IP exato e
+    o analisador respondia 500) passa a valer como "Faixa / parte do IP"; se esse campo também veio, é ignorado com aviso."""
+    import ipaddress
+    ip = (ip or "").strip()
+    if not ip:
+        return ip, cidr
+    try:
+        return str(ipaddress.ip_address(ip)), cidr
+    except ValueError:
+        pass
+    if cidr:
+        flash(f"\"{ip}\" não é um IP completo: ignorado (vale a faixa {cidr}).", "erro")
+        return "", cidr
+    return "", ip
+
+
 def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, resposta, redes, ip_like,
                                mapa, grupos, lista_empresas, cls_f="", categoria="", vista="agrupado", locais=False):
     def utc(v):
@@ -398,6 +415,7 @@ def logs_dns():
         inicio = f"{hoje}T00:00"
         fim = f"{hoje}T23:59"
 
+    ip, cidr = _ip_exato_ou_faixa(ip, cidr)
     linhas, agrupado, grupos, scanned, cap, coberto_desde = [], [], [], 0, False, None
     lista_empresas = emp.lista()
     try:

@@ -32,6 +32,12 @@ def ips_servicos(slug: str | None = None) -> list[dict]:
         raise
 
 
+def liberados_parciais() -> list[dict]:
+    """IPs liberados só de algumas listas de bloqueio ([{"ip", "listas"}]). Falha sobe: sincronizar sem a relação
+    apagaria os grupos desses IPs (voltariam a filtrar pela rede inteira)."""
+    return [{"ip": m["ip"], "listas": m["listas"]} for m in api.get("/console/liberados-meta") if m.get("listas")]
+
+
 def sincronizar() -> dict:
     """Aplica todas as políticas no Technitium (empresas cadastradas; as detectadas nos logs e as
     redes fora do cadastro ficam no default)."""
@@ -46,7 +52,8 @@ def sincronizar() -> dict:
         ajustes = list((api.get("/ajustes").get("escopos") or {}))
     except Exception:  # noqa: BLE001 — analisador antigo: sem ajustes
         ajustes = []
-    r = dnslib.sincronizar_politicas(empresas, lista(), por=por, ajustes=ajustes, ips=ips_servicos())
+    r = dnslib.sincronizar_politicas(empresas, lista(), por=por, ajustes=ajustes, ips=ips_servicos(),
+                                     parciais=liberados_parciais())
     current_app.logger.info("políticas -> Technitium: criados %s, apagados %s, %d rede(s)",
                             r["criados"], r["apagados"], r["redes"])
     return r

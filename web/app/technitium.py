@@ -594,13 +594,21 @@ def nome_grupo_ip(empresa: str | None, ip: str) -> str:
     return nome_grupo(empresa or "(sem cadastro)") + " · IP " + (ip[:-3] if ip.endswith("/32") else ip)
 
 
-def plano_politicas(empresas, politicas, ajustes=(), ips=()):
+def nome_grupo_sem(base: str, sem) -> str:
+    """Grupo dos IPs liberados só de algumas listas: o grupo da rede deles + " · sem <listas>" (um por combinação)."""
+    return base + " · sem " + "+".join(sorted(sem))
+
+
+def plano_politicas(empresas, politicas, ajustes=(), ips=(), parciais=()):
     """-> (grupos {nome: {"lists", "services", "blocked", "escopo"}}, mapa {cidr: grupo}, default {...}).
     Rede de empresa sem política (nem da unidade nem da empresa) e sem ajuste fica sem mapeamento: vale o default.
     `ajustes` = escopos com ajuste próprio das listas (01/10: listas por empresa/unidade): a unidade com ajuste ganha
     grupo próprio (com as listas da empresa) e cada grupo assina as listas de ajuste do escopo dele ("escopo").
     `ips` = [{"ip", "slug"}] serviços liberados só para um IP/faixa (03/10): o IP ganha grupo próprio com a política
-    da rede mais específica que o contém (sem rede no cadastro: a padrão) mais esses serviços."""
+    da rede mais específica que o contém (sem rede no cadastro: a padrão) mais esses serviços.
+    `parciais` = [{"ip", "listas"}] IPs liberados só de algumas listas de bloqueio (07/10): em vez do grupo de isenção
+    (que não bloqueia nada), o IP vai p/ um grupo com a política da rede dele MENOS essas listas — compartilhado por
+    quem tem a mesma rede e a mesma escolha ("Empresa: X · sem redes_sociais"); com serviço só dele, o grupo do IP."""
     pol = {p["scope"]: p for p in politicas}
     ajustes = set(ajustes or ())
     grupos, mapa = {}, {}
@@ -618,13 +626,13 @@ def plano_politicas(empresas, politicas, ajustes=(), ips=()):
             proprio = bool(tu) and (bool(pu) or tu in ajustes)       # unidade com política ou ajuste: grupo dela
             escopo = tu if tu in ajustes else te if te in ajustes else None
             p = pu or pe or (pol.get("default") if escopo else None)   # só ajuste, sem política: listas do padrão
+            nome = nome_grupo(e["name"], unidade) if proprio else nome_grupo(e["name"])
             try:
-                redes.append((ipaddress.ip_network(cidr), e["name"], p, escopo))
+                redes.append((ipaddress.ip_network(cidr), e["name"], p, escopo, nome if p else nome_grupo(e["name"])))
             except ValueError:
                 pass
             if not p:
                 continue
-            nome = nome_grupo(e["name"], unidade) if proprio else nome_grupo(e["name"])
             grupos[nome] = {"lists": sorted(p.get("lists") or []), "services": sorted(p.get("services") or []),
                             "blocked": sorted(p.get("services_blocked") or []), "escopo": escopo}
             mapa[cidr] = nome
@@ -634,13 +642,22 @@ def plano_politicas(empresas, politicas, ajustes=(), ips=()):
         ipn = norm_ip(x.get("ip"))
         if ipn and x.get("slug"):
             por_ip.setdefault(ipn, set()).add(x["slug"])
-    for ipn, slugs in por_ip.items():
+    sem_ip: dict[str, set] = {}
+    for x in parciais or ():
+        ipn = norm_ip(x.get("ip"))
+        if ipn and x.get("listas"):
+            sem_ip[ipn] = set(x["listas"])
+    for ipn in sorted(set(por_ip) | set(sem_ip)):
+        slugs, sem = por_ip.get(ipn, set()), sem_ip.get(ipn, set())
         alvo = ipaddress.ip_network(ipn)
         dona = max((r for r in redes if r[0].version == alvo.version and alvo.subnet_of(r[0])),
                    key=lambda r: r[0].prefixlen, default=None)
         p = (dona[2] if dona else None) or d
-        nome = nome_grupo_ip(dona[1] if dona else None, ipn)
-        grupos[nome] = {"lists": sorted(p.get("lists") or []), "services": sorted(set(p.get("services") or []) | slugs),
+        if slugs:
+            nome = nome_grupo_ip(dona[1] if dona else None, ipn)
+        else:
+            nome = nome_grupo_sem(dona[4] if dona else nome_grupo("(sem cadastro)"), sem)
+        grupos[nome] = {"lists": sorted(set(p.get("lists") or []) - sem), "services": sorted(set(p.get("services") or []) | slugs),
                         "blocked": sorted(p.get("services_blocked") or []), "escopo": dona[3] if dona else None}
         mapa[ipn] = nome
     return grupos, mapa, {"lists": sorted(d.get("lists") or []), "services": sorted(d.get("services") or []),
@@ -712,7 +729,7 @@ def _aplica_politica(g, lists, services, bloqueados=(), escopo=None):
                           + ([url_ajuste(escopo, "liberar")] if escopo else []))
 
 
-def _valida_sincronizacao(antes: dict, depois: dict, lib: str) -> None:
+def _valida_sincronizacao(antes: dict, depois: dict, lib: str, saem=()) -> None:
     """Recusa gravar (RuntimeError) um resultado que apagaria o que não é da sincronização."""
     ga = {g.get("name") for g in antes.get("groups", [])}
     gd = {g.get("name") for g in depois.get("groups", [])}
@@ -724,31 +741,34 @@ def _valida_sincronizacao(antes: dict, depois: dict, lib: str) -> None:
     na, nd = antes.get("networkGroupMap") or {}, depois.get("networkGroupMap") or {}
     if len(na) >= 5 and len(nd) < 0.8 * len(na):
         raise RuntimeError(f"a sincronização deixaria o mapa de redes com {len(nd)} de {len(na)} entradas; nada foi gravado")
-    mudou = sorted(k for k, v in na.items() if v == lib and nd.get(k) != lib)
+    saem = set(saem)   # IPs que passaram a ser liberados só de algumas listas: saem da isenção de propósito
+    mudou = sorted(k for k, v in na.items() if v == lib and nd.get(k) != lib and norm_ip(k) not in saem)
     if mudou:
         raise RuntimeError(f"a sincronização mexeria em redes isentas ({', '.join(mudou[:5])}); nada foi gravado")
 
 
 def sincronizar_politicas(empresas, politicas, aplicar=True, por="console", motivo="sincronizar políticas", ajustes=(),
-                          ips=()):
+                          ips=(), parciais=()):
     """Deixa o Technitium igual às políticas: cria/atualiza/apaga os grupos "Empresa: …", aponta
     as redes das empresas para eles e aplica a política default no grupo default. Não mexe no
-    grupo Liberados nem em redes/IPs mapeados para ele. Valida o resultado antes de gravar (ver
+    grupo Liberados nem em redes/IPs mapeados para ele — a não ser os `parciais` (IPs liberados só de algumas listas:
+    saem da isenção e vão p/ o grupo "… · sem <listas>"). Valida o resultado antes de gravar (ver
     _valida_sincronizacao), guarda backup e não sobrescreve alteração de outra pessoa
     (_read_modify_write). Retorna um resumo do que mudou."""
     lib = current_app.config.get("TECHNITIUM_LIBERADOS_GROUP", "Liberados")
 
     def muda(cfg):
         antes = json.loads(_canon(cfg))
-        r = _sincroniza(cfg, empresas, politicas, lib, ajustes, ips)
-        _valida_sincronizacao(antes, cfg, lib)
+        r = _sincroniza(cfg, empresas, politicas, lib, ajustes, ips, parciais)
+        _valida_sincronizacao(antes, cfg, lib, [norm_ip(x.get("ip")) for x in parciais or () if x.get("listas")])
         return r, aplicar
     return _read_modify_write(muda, por, motivo)
 
 
-def _sincroniza(cfg, empresas, politicas, lib, ajustes=(), ips=()):
+def _sincroniza(cfg, empresas, politicas, lib, ajustes=(), ips=(), parciais=()):
     """Aplica as políticas no config (em memória)."""
-    grupos, mapa, default = plano_politicas(empresas, politicas, ajustes, ips)
+    grupos, mapa, default = plano_politicas(empresas, politicas, ajustes, ips, parciais)
+    saem = {norm_ip(x.get("ip")) for x in parciais or () if x.get("listas")}
     existentes = {g.get("name"): g for g in cfg.get("groups", [])}
     criados, atualizados, apagados = [], [], []
     for nome, p in grupos.items():
@@ -770,12 +790,12 @@ def _sincroniza(cfg, empresas, politicas, lib, ajustes=(), ips=()):
     ngm = cfg.setdefault("networkGroupMap", {})
     for k in list(ngm):
         v = ngm[k]
-        if v == lib:
+        if v == lib and norm_ip(k) not in saem:
             continue                      # isenções (Liberados) ficam como estão
         if norm_ip(k) in mapa or (str(v).startswith(PREFIXO_GRUPO) and v not in grupos):
             del ngm[k]                    # será reapontado (ou o grupo da empresa deixou de existir)
     for cidr, nome in mapa.items():
-        if ngm.get(cidr) != lib:
+        if ngm.get(cidr) != lib or cidr in saem:
             ngm[cidr] = nome
     for g in list(cfg.get("groups", [])):
         n = g.get("name") or ""

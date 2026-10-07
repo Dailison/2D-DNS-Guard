@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}IPs liberados{% endblock %}
 {% block content %}
-<h1>IPs liberados <span class="mut" style="font-size:.8rem">· computadores isentos do filtro DNS no Technitium</span></h1>
-<p class="mut" style="margin:-.6rem 0 1rem">IPs aqui são <b>isentos do filtro DNS</b> (grupo <code>{{ grupo }}</code> — não bloqueia nada). Revogar faz o IP voltar a filtrar pela rede dele.</p>
+<h1>IPs liberados</h1>
 
 {% from "admin/_liberado_campos.html" import sel_empresa, sel_filial, sel_tipo, script_sugestao with context %}
+{% from "admin/_liberado_listas.html" import sel_listas, script_listas with context %}
 
 <div class="card">
   <h2>Liberar IP</h2>
@@ -15,6 +15,7 @@
     <div><label>Departamento</label><input type="text" name="departamento" placeholder="Ex.: Recepção"></div>
     <div><label>Usuário</label><input type="text" name="usuario" placeholder="Ex.: João"></div>
     <div><label>Tipo</label>{{ sel_tipo(None, None) }}</div>
+    <div><label>Libera</label>{{ sel_listas(None, listas_novo) }}</div>
     <div><label>Autorizado por (empresa)</label><input type="text" name="autorizado_por" placeholder="Ex.: Maria, gerente" required
       title="quem da empresa pediu/autorizou a liberação (fica no histórico junto com o seu usuário)"></div>
     <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Liberar</button></div>
@@ -36,12 +37,13 @@
   </div>
   <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Edite na linha e clique <b>Salvar</b>.</p>
   <table>
-    <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Filial</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th>Autorizado por</th><th>Liberado por</th><th></th></tr></thead>
+    <thead><tr><th>IP / Faixa</th><th>Libera</th><th>Empresa</th><th>Filial</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th>Autorizado por</th><th>Liberado por</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}
       {% set fid = 'e_' ~ loop.index %}
       <tr>
         <td><code>{{ r.ip }}</code></td>
+        <td>{{ sel_listas(fid, r.listas) }}</td>
         <td>{{ sel_empresa(fid, r.tenant_id) }}
           {% if not r.tenant_id and r.empresa %}<div class="mut" style="font-size:.75rem">antes: {{ r.empresa }}</div>
           <input type="hidden" form="{{ fid }}" name="empresa" value="{{ r.empresa }}">{% endif %}</td>
@@ -64,7 +66,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="9" class="mut">Nenhum IP liberado.</td></tr>
+      <tr><td colspan="10" class="mut">Nenhum IP liberado.</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -79,7 +81,8 @@
       <tr>
         <td style="white-space:nowrap">{{ h.at|dt_sp }}</td>
         <td>{{ {'liberar': '✅ liberou', 'editar': '✏️ editou', 'revogar': '⛔ revogou'}.get(h.acao, h.acao) }}</td>
-        <td><code>{{ h.ip }}</code>{% set d = h.detalhe or {} %}{% if d.usuario or d.departamento %}<div class="mut" style="font-size:.75rem">{{ [d.usuario, d.departamento]|select|join(' · ') }}</div>{% endif %}</td>
+        <td><code>{{ h.ip }}</code>{% set d = h.detalhe or {} %}{% if d.usuario or d.departamento %}<div class="mut" style="font-size:.75rem">{{ [d.usuario, d.departamento]|select|join(' · ') }}</div>{% endif %}
+          {% if d.listas %}<div class="mut" style="font-size:.75rem">libera: {% if d.listas is string %}tudo{% else %}{% for cod in d.listas %}{{ nomes_lista.get(cod, cod) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</div>{% endif %}</td>
         <td>{{ h.tenant_name or '—' }}{% if (h.detalhe or {}).filial %} · {{ h.detalhe.filial }}{% endif %}</td>
         <td>{{ h.autorizado_por or '—' }}</td>
         <td>{{ h.por or '—' }}</td>
@@ -92,4 +95,5 @@
 </div>
 
 {{ script_sugestao() }}
+{{ script_listas() }}
 {% endblock %}

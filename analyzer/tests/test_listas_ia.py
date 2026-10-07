@@ -1679,3 +1679,33 @@ def test_dns_inativo_aproveita_a_resposta_do_technitium(env, monkeypatch):
         motivo = c.execute("SELECT lista_motivo FROM domains WHERE name = 'morto-log.com'").fetchone()["lista_motivo"]
     assert em == {("dns_inativo", "morto-log.com"), ("dns_inativo", "bloqueado-log.com"), ("dns_inativo", "velho-log.com")}
     assert "NXDOMAIN no log do Technitium: api.morto-log.com" in motivo
+
+
+def test_liberado_so_de_algumas_listas(env):
+    """07/10 (pedido do usuário): cada IP liberado guarda de quais listas de bloqueio fica livre (NULL = todas, como
+    era). Editar a descrição não mexe na escolha; a definição em lote não mexe na descrição."""
+    from fastapi.testclient import TestClient
+
+    from dnsanalyzer import api, db
+    cli = TestClient(api.app)
+    ip = "10.77.0.9/32"
+    r = cli.put("/console/liberados-meta", headers=H, json={"ip": ip, "usuario": "João", "autorizado_por": "Maria", "by": "op@2d",
+                                                            "listas": ["redes_sociais", "noticias", "redes_sociais"], "definir_listas": True})
+    assert r.status_code == 200
+    meta = lambda: next(m for m in cli.get("/console/liberados-meta", headers=H).json() if m["ip"] == ip)   # noqa: E731
+    assert meta()["listas"] == ["noticias", "redes_sociais"]
+    cli.put("/console/liberados-meta", headers=H, json={"ip": ip, "usuario": "José", "by": "op@2d", "listas": None})
+    assert meta()["listas"] == ["noticias", "redes_sociais"] and meta()["usuario"] == "José", "sem definir_listas a escolha fica"
+    for ruim in (["inventada"], [], ["para_revisar"]):
+        assert cli.put("/console/liberados-meta", headers=H, json={"ip": ip, "listas": ruim, "definir_listas": True}).status_code == 422
+    # em lote (a largada): só a escolha muda; IP sem descrição ganha a linha
+    r = cli.post("/console/liberados-listas", headers=H, json={"ips": [ip, "10.77.0.10"], "listas": ["compras"], "by": "op@2d"})
+    assert r.json() == {"ok": True, "ips": 2}
+    assert meta()["listas"] == ["compras"] and meta()["usuario"] == "José" and meta()["autorizado_por"] == "Maria"
+    novo = next(m for m in cli.get("/console/liberados-meta", headers=H).json() if m["ip"] == "10.77.0.10/32")
+    assert novo["listas"] == ["compras"] and novo["usuario"] is None
+    cli.post("/console/liberados-listas", headers=H, json={"ips": [ip], "listas": None, "by": "op@2d"})   # de volta p/ todas
+    assert meta()["listas"] is None
+    with db.conn() as c:
+        det = [r["detalhe"].get("listas") for r in c.execute("SELECT detalhe FROM liberado_log WHERE ip = %s ORDER BY id", (ip,))]
+    assert det == [["noticias", "redes_sociais"], None, ["compras"], "todas"]

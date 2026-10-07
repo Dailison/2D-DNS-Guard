@@ -1,0 +1,48 @@
+{# De quais listas de bloqueio um IP liberado fica livre (07/10). `atual` = lista de códigos; None = todas (isento do
+   filtro). 'secoes_lista' e 'nomes_lista' vêm da rota.
+   importar com: {% from "admin/_liberado_listas.html" import sel_listas, script_listas with context %} #}
+{% macro sel_listas(form_id, atual) -%}
+{% set f = ('form="' ~ form_id ~ '"') if form_id else '' %}
+<details class="lb-ls">
+  <summary title="listas de bloqueio que deixam de valer para este IP">{% if atual is none %}Tudo{% else %}{% for cod in atual %}{{ nomes_lista.get(cod, cod) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</summary>
+  <div class="pn">
+    <label class="tu" title="isento do filtro: nenhuma lista vale, nem as de segurança"><input type="checkbox" {{ f|safe }} name="tudo" value="1" {{ 'checked' if atual is none }}> Tudo</label>
+    {% for sec, itens in secoes_lista %}
+    <div class="sc">{{ sec }}</div>
+    {% for cod, nome in itens %}<label><input type="checkbox" {{ f|safe }} name="listas" value="{{ cod }}" data-n="{{ nome }}" {{ 'checked' if atual is not none and cod in atual }} {{ 'disabled' if atual is none }}> {{ nome }}</label>
+    {% endfor %}
+    {% endfor %}
+  </div>
+</details>
+{%- endmacro %}
+
+{% macro script_listas() -%}
+<style>
+  .lb-ls{position:relative;min-width:9rem}
+  .lb-ls summary{cursor:pointer;list-style:none;border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem;max-width:15rem;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--bg)}
+  .lb-ls summary::-webkit-details-marker{display:none}
+  .lb-ls .pn{position:absolute;z-index:30;top:calc(100% + 4px);left:0;background:var(--card);border:1px solid var(--bd);border-radius:10px;
+    padding:.55rem .75rem;min-width:15rem;max-height:24rem;overflow:auto;box-shadow:0 8px 28px rgba(0,0,0,.28)}
+  .lb-ls .pn label{display:flex;align-items:center;gap:.45rem;font-size:.88rem;margin:.18rem 0;white-space:nowrap;cursor:pointer}
+  .lb-ls .pn label input{width:auto;margin:0}
+  .lb-ls .pn .tu{font-weight:700;padding-bottom:.35rem;border-bottom:1px solid var(--bd);margin-bottom:.35rem}
+  .lb-ls .pn .sc{font-size:.72rem;color:var(--mut);margin:.5rem 0 .15rem;text-transform:uppercase;letter-spacing:.04em}
+</style>
+<script>
+(function () {
+  // "Tudo" desliga as demais; o resumo acompanha o que está marcado; clicar fora fecha
+  document.querySelectorAll('details.lb-ls').forEach(function (d) {
+    var tudo = d.querySelector('input[name="tudo"]'), ls = d.querySelectorAll('input[name="listas"]'), sm = d.querySelector('summary');
+    d.addEventListener('change', function () {
+      ls.forEach(function (c) { c.disabled = tudo.checked; });
+      var m = Array.prototype.filter.call(ls, function (c) { return c.checked; }).map(function (c) { return c.dataset.n; });
+      sm.textContent = tudo.checked ? 'Tudo' : (m.length ? m.join(', ') : '—');
+    });
+  });
+  document.addEventListener('click', function (ev) {
+    document.querySelectorAll('details.lb-ls[open]').forEach(function (d) { if (!d.contains(ev.target)) d.open = false; });
+  });
+})();
+</script>
+{%- endmacro %}

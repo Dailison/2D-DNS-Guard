@@ -1035,14 +1035,28 @@ class LiberadoMetaIn(BaseModel):
     autorizado_por: Optional[str] = None   # quem da empresa autorizou (vazio na edição = mantém)
     acao: Optional[str] = None             # liberar | editar (histórico); sem = pelo que já existia
     by: str = ""
+    # de quais listas de bloqueio o IP fica livre (07/10): só vale com definir_listas — None = todas (isento de tudo)
+    listas: Optional[list[str]] = None
+    definir_listas: bool = False
+
+
+def _listas_liberado(v: Optional[list[str]]) -> Optional[list[str]]:
+    """Listas de bloqueio das quais um IP fica livre: None = todas; senão ao menos uma, todas existentes."""
+    if v is None:
+        return None
+    v = sorted(set(v))
+    ruins = [x for x in v if x not in listas.CATEGORIAS or x == "para_revisar"]
+    if ruins or not v:
+        raise HTTPException(422, "lista inexistente: " + ", ".join(ruins) if ruins else "escolha ao menos uma lista (ou todas)")
+    return v
 
 
 @app.get("/console/liberados-meta", dependencies=[Depends(auth)])
 def liberados_meta_list():
     with db.conn() as c:
         return c.execute("SELECT m.ip, m.tenant_id, t.name AS tenant_name, m.filial, m.empresa, m.departamento, "
-                         "m.usuario, m.tipo, m.autorizado_por, m.created_at, m.created_by, m.updated_at, m.updated_by "
-                         "FROM liberado_meta m LEFT JOIN tenants t ON t.id=m.tenant_id ORDER BY m.ip").fetchall()
+                         "m.usuario, m.tipo, m.autorizado_por, m.created_at, m.created_by, m.updated_at, m.updated_by, "
+                         "m.listas FROM liberado_meta m LEFT JOIN tenants t ON t.id=m.tenant_id ORDER BY m.ip").fetchall()
 
 
 @app.get("/console/liberados-log", dependencies=[Depends(auth)])
@@ -1078,11 +1092,37 @@ def liberados_meta_upsert(body: LiberadoMetaIn):
             (body.ip, body.tenant_id, s(body.filial, 150) if body.tenant_id else None,
              None if body.tenant_id else s(body.empresa, 150), s(body.departamento, 255), s(body.usuario, 255),
              s(body.tipo, 20), s(body.autorizado_por, 255), body.by or None)).fetchone()
+        det = {k: r[k] for k in ("filial", "departamento", "usuario", "tipo") if r[k]}
+        if body.definir_listas:
+            ls = _listas_liberado(body.listas)
+            c.execute("UPDATE liberado_meta SET listas = %s WHERE ip = %s", (ls, body.ip))
+            det["listas"] = ls if ls is not None else "todas"
         acao = body.acao if body.acao in ("liberar", "editar") else ("editar" if existia else "liberar")
         c.execute("INSERT INTO liberado_log (ip, acao, por, autorizado_por, tenant_id, detalhe) VALUES (%s,%s,%s,%s,%s,%s)",
-                  (body.ip, acao, body.by or None, r["autorizado_por"], r["tenant_id"],
-                   Jsonb({k: r[k] for k in ("filial", "departamento", "usuario", "tipo") if r[k]})))
+                  (body.ip, acao, body.by or None, r["autorizado_por"], r["tenant_id"], Jsonb(det)))
         return {"ok": True, "ip": body.ip}
+
+
+class LiberadosListasIn(BaseModel):
+    ips: list[str]
+    listas: Optional[list[str]] = None   # None = todas (isento de tudo)
+    by: str = ""
+
+
+@app.post("/console/liberados-listas", dependencies=[Depends(auth)])
+def liberados_listas(body: LiberadosListasIn):
+    """Define, para vários IPs de uma vez, de quais listas de bloqueio ficam livres — sem tocar na descrição deles
+    (IP sem descrição ganha a linha). O console sincroniza o Technitium em seguida."""
+    ls = _listas_liberado(body.listas)
+    ips = sorted({_cidr(x) for x in body.ips if x and x.strip()})
+    with db.conn() as c:
+        for ip in ips:
+            r = c.execute("INSERT INTO liberado_meta (ip, listas, created_by) VALUES (%s, %s, %s) ON CONFLICT (ip) DO UPDATE "
+                          "SET listas = EXCLUDED.listas, updated_at = now(), updated_by = EXCLUDED.created_by "
+                          "RETURNING tenant_id, autorizado_por", (ip, ls, body.by or None)).fetchone()
+            c.execute("INSERT INTO liberado_log (ip, acao, por, autorizado_por, tenant_id, detalhe) VALUES (%s,'editar',%s,%s,%s,%s)",
+                      (ip, body.by or None, r["autorizado_por"], r["tenant_id"], Jsonb({"listas": ls if ls is not None else "todas"})))
+    return {"ok": True, "ips": len(ips)}
 
 
 @app.delete("/console/liberados-meta", dependencies=[Depends(auth)])

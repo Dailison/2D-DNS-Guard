@@ -25,6 +25,7 @@ def dashboard():
 
 # ------------------------------------------------- Liberados DNS (Technitium)
 TIPOS_LIBERADO = ["Computador", "Celular", "Roteador", "Faixa de IP"]
+LISTAS_LIBERADO_PADRAO = ["noticias", "compras", "redes_sociais"]   # já marcadas ao liberar um IP (pedido do usuário 07/10)
 
 
 @admin_bp.get("/liberados")
@@ -42,11 +43,14 @@ def liberados():
         except AnalyzerError as e:
             metas = {}
             flash(f"Descrições indisponíveis (analisador): {e}", "erro")
-        for ip in ips:
+        # isentos de tudo = quem está no grupo de isenção do Technitium; liberados só de algumas listas = quem o
+        # analisador diz (o Technitium os tem num grupo "… · sem <listas>")
+        parciais = [ip for ip, m in metas.items() if m.get("listas")]
+        for ip in sorted(set(ips) | set(parciais), key=dnslib._sort_key):
             m = metas.get(ip) or {}
             rows.append({k: m.get(k) or "" for k in ("tenant_name", "filial", "empresa", "departamento", "usuario", "tipo",
                                                       "autorizado_por", "created_by", "created_at", "updated_by", "updated_at")}
-                        | {"ip": ip, "tenant_id": m.get("tenant_id")})
+                        | {"ip": ip, "tenant_id": m.get("tenant_id"), "listas": m.get("listas") or None})
         if f_emp:
             rows = [r for r in rows if r["tenant_id"] == f_emp]
         if q:
@@ -60,7 +64,8 @@ def liberados():
     except AnalyzerError:
         historico = []
     return render_template("admin/liberados.html", rows=rows, q=q, f_emp=f_emp, empresas=_empresas_liberado(),
-                           historico=historico,
+                           historico=historico, secoes_lista=dnslib.SECOES_LISTA, nomes_lista=dict(dnslib.CATEGORIAS_LISTA),
+                           listas_novo=LISTAS_LIBERADO_PADRAO,
                            tipos=TIPOS_LIBERADO, grupo=current_app.config.get("TECHNITIUM_LIBERADOS_GROUP"))
 
 
@@ -73,13 +78,39 @@ def _empresas_liberado() -> list[dict]:
                    for e in emp.lista()), key=lambda e: e["name"].lower())
 
 
-def _liberado_meta_upsert(ip, acao):
+def _liberado_meta_upsert(ip, acao, listas=None, definir_listas=False):
     """Grava empresa (cadastro) + filial, a descrição e quem da empresa autorizou (do form) para o IP normalizado;
-    o analisador registra no histórico o usuário logado."""
+    o analisador registra no histórico o usuário logado. `definir_listas`: grava também de quais listas de bloqueio
+    o IP fica livre (None = todas)."""
     tid = request.form.get("tenant_id", type=int)
     api.put("/console/liberados-meta", {"ip": ip, "by": admin_atual().email, "tenant_id": tid, "acao": acao,
+                                        "listas": listas, "definir_listas": definir_listas,
                                         **{k: request.form.get(k) or "" for k in
                                            ("filial", "empresa", "departamento", "usuario", "tipo", "autorizado_por")}})
+
+
+def _listas_do_form():
+    """De quais listas de bloqueio o IP fica livre: None = todas ("Tudo": isento do filtro); senão as marcadas."""
+    if request.form.get("tudo"):
+        return None
+    validas = dict(dnslib.CATEGORIAS_LISTA)
+    return sorted({x for x in request.form.getlist("listas") if x in validas})
+
+
+def _aplica_liberacao(ip, listas, acao) -> str:
+    """Grava a escolha e deixa o Technitium igual: todas as listas = grupo de isenção (não bloqueia nada); algumas =
+    grupo com a política da rede do IP menos elas (montado pela sincronização das políticas)."""
+    from app import politicas as pol
+    por = admin_atual().email
+    if listas is None:
+        if ip not in dnslib.listar():
+            dnslib.liberar(ip, por=por)
+        _liberado_meta_upsert(ip, acao, None, True)
+        return "liberado de todas as listas"
+    _liberado_meta_upsert(ip, acao, listas, True)
+    pol.sincronizar()
+    nomes = dict(dnslib.CATEGORIAS_LISTA)
+    return "liberado de " + ", ".join(nomes.get(x, x) for x in listas)
 
 
 @admin_bp.post("/liberados/liberar")
@@ -88,26 +119,35 @@ def liberados_liberar():
     if not (request.form.get("autorizado_por") or "").strip():
         flash("Informe quem da empresa autorizou a liberação.", "erro")
         return redirect(url_for("admin.liberados"))
-    try:
-        ip, msg = dnslib.liberar(request.form.get("ip"), por=admin_atual().email)
-        if ip:
-            _liberado_meta_upsert(ip, "liberar")
-        flash((f"{ip} {msg}." if ip else msg), "ok" if ip else "erro")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Falha ao liberar: {e}", "erro")
+    ip, listas = dnslib.norm_ip(request.form.get("ip")), _listas_do_form()
+    if not ip:
+        flash("IP ou CIDR inválido (ex.: 10.100.10.20 ou 10.100.10.0/24).", "erro")
+    elif listas is not None and not listas:
+        flash("Escolha ao menos uma lista para liberar (ou Tudo).", "erro")
+    else:
+        try:
+            flash(f"{ip} {_aplica_liberacao(ip, listas, 'liberar')}.", "ok")
+        except Exception as e:  # noqa: BLE001
+            flash(f"Falha ao liberar: {e}", "erro")
     return redirect(url_for("admin.liberados"))
 
 
 @admin_bp.post("/liberados/editar")
 @login_required
 def liberados_editar():
-    ip = dnslib.norm_ip(request.form.get("ip"))
+    ip, listas = dnslib.norm_ip(request.form.get("ip")), _listas_do_form()
     try:
-        if ip:
-            _liberado_meta_upsert(ip, "editar")
-            flash(f"{ip} atualizado.", "ok")
-        else:
+        if not ip:
             flash("IP inválido.", "erro")
+        elif listas is not None and not listas:
+            flash("Escolha ao menos uma lista para liberar (ou Tudo).", "erro")
+        else:
+            antes = next((m.get("listas") or None for m in api.get("/console/liberados-meta") if m["ip"] == ip), None)
+            if listas == antes and (listas is not None or ip in dnslib.listar()):
+                _liberado_meta_upsert(ip, "editar")   # só a descrição mudou: o Technitium fica como está
+                flash(f"{ip} atualizado.", "ok")
+            else:
+                flash(f"{ip} atualizado: {_aplica_liberacao(ip, listas, 'editar')}.", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao salvar: {e}", "erro")
     return redirect(url_for("admin.liberados"))
@@ -116,10 +156,14 @@ def liberados_editar():
 @admin_bp.post("/liberados/revogar")
 @login_required
 def liberados_revogar():
+    from app import politicas as pol
     try:
-        ip = dnslib.revogar(request.form.get("ip"), por=admin_atual().email)
+        ip = dnslib.norm_ip(request.form.get("ip"))
         if ip:
+            isento = dnslib.revogar(ip, por=admin_atual().email)   # (só quem está no grupo de isenção)
             api.delete(f"/console/liberados-meta?ip={quote(ip, safe='')}&by={quote(admin_atual().email, safe='@')}")
+            if not isento:   # liberado só de algumas listas: a sincronização devolve o IP ao grupo da rede dele
+                pol.sincronizar()
             flash(f"{ip} removido (volta a filtrar).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"Falha ao revogar: {e}", "erro")

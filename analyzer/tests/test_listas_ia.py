@@ -1709,3 +1709,23 @@ def test_liberado_so_de_algumas_listas(env):
     with db.conn() as c:
         det = [r["detalhe"].get("listas") for r in c.execute("SELECT detalhe FROM liberado_log WHERE ip = %s ORDER BY id", (ip,))]
     assert det == [["noticias", "redes_sociais"], None, ["compras"], "todas"]
+
+
+def test_busca_em_todas_as_listas_de_liberacao(env):
+    """08/10 (pedido do usuário): a página Domínios liberados não tinha busca como a de bloqueados. Procura nas
+    whitelists e nas listas de liberação (serviços) de uma vez; subdomínio acha o domínio-pai que o libera."""
+    from dnsanalyzer import db
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, kind, classification, total_queries) VALUES ('buscawl-t.com', 'public', 'TRABALHO', 42)")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES ('produtividade', 'buscawl-t.com', 'op', true), "
+                  "('cdn', 'cdn.buscawl-t.net', 'IA', false)")
+        c.execute("INSERT INTO allow_lists (slug, name) VALUES ('busca-t', 'Sistema Busca T')")
+        c.execute("INSERT INTO allow_list_domains (list_slug, domain) VALUES ('busca-t', 'buscawl-t.com'), ('busca-t', 'outro-buscawl-t.org')")
+    r = env.get("/whitelist-busca", params={"q": "buscawl-t"}, headers=H).json()
+    assert [x["domain"] for x in r] == ["buscawl-t.com", "cdn.buscawl-t.net", "outro-buscawl-t.org"]
+    assert r[0] == {"domain": "buscawl-t.com", "whitelists": ["produtividade"], "servicos": [{"slug": "busca-t", "name": "Sistema Busca T"}],
+                    "publicado": True, "classification": "TRABALHO", "total_queries": 42, "pai": False}
+    assert r[1]["publicado"] is False and r[1]["whitelists"] == ["cdn"] and r[2]["servicos"][0]["slug"] == "busca-t"
+    sub = env.get("/whitelist-busca", params={"q": "login.app.buscawl-t.com"}, headers=H).json()
+    assert [(x["domain"], x["pai"]) for x in sub] == [("buscawl-t.com", True)], "o domínio-pai liberado cobre o subdomínio"
+    assert env.get("/whitelist-busca", params={"q": "bu"}, headers=H).json() == []

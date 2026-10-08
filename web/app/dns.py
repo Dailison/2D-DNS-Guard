@@ -1196,8 +1196,16 @@ def listas_liberacao():
     if request.headers.get("X-Partial") and ctx.get("det") is not None:
         return render_template("admin/_dominios_detalhe.html", so_tabela=True, modo="whitelist" if ctx.get("wl") else "sem_lista",
                                categorias=dnslib.CATEGORIAS_LISTA, cat="", **{k: v for k, v in ctx.items() if k in ("det", "fd", "wl", "scats", "pag_url")})
+    busca = (request.args.get("busca") or "").strip().lower().rstrip(".")
+    achados = None
+    if len(busca) >= 3:   # procura em TODAS as whitelists e listas de liberação (não só na aberta), como em Domínios bloqueados
+        try:
+            achados = api.get("/whitelist-busca", q=busca)
+        except AnalyzerError as e:
+            flash(f"Falha na busca: {e}", "erro")
+            achados = []
     return render_template("admin/servico.html", modo="liberacao", categorias=dnslib.CATEGORIAS_LISTA, whitelists=ctx_wl,
-                           cats_wl=dnslib.CATEGORIAS_WHITELIST, **ctx)
+                           cats_wl=dnslib.CATEGORIAS_WHITELIST, busca=busca, achados=achados, **ctx)
 
 
 @admin_bp.post("/whitelist/add")

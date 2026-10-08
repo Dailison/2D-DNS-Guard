@@ -1974,6 +1974,32 @@ def whitelist_dominios():
         return [r["domain"] for r in c.execute("SELECT DISTINCT domain FROM whitelist_domains WHERE publicar")]
 
 
+@app.get("/whitelist-busca", dependencies=[Depends(auth)])
+def whitelist_busca(q: str, limit: int = Query(100, le=500)):
+    """Procura o domínio (ou parte dele) em TODAS as whitelists e listas de liberação (página Domínios liberados; a
+    irmã de /listas-busca): [{domain, whitelists, servicos, publicado, classification, total_queries, pai}], exatos
+    primeiro. Subdomínio também acha a entrada do domínio-pai que o libera (pai = true)."""
+    termo = q.strip().lower().rstrip(".")
+    if len(termo) < 3:
+        return []
+    padrao = "%" + termo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with db.conn() as c:
+        return c.execute(
+            "WITH e AS ("
+            " SELECT domain, category AS wl, NULL::text AS slug, NULL::text AS servico, publicar FROM whitelist_domains "
+            " UNION ALL SELECT a.domain, NULL, a.list_slug, s.name, true FROM allow_list_domains a JOIN allow_lists s ON s.slug = a.list_slug) "
+            "SELECT e.domain, coalesce(array_agg(DISTINCT e.wl) FILTER (WHERE e.wl IS NOT NULL), '{}') AS whitelists, "
+            "       coalesce(jsonb_agg(DISTINCT jsonb_build_object('slug', e.slug, 'name', e.servico)) FILTER (WHERE e.slug IS NOT NULL), '[]') AS servicos, "
+            "       bool_or(e.publicar) AS publicado, d.classification, coalesce(d.total_queries, 0) AS total_queries, "
+            "       right(%(t)s, length(e.domain) + 1) = '.' || e.domain AS pai "
+            "FROM e LEFT JOIN domains d ON d.name = e.domain "
+            "WHERE e.domain LIKE %(p)s OR right(%(t)s, length(e.domain) + 1) = '.' || e.domain "
+            "GROUP BY e.domain, d.classification, d.total_queries "
+            "ORDER BY (e.domain = %(t)s OR right(%(t)s, length(e.domain) + 1) = '.' || e.domain) DESC, (e.domain LIKE %(fim)s) DESC, "
+            "         coalesce(d.total_queries, 0) DESC, e.domain LIMIT %(n)s",
+            {"p": padrao, "t": termo, "fim": "%." + termo, "n": limit}).fetchall()
+
+
 @app.get("/whitelist/{categoria}/detalhes", dependencies=[Depends(auth)])
 def whitelist_detalhes(categoria: str, q: Optional[str] = None, cls: Optional[str] = None, cat_ia: Optional[str] = None,
                        revisao: Optional[str] = None, sug: Optional[str] = None, rec: Optional[str] = None,

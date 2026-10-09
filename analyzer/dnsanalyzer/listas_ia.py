@@ -523,6 +523,53 @@ def _incoerencia(cat: str, cls: str | None, categoria: str | None) -> str | None
     return None
 
 
+# listas que dizem o TIPO do site (o resto é risco, falta de identificação ou arrumação: não classifica ninguém)
+_SEM_CLASSE = {"ameaca", NAO_IDENT, INFRA, OUTROS, PARA_REVISAR, listas.BLACKLIST, listas.DNS_INATIVO}
+_SUGERIU = re.compile(r"sugeriu (TRABALHO|NAO_TRABALHO)")
+
+
+def classe_da_lista(c, ids: list[int] | None = None) -> int:
+    """Domínio numa lista de bloqueio de conteúdo não pode continuar DESCONHECIDO: a lista diz o que o site é.
+    (09/10, pedido do usuário: 2.727 domínios estavam bloqueados em apostas, compras, adulto… e seguiam "desconhecidos"
+    — a lista era aceita pela página do site ou vinha da IA online sem "reconhecido", e a classificação tinha regra
+    própria, mais exigente. Sendo desconhecidos, iam p/ a fila da investigação profunda sem necessidade.)
+    Vale a classe que a IA sugeriu (nota do sistema ou resposta da IA online); nas listas que só cabem em
+    NAO_TRABALHO, ou sem sugestão, NAO_TRABALHO. Suspeito/malicioso e travados à mão não mudam. Devolve quantos mudou."""
+    from .corporate import recommend
+    rows = c.execute(
+        "SELECT d.id, d.name, d.category, d.risk_score, d.work_score, d.confidence, d.topic, d.reasons, d.evidence, d.model, "
+        "       d.online_resp->>'classificacao' AS cls_online, "
+        "       (SELECT l.category FROM category_lists l WHERE l.domain = d.name AND l.category <> ALL(%(sem)s) "
+        "         ORDER BY l.added_at LIMIT 1) AS lista "
+        "FROM domains d WHERE d.kind = 'public' AND d.classification = 'DESCONHECIDO' AND NOT d.locked "
+        + ("AND d.id = ANY(%(ids)s) " if ids is not None else "")
+        + "AND EXISTS (SELECT 1 FROM category_lists l WHERE l.domain = d.name AND l.category <> ALL(%(sem)s))",
+        {"sem": sorted(_SEM_CLASSE), "ids": ids}).fetchall()
+    if not rows:
+        return 0
+    scats = {r["code"] for r in c.execute("SELECT code FROM site_categories")}
+    for r in rows:
+        cat = r["lista"]
+        notas = " ".join(x.get("text") or "" for x in (r["reasons"] or []) if x.get("by") == "sistema")
+        sug = (_SUGERIU.search(notas) or [None, None])[1] or (r["cls_online"] if r["cls_online"] in ("TRABALHO", "NAO_TRABALHO") else None)
+        cls = "NAO_TRABALHO" if cat in _EXIGE_NAO_TRABALHO or not sug else sug
+        categoria = cat if cat in scats and (r["category"] or "desconhecido") in ("desconhecido", "outros") else r["category"]
+        prot = any(e.get("kind") == "catalog" and (e.get("data") or {}).get("protected") for e in (r["evidence"] or []))
+        rec = recommend(cls, categoria, r["risk_score"], prot)
+        nota = f"classificação acompanha a lista de bloqueio {cat}: o site foi identificado pelo tipo"
+        razoes = [{"evidence_id": None, "text": nota, "by": "sistema"}]
+        c.execute("UPDATE domains SET classification = %s, category = %s, work_score = CASE WHEN %s = 'NAO_TRABALHO' "
+                  "THEN least(coalesce(work_score, 50), 30) ELSE work_score END, reasons = %s || coalesce(reasons, '[]'::jsonb) "
+                  "WHERE id = %s", (cls, categoria, cls, Jsonb(razoes), r["id"]))
+        if rec:
+            c.execute("UPDATE domains SET corp_action = %s, corp_reason = %s, corp_by = %s WHERE id = %s AND coalesce(corp_by, '') <> 'humano'",
+                      (*rec, r["id"]))
+        c.execute("INSERT INTO classification_history (domain_id, classification, risk_score, work_score, confidence, topic, "
+                  "reasons, source, model, note) VALUES (%s,%s,%s,%s,%s,%s,%s,'lista',%s,%s)",
+                  (r["id"], cls, r["risk_score"], r["work_score"], r["confidence"], r["topic"], Jsonb(razoes), r["model"], nota))
+    return len(rows)
+
+
 def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
     """Resultados novos da etapa "lista" e da IA online -> listas.
 
@@ -719,6 +766,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         tirar = [x for x in moveis if x in em and x != cat]
         if tirar:
             c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
+    if rows:   # quem ficou numa lista de bloqueio de conteúdo deixa de ser "desconhecido"
+        out["classe"] = classe_da_lista(c, [r["id"] for r in rows])
     if out["direto"] or out["travados"] or out["online"] or out["resolvidos"]:
         log.info("listas pela IA: %d direto, %d p/ a IA online, %d travados (whitelist), %d resolvidos", len(out["direto"]),
                  len(out["online"]), len(out["travados"]), len(out["resolvidos"]))

@@ -93,11 +93,16 @@ def combine(rule: RuleResult, llm: LLMResult, evidence: list[dict]) -> Final:
                 or (ev_by_id[r["evidence_id"]]["kind"] == "whois" and ev_by_id[r["evidence_id"]]["data"].get("confiavel"))
                 for r in valid) and not (
                 any(ev_by_id[r["evidence_id"]]["kind"] in ("websearch", "site") for r in valid) and len(
-                    {e["data"].get("host") for e in evidence if e["kind"] == "websearch"} - {None}) >= 2):
+                    {e["data"].get("host") for e in evidence if e["kind"] == "websearch"} - {None}) >= 2) and not (
+                cls == "NAO_TRABALHO" and any(ev_by_id[r["evidence_id"]]["kind"] == "site" for r in valid)):
             # modelos pequenos "reconhecem" domínios da cauda longa por chute: fora do top 1M
             # só vale se a IA se apoiou numa identidade externa confiável (Wikidata/certificado)
             # ou na busca na web/página do site, com resultados de 2+ sites diferentes no dossiê
-            # (o modelo raramente cita todos os ids que leu: exigir 2 citados descartava acertos)
+            # (o modelo raramente cita todos os ids que leu: exigir 2 citados descartava acertos).
+            # (09/10, pedido do usuário) NAO_TRABALHO apoiado na PÁGINA do próprio site vale sem a busca: é a mesma
+            # evidência que, desde 30/09, basta p/ a lista de bloqueio — a exigência antiga deixava 1.734 domínios
+            # bloqueados numa lista (apostas, compras, adulto…) e ainda "desconhecidos", na fila da investigação.
+            # Para TRABALHO a exigência fica: é o lado que libera, e a IA local chuta "infraestrutura" com facilidade.
             notes.append(f"domínio fora do top 1M (Tranco) e sem identificação externa confiável citada: "
                          f"reconhecimento da IA não é confiável (sugeriu {cls}); classificado como DESCONHECIDO")
             cls, work_forced = "DESCONHECIDO", 50

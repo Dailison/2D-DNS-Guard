@@ -170,3 +170,20 @@ def test_vaga_da_vm_uma_chamada_por_vez():
         return maior[0]
     assert pico(SimpleNamespace(extra=False)) == 1
     assert pico(SimpleNamespace(extra=True)) > 1
+
+
+def test_pagina_do_site_basta_para_nao_trabalho_fora_do_top_1m():
+    """09/10 (pedido do usuário): a página do próprio site já bastava p/ a LISTA de bloqueio (30/09), mas a
+    classificação exigia também busca na web com 2 sites — 1.734 domínios ficaram em apostas/compras/adulto e ainda
+    "desconhecidos" (e na fila da investigação). NAO_TRABALHO apoiado na página vale; TRABALHO (o lado que libera)
+    continua exigindo identificação externa; chute só pelo nome continua desconhecido."""
+    r = base("hhbet12.com")
+    pagina = {"id": "E9", "kind": "site", "text": "página inicial: 'Apostas e cassino online'", "risk": False, "data": {}}
+    evid = ev(r) + [pagina]
+    cita_pagina = [{"evidence_id": "E9", "text": "a página mostra um cassino online"}]
+    f = combine(r, llm("NAO_TRABALHO", work=10, recognized=True, reasons=cita_pagina), evid)
+    assert f.classification == "NAO_TRABALHO" and not any("não é confiável" in n for n in f.notes)
+    f = combine(r, llm("TRABALHO", work=80, recognized=True, reasons=cita_pagina), evid)
+    assert f.classification == "DESCONHECIDO", "liberar pela página sozinha continua exigindo confirmação"
+    f = combine(r, llm("NAO_TRABALHO", work=10, recognized=True), evid)   # cita só o nome (E0)
+    assert f.classification == "DESCONHECIDO", "sem se apoiar na página é chute"

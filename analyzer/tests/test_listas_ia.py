@@ -1729,3 +1729,40 @@ def test_busca_em_todas_as_listas_de_liberacao(env):
     sub = env.get("/whitelist-busca", params={"q": "login.app.buscawl-t.com"}, headers=H).json()
     assert [(x["domain"], x["pai"]) for x in sub] == [("buscawl-t.com", True)], "o domínio-pai liberado cobre o subdomínio"
     assert env.get("/whitelist-busca", params={"q": "bu"}, headers=H).json() == []
+
+
+def test_classificacao_acompanha_a_lista_de_bloqueio(env):
+    """09/10 (pedido do usuário): domínio numa lista de bloqueio de conteúdo não continua DESCONHECIDO — a lista diz o
+    que ele é. Vale a classe sugerida pela IA; nas listas que só cabem em NAO_TRABALHO, NAO_TRABALHO. Ameaça, não
+    identificado, suspeito e travado não mudam."""
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import db, listas_ia
+    nota = lambda sug: Jsonb([{"evidence_id": None, "by": "sistema", "text": f"domínio fora do top 1M (Tranco)...: (sugeriu {sug}); classificado como DESCONHECIDO"}])   # noqa: E731
+    casos = [("bet-cl.com", "DESCONHECIDO", "apostas", nota("NAO_TRABALHO"), None, False),
+             ("loja-cl.com", "DESCONHECIDO", "compras", nota("TRABALHO"), None, False),
+             ("portal-cl.com", "DESCONHECIDO", "noticias", nota("TRABALHO"), None, False),      # notícias só cabe em NAO_TRABALHO
+             ("chat-cl.com", "DESCONHECIDO", "ia_chatbots", Jsonb([]), {"classificacao": "TRABALHO"}, False),
+             ("semsug-cl.com", "DESCONHECIDO", "compras", Jsonb([]), None, False),
+             ("golpe-cl.com", "DESCONHECIDO", "ameaca", Jsonb([]), None, False),
+             ("nada-cl.com", "DESCONHECIDO", "nao_identificado", Jsonb([]), None, False),
+             ("susp-cl.com", "SUSPEITO", "apostas", Jsonb([]), None, False),
+             ("trava-cl.com", "DESCONHECIDO", "apostas", Jsonb([]), None, True)]
+    with db.conn() as c:
+        ids = {}
+        for n, cls, lista, razoes, online, travado in casos:
+            ids[n] = c.execute("INSERT INTO domains (name, kind, classification, category, work_score, risk_score, reasons, online_resp, locked) "
+                               "VALUES (%s, 'public', %s, 'desconhecido', 50, 10, %s, %s, %s) RETURNING id",
+                               (n, cls, razoes, Jsonb(online) if online else None, travado)).fetchone()["id"]
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES (%s, %s, %s)", (lista, n, f"IA automática ({lista})"))
+        assert listas_ia.classe_da_lista(c, list(ids.values())) == 5
+        d = {r["name"]: r for r in c.execute("SELECT name, classification, category, work_score, corp_action, reasons FROM domains WHERE name LIKE '%%-cl.com'")}
+        assert listas_ia.classe_da_lista(c, list(ids.values())) == 0, "rodar de novo não muda mais nada"
+        hist = c.execute("SELECT count(*) AS n FROM classification_history WHERE source = 'lista' AND domain_id = ANY(%s)", (list(ids.values()),)).fetchone()["n"]
+    assert (d["bet-cl.com"]["classification"], d["bet-cl.com"]["category"], d["bet-cl.com"]["work_score"]) == ("NAO_TRABALHO", "apostas", 30)
+    assert d["bet-cl.com"]["corp_action"] == "BLOQUEAR" and "acompanha a lista de bloqueio apostas" in d["bet-cl.com"]["reasons"][0]["text"]
+    assert d["loja-cl.com"]["classification"] == "TRABALHO" and d["loja-cl.com"]["category"] == "compras" and d["loja-cl.com"]["work_score"] == 50
+    assert d["portal-cl.com"]["classification"] == "NAO_TRABALHO" and d["chat-cl.com"]["classification"] == "TRABALHO"
+    assert d["semsug-cl.com"]["classification"] == "NAO_TRABALHO"
+    assert [d[n]["classification"] for n in ("golpe-cl.com", "nada-cl.com", "susp-cl.com", "trava-cl.com")] == ["DESCONHECIDO", "DESCONHECIDO", "SUSPEITO", "DESCONHECIDO"]
+    assert hist == 5

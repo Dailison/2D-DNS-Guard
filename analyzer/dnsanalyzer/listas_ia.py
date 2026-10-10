@@ -27,7 +27,11 @@ log = logging.getLogger(__name__)
 # listas que a IA preenche (as de "Sistema" — Infraestrutura, Outros, Para revisar — são manuais)
 LISTAS_IA = {
     "ameaca": "phishing, golpe, malware, comando e controle, site malicioso confirmado, e site com CAMUFLAGEM (a página "
-              "imita erro do navegador ou prende o botão Voltar — SINAL na evidência da página): não é site honesto",
+              "imita erro do navegador ou prende o botão Voltar — SINAL na evidência da página): não é site honesto. "
+              "Relatório de SANDBOX (ANY.RUN, JoeSandbox, Hybrid Analysis) ou página do VirusTotal que apenas CITA o "
+              "domínio NÃO é prova: sandbox lista todo endereço que o programa analisado contatou (Microsoft, AnyDesk, "
+              "CDNs, telemetria de software legítimo) — conta só detecção do PRÓPRIO domínio por fornecedores de "
+              "segurança, lista de ameaça ou golpe visível na página",
     "vpn_proxy": "VPN de uso pessoal, proxy, anonimizador, Tor, qualquer coisa para contornar o filtro "
                  "(VPN CORPORATIVA — Fortinet, GlobalProtect, Cisco AnyConnect, Zscaler — é nenhuma)",
     "doh_dns": "resolvedor DNS público e DNS sobre HTTPS/TLS (dns.google, cloudflare-dns, quad9, nextdns, adguard-dns, opendns)",
@@ -523,6 +527,41 @@ def _incoerencia(cat: str, cls: str | None, categoria: str | None) -> str | None
     return None
 
 
+# (09/10, pedido do usuário) Ameaças só pela palavra da IA: playanext.com (API de licença do AnyDesk, Tranco #40 mil,
+# 15 empresas) e 42 endereços de armazenamento do OneDrive ficaram bloqueados como "ameaça" por UM modelo online que
+# leu título de sandbox como prova. Em domínio popular (top 1M) ou usado por várias empresas a IA só põe em Ameaças com
+# confirmação: lista de ameaça, verificação (VirusTotal >= 3 / URLScan) ou dois modelos online de acordo. Sem ela o
+# domínio fica SUSPEITO, fora da lista, e a investigação (que consulta essas fontes) decide. E o que a IA pôs em
+# Ameaças só sai por resposta nova da IA com a verificação limpa (a IA local solta bloqueio certo com facilidade).
+AMEACA_EMPRESAS = 3
+AMEACA_SEM_CONFIRMACAO = ("ameaça sem confirmação em domínio popular ou usado por várias empresas: falta lista de ameaça, "
+                          "VirusTotal/URLScan ou dois modelos online de acordo")
+
+
+def _verificacao(c, nome: str) -> str | None:
+    """Estado da verificação guardada (investigacao.verificar_infra): limpo | suspeito | malicioso; None = sem."""
+    r = c.execute("SELECT value->>'estado' AS e FROM lookup_cache WHERE kind = 'verif_infra' AND key = %s "
+                  "AND fetched_at > now() - interval '30 days'", (nome,)).fetchone()
+    return r["e"] if r else None
+
+
+def ameaca_sem_confirmacao(c, r: dict) -> str | None:
+    """Motivo p/ a IA NÃO pôr o domínio em Ameaças agora, ou None (confirmado, ou domínio sem uso relevante)."""
+    if r.get("popularity_rank") is None and (r.get("n_empresas") or 0) < AMEACA_EMPRESAS:
+        return None
+    if r.get("ti_signature"):
+        return None
+    if r.get("reforco") and ((r.get("antes") or {}).get("lista") == "ameaca"):
+        return None
+    if _verificacao(c, r["name"]) == "malicioso":
+        return None
+    vt = c.execute("SELECT (value->'virustotal'->>'maliciosos')::int AS n FROM lookup_cache WHERE kind = 'coleta' AND key = %s",
+                   (r["name"],)).fetchone()
+    if vt and (vt["n"] or 0) >= 3:
+        return None
+    return AMEACA_SEM_CONFIRMACAO
+
+
 # listas que dizem o TIPO do site (o resto é risco, falta de identificação ou arrumação: não classifica ninguém)
 _SEM_CLASSE = {"ameaca", NAO_IDENT, INFRA, OUTROS, PARA_REVISAR, listas.BLACKLIST, listas.DNS_INATIVO}
 _SUGERIU = re.compile(r"sugeriu (TRABALHO|NAO_TRABALHO)")
@@ -584,6 +623,7 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
         "SELECT d.id, d.name, d.classification, d.category, d.locked, d.lista_ia, d.lista_conf, d.lista_fonte, d.lista_at, "
         " d.popularity_rank, d.corp_action, d.whois_at, d.web_search_at, d.lista_fase, d.lista_wl, d.lista_modelo, d.online_resp->>'classificacao' AS cls_online, d.online_resp->>'categoria' AS cat_online, "
         " d.online_resp->'_meta'->'antes' AS antes, coalesce((d.online_resp->'_meta'->>'nivel_reforco')::boolean, false) AS reforco, "
+        " coalesce(d.ti_signature, '') AS ti_signature, (SELECT count(*) FROM tenant_domains tn WHERE tn.domain_id = d.id) AS n_empresas, "
         " EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = d.id AND g.status = 'allowed' "
         "         AND g.reviewed_by NOT LIKE 'IA%%' AND g.reviewed_by NOT LIKE 'bloqueio automático%%') AS g_allowed, "
         " EXISTS (SELECT 1 FROM tenant_domains td WHERE td.domain_id = d.id AND (td.review_status = 'allowed' "
@@ -727,7 +767,9 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
             # da Infraestrutura (migração) só com certeza, a resposta do modelo maior (ou dois modelos) e sem suspeita:
             # senão fica lá (bloqueado como estava)
             sai_infra = certo and cls not in ("SUSPEITO", "MALICIOSO") and (r["reforco"] or _dois_nenhuma(r))
-            tirar = [x for x in moveis if x in em and x != OUTROS and (x != INFRA or sai_infra)]
+            fica_ameaca = "ameaca" in da_ia and not fixa and _verificacao(c, r["name"]) != "limpo"
+            tirar = [x for x in moveis if x in em and x != OUTROS and (x != INFRA or sai_infra)
+                     and not (x == "ameaca" and fica_ameaca)]
             if tirar:
                 listas.contexto(c, _fonte(r), ("IA online" if online else "IA local") + ": não é de lista nenhuma")
                 c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
@@ -737,6 +779,14 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                                   f"não é de lista nenhuma · {_fonte(r)}", r["id"], origem(r), cls)
             if not (set(em) - set(tirar)):   # não sobrou lista de bloqueio: vai p/ a whitelist
                 liberar(r, cls)
+            continue
+        if cat == "ameaca" and cat not in em and not fixa and ameaca_sem_confirmacao(c, r):
+            # sem confirmação: não entra em Ameaças; fica SUSPEITO p/ a investigação (não vai p/ whitelist nenhuma)
+            out["travados"].append((r["name"], cat, AMEACA_SEM_CONFIRMACAO))
+            sai_revisao(r, em)
+            c.execute("UPDATE domains SET classification = 'SUSPEITO', revisado_at = now(), reanalise_pedida = false, "
+                      "lista_duvida = false WHERE id = %s", (r["id"],))
+            eventos.lista("decisao", r["name"], None, f"{AMEACA_SEM_CONFIRMACAO} · {_fonte(r)}", r["id"], origem(r), "SUSPEITO")
             continue
         # lista de bloqueio. A lista diz O QUE O SITE É; p/ a IA online, "ameaça" só com classificação suspeita/maliciosa
         coerente = (fixa or (cat != "ameaca" or cls in ("MALICIOSO", "SUSPEITO")) if online
@@ -763,7 +813,8 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
                           r["id"], origem(r), cls)
         elif online:   # já estava na lista: a IA online confirmou (a decisão aparece na coluna "Decisão")
             eventos.lista("lista_add", r["name"], cat, f"confirmou (já estava na lista) · {_fonte(r)}", r["id"], origem(r), cls)
-        tirar = [x for x in moveis if x in em and x != cat]
+        tirar = [x for x in moveis if x in em and x != cat
+                 and not (x == "ameaca" and x in da_ia and not fixa and _verificacao(c, r["name"]) != "limpo")]
         if tirar:
             c.execute("DELETE FROM category_lists WHERE category = ANY(%s) AND domain = %s", (tirar, r["name"]))
     if rows:   # quem ficou numa lista de bloqueio de conteúdo deixa de ser "desconhecido"

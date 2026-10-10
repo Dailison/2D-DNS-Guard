@@ -904,7 +904,7 @@ def urlscan_malicioso(nome: str, cliente: httpx.Client, chave: str) -> int | Non
 VERIFICACAO = "verif_infra"   # lookup_cache.kind: resultado da verificação (vale 30 dias)
 
 
-def verificar_infra(did: int, nome: str) -> dict:
+def verificar_infra(did: int, nome: str, uso: str = "verificacao") -> dict:
     """Antes da whitelist do catálogo p/ infraestrutura que hospeda apps de TERCEIROS (bucket S3, CloudFront, Cloud Run,
     Azure, …; pedido do usuário 30/09): listas de ameaça, VirusTotal e URLScan. estado: limpo | suspeito (1-2
     detecções, alguma lista de ameaça) | malicioso (VirusTotal >= 3 ou veredito malicioso no URLScan) | adiar (a
@@ -920,9 +920,9 @@ def verificar_infra(did: int, nome: str) -> dict:
     vt = us = None
     with httpx.Client(timeout=30, follow_redirects=True, headers={"User-Agent": webintel.UA}) as http:
         if cfg.virustotal_api_key:
-            vt = virustotal(nome, http, cfg.virustotal_api_key, esperar=40, uso="verificacao")
+            vt = virustotal(nome, http, cfg.virustotal_api_key, esperar=40, uso=uso)
             if vt is None:
-                return {"estado": "adiar", "resumo": "cota do dia do VirusTotal esgotada" if vt_resta("verificacao") <= 0
+                return {"estado": "adiar", "resumo": "cota do dia do VirusTotal esgotada" if vt_resta(uso) <= 0
                         else "VirusTotal indisponível ou no limite do plano grátis"}
         if cfg.urlscan_api_key:
             us = urlscan_malicioso(nome, http, cfg.urlscan_api_key)
@@ -942,6 +942,54 @@ def verificar_infra(did: int, nome: str) -> dict:
     with db.conn() as c:
         c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES (%s, %s, true, %s) ON CONFLICT (kind, key) "
                   "DO UPDATE SET ok = true, value = EXCLUDED.value, fetched_at = now()", (VERIFICACAO, nome, _jsonb(out)))
+    return out
+
+
+def revisar_ameacas(aplicar: bool = False, limite: int = 500, reserva: int = 60, parar=lambda: False) -> dict:
+    """Passada (09/10, pedido do usuário): o que a IA pôs em Ameaças SEM lista de ameaça, em domínio popular (top 1M).
+    Dois modelos online de acordo: fica. Senão verifica o domínio (listas de ameaça, VirusTotal, URLScan): malicioso ou
+    suspeito (alguma detecção) fica; limpo sai de Ameaças e volta p/ a análise, que agora só o devolve p/ lá com
+    confirmação. Os que estão bloqueando alguém vêm primeiro. Usa a cota do VirusTotal da investigação, deixando
+    `reserva` p/ ela; sem cota para e continua na próxima execução (o resultado de cada um fica guardado 30 dias)."""
+    from . import eventos, listas
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT d.id, d.name, d.classification, d.popularity_rank, coalesce((d.online_resp->'_meta'->>'nivel_reforco')::boolean, false) AS reforco, "
+            " d.online_resp->'_meta'->'antes'->>'lista' AS antes, "
+            " (SELECT count(*) FROM query_log q WHERE q.domain_id = d.id AND q.rtype = 'Blocked' AND q.ts > now() - interval '3 days') AS bloqueios "
+            "FROM category_lists l JOIN domains d ON d.name = l.domain "
+            "WHERE l.category = 'ameaca' AND l.added_by LIKE 'IA automática%%' AND coalesce(d.ti_signature, '') = '' "
+            " AND d.popularity_rank IS NOT NULL AND NOT d.locked AND d.kind = 'public' "
+            "ORDER BY 7 DESC, d.total_queries DESC LIMIT %s", (limite,)).fetchall()
+    out = {"candidatos": len(rows), "dois_modelos": 0, "malicioso": [], "suspeito": [], "limpo": [], "adiados": 0, "aplicado": aplicar}
+    for r in rows:
+        if parar():
+            break
+        if r["reforco"] and r["antes"] == "ameaca":
+            out["dois_modelos"] += 1
+            continue
+        with db.conn() as c:
+            feita = c.execute("SELECT value FROM lookup_cache WHERE kind = %s AND key = %s AND fetched_at > now() - interval '30 days'",
+                              (VERIFICACAO, r["name"])).fetchone()
+        if not feita and vt_resta("investigacao") <= reserva:
+            out["adiados"] += 1
+            continue
+        v = verificar_infra(r["id"], r["name"], uso="investigacao")
+        if v["estado"] == "adiar":
+            out["adiados"] += 1
+            continue
+        out[v["estado"]].append({"dominio": r["name"], "tranco": r["popularity_rank"], "bloqueios_3d": r["bloqueios"], "resumo": v["resumo"]})
+        if v["estado"] == "limpo" and aplicar:
+            with db.conn() as c:
+                motivo = f"revisão das ameaças postas só pela IA: verificação limpa ({v['resumo']})"
+                listas.contexto(c, "revisão das ameaças", motivo[:300])
+                c.execute("DELETE FROM category_lists WHERE category = 'ameaca' AND domain = %s AND added_by LIKE 'IA automática%%'", (r["name"],))
+                c.execute("DELETE FROM global_reviews WHERE domain_id = %s AND status = 'blocked' AND reviewed_by LIKE 'IA automática%%'", (r["id"],))
+                # volta p/ a análise (como "Reanalisar"): as regras novas decidem o destino
+                c.execute("UPDATE domains SET needs_analysis = true, evidence_hash = '', classified_by = NULL, llm_attempts = 0, "
+                          "revisado_at = NULL, reanalise_pedida = true, lista_duvida = false, online_claimed_at = NULL WHERE id = %s", (r["id"],))
+                eventos.lista("lista_rem", r["name"], "ameaca", motivo[:300], r["id"], "f5:ti", r["classification"])
+    log.info("revisão das ameaças: %s", {k: (len(v) if isinstance(v, list) else v) for k, v in out.items()})
     return out
 
 
@@ -1244,6 +1292,9 @@ Como raciocinar:
 - Domínio sem DNS, sem certificados, sem histórico e sem páginas: provavelmente parado/descartável.
 - NUNCA invente fatos que não estejam nas evidências. Sem identificar com segurança: recognized=false, DESCONHECIDO.
 - MALICIOSO só com evidência forte (lista de ameaça de alta confiança ou golpe evidente na página).
+- Relatório de SANDBOX (ANY.RUN, JoeSandbox, Hybrid Analysis) que apenas cita o domínio NÃO é prova de ameaça: a sandbox
+  lista todo endereço que o programa analisado contatou (Microsoft, AnyDesk, CDNs, telemetria). Vale a detecção do
+  PRÓPRIO domínio (VirusTotal com vários fornecedores marcando, lista de ameaça).
 - "confidence" 0.9+ só quando as evidências apontam claramente o serviço; 0.7 provável; 0.5 ou menos se chutando.
 """
 

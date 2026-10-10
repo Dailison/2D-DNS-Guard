@@ -1766,3 +1766,112 @@ def test_classificacao_acompanha_a_lista_de_bloqueio(env):
     assert d["semsug-cl.com"]["classification"] == "NAO_TRABALHO"
     assert [d[n]["classification"] for n in ("golpe-cl.com", "nada-cl.com", "susp-cl.com", "trava-cl.com")] == ["DESCONHECIDO", "DESCONHECIDO", "SUSPEITO", "DESCONHECIDO"]
     assert hist == 5
+
+
+def test_ameaca_pela_ia_online_exige_confirmacao_em_dominio_popular(env):
+    """09/10 (pedido do usuário): playanext.com (API do AnyDesk, top 50 mil, 15 empresas) e 42 endereços do OneDrive
+    ficaram em Ameaças pela palavra de UM modelo online. Em domínio popular ou usado por várias empresas a IA só põe
+    em Ameaças com lista de ameaça, verificação (VirusTotal/URLScan) ou dois modelos de acordo; sem isso fica
+    SUSPEITO, fora da lista (a investigação decide). E o que a IA pôs em Ameaças só sai com a verificação limpa."""
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import db, listas_ia
+    um = {"classificacao": "MALICIOSO", "lista": "ameaca", "_meta": {"model": "gemini-3.5-flash-lite"}}
+    dois = {**um, "_meta": {"model": "gemma-4-31b-it", "nivel_reforco": True, "antes": {"lista": "ameaca", "confianca": 0.9}}}
+    maior = {**um, "_meta": {"model": "gemma-4-31b-it", "nivel_reforco": True, "antes": {"lista": "nenhuma", "confianca": 0.6}}}
+    libera = {"classificacao": "TRABALHO", "lista": "wl:cdn", "_meta": {"model": "gemini-3.5-flash-lite"}}
+    #        nome,                rank,  feed, resposta, lista_ia,  lista_wl, cls
+    casos = [("pop-1modelo-am.com", 40000, "", um, "ameaca", None, "MALICIOSO"),
+             ("pop-maior-am.com", 40000, "", maior, "ameaca", None, "MALICIOSO"),
+             ("pop-2modelos-am.com", 40000, "", dois, "ameaca", None, "MALICIOSO"),
+             ("raro-am.com", None, "", um, "ameaca", None, "MALICIOSO"),
+             ("pop-feed-am.com", 40000, "urlhaus:x", um, "ameaca", None, "MALICIOSO"),
+             ("pop-verif-am.com", 40000, "", um, "ameaca", None, "MALICIOSO"),
+             ("empresas-am.com", None, "", um, "ameaca", None, "MALICIOSO"),
+             ("sai-sem-verif-am.com", 40000, "", libera, None, "cdn", "TRABALHO"),
+             ("sai-limpo-am.com", 40000, "", libera, None, "cdn", "TRABALHO")]
+    with db.conn() as c:
+        ids = {}
+        for n, rank, feed, resp, lista, wl, cls in casos:
+            ids[n] = c.execute(
+                "INSERT INTO domains (name, kind, classification, category, popularity_rank, ti_signature, online_resp, lista_ia, lista_wl, "
+                " lista_conf, lista_fonte, lista_fase, lista_at, analyzed_at) VALUES (%s, 'public', %s, 'outros', %s, %s, %s, %s, %s, 0.9, "
+                " 'online:gemini', 4, now(), now()) RETURNING id", (n, cls, rank, feed, Jsonb(resp), lista, wl)).fetchone()["id"]
+        c.execute("INSERT INTO lookup_cache (kind, key, ok, value) VALUES ('verif_infra', 'pop-verif-am.com', true, %s), "
+                  "('verif_infra', 'sai-limpo-am.com', true, %s)", (Jsonb({"estado": "malicioso"}), Jsonb({"estado": "limpo"})))
+        for i in range(3):
+            t = c.execute("INSERT INTO tenants (slug, name) VALUES (%s, %s) RETURNING id", (f"am{i}", f"AM{i}")).fetchone()["id"]
+            c.execute("INSERT INTO tenant_domains (tenant_id, domain_id, first_seen, last_seen) VALUES (%s, %s, now(), now())", (t, ids["empresas-am.com"]))
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('ameaca', 'sai-sem-verif-am.com', 'IA automática (ameaca)'), "
+                  "('ameaca', 'sai-limpo-am.com', 'IA automática (ameaca)')")
+        ap = listas_ia.aplicar(c, ids=list(ids.values()))
+        em = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'ameaca' AND domain LIKE '%%-am.com'")}
+        cls = {r["name"]: r["classification"] for r in c.execute("SELECT name, classification FROM domains WHERE name LIKE '%%-am.com'")}
+        wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain LIKE '%%-am.com'")}
+    assert em == {"pop-2modelos-am.com", "raro-am.com", "pop-feed-am.com", "pop-verif-am.com", "sai-sem-verif-am.com"}
+    for n in ("pop-1modelo-am.com", "pop-maior-am.com", "empresas-am.com"):
+        assert cls[n] == "SUSPEITO" and n not in wl, f"{n}: sem confirmação fica suspeito, sem lista e sem whitelist"
+    assert {t[0] for t in ap["travados"]} >= {"pop-1modelo-am.com", "pop-maior-am.com", "empresas-am.com"}
+    assert "sai-limpo-am.com" in wl and "sai-sem-verif-am.com" not in wl, "sair de Ameaças só com a verificação limpa"
+
+
+def test_ameaca_sempre_pede_o_segundo_modelo(env, monkeypatch):
+    """09/10: "ameaça" do modelo de volume passa pelo modelo maior (em domínio popular só os dois de acordo confirmam)."""
+    from dnsanalyzer import config, db, online
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "k")
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, classification, category, analyzed_at, total_queries, lista_duvida, popularity_rank) "
+                  "VALUES ('api-anydesk-t.com', 'DESCONHECIDO', 'desconhecido', now(), 9000, true, 40000)")
+    vistos = []
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)
+
+    def falso(d, cats, buscar, modelo):
+        vistos.append((d["name"], modelo))
+        if modelo.startswith("gemma"):   # o modelo maior não vê ameaça
+            return {"lista": "wl:infraestrutura", "confianca": 0.9, "classificacao": "TRABALHO", "reconhecido": True}, {"model": modelo}
+        return {"lista": "ameaca", "confianca": 0.95, "classificacao": "MALICIOSO", "reconhecido": True}, {"model": modelo}
+    monkeypatch.setattr(online, "perguntar", falso)
+    for _ in range(60):   # (a fila pode ter domínios de outros testes na frente)
+        if online.fase(["infraestrutura"]) != "done" or any(n == "api-anydesk-t.com" for n, _ in vistos):
+            break
+    assert [m for n, m in vistos if n == "api-anydesk-t.com"] == ["gemini-3.5-flash-lite", "gemma-4-31b-it"]
+    with db.conn() as c:
+        assert not c.execute("SELECT 1 FROM category_lists WHERE domain = 'api-anydesk-t.com' AND category = 'ameaca'").fetchone()
+
+
+def test_revisao_das_ameacas_postas_so_pela_ia(env, monkeypatch):
+    """09/10: passada sobre o que a IA pôs em Ameaças sem lista de ameaça, em domínio popular. Dois modelos de acordo
+    ficam; os outros são verificados — limpo sai e volta p/ a análise; malicioso/suspeito ficam; sem cota, fica p/ depois."""
+    from psycopg.types.json import Jsonb
+
+    from dnsanalyzer import db, investigacao
+    dois = {"_meta": {"nivel_reforco": True, "antes": {"lista": "ameaca"}}}
+    um = {"_meta": {"model": "gemini-3.5-flash-lite"}}
+    with db.conn() as c:
+        c.execute("DELETE FROM category_lists WHERE category = 'ameaca'")
+        for n, resp, feed, rank, por in [("rev-2modelos.com", dois, "", 100, "IA automática (ameaca)"), ("rev-limpo.com", um, "", 200, "IA automática (ameaca)"),
+                                         ("rev-malicioso.com", um, "", 300, "IA automática (ameaca)"), ("rev-adiar.com", um, "", 400, "IA automática (ameaca)"),
+                                         ("rev-feed.com", um, "urlhaus:x", 500, "IA automática (ameaca)"), ("rev-raro.com", um, "", None, "IA automática (ameaca)"),
+                                         ("rev-pessoa.com", um, "", 600, "op@2d")]:
+            c.execute("INSERT INTO domains (name, kind, classification, popularity_rank, ti_signature, online_resp, total_queries) "
+                      "VALUES (%s, 'public', 'MALICIOSO', %s, %s, %s, 10)", (n, rank, feed, Jsonb(resp)))
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('ameaca', %s, %s)", (n, por))
+    estados = {"rev-limpo.com": "limpo", "rev-malicioso.com": "malicioso", "rev-adiar.com": "adiar"}
+    vistos = []
+    monkeypatch.setattr(investigacao, "verificar_infra", lambda did, nome, uso="verificacao": vistos.append((nome, uso)) or
+                        {"estado": estados[nome], "resumo": "VirusTotal: x"})
+    monkeypatch.setattr(investigacao, "vt_resta", lambda uso: 200)
+    seco = investigacao.revisar_ameacas(aplicar=False)
+    assert seco["candidatos"] == 4 and seco["dois_modelos"] == 1 and seco["adiados"] == 1, "feed de ameaça, domínio raro e posto por pessoa ficam de fora"
+    assert [x["dominio"] for x in seco["limpo"]] == ["rev-limpo.com"] and [x["dominio"] for x in seco["malicioso"]] == ["rev-malicioso.com"]
+    assert {u for _, u in vistos} == {"investigacao"}
+    with db.conn() as c:
+        assert c.execute("SELECT count(*) AS n FROM category_lists WHERE category = 'ameaca' AND domain LIKE 'rev-%%'").fetchone()["n"] == 7, "sem aplicar nada muda"
+    investigacao.revisar_ameacas(aplicar=True)
+    with db.conn() as c:
+        em = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category = 'ameaca' AND domain LIKE 'rev-%%'")}
+        d = c.execute("SELECT needs_analysis, reanalise_pedida FROM domains WHERE name = 'rev-limpo.com'").fetchone()
+    assert "rev-limpo.com" not in em and len(em) == 6 and d["needs_analysis"] and d["reanalise_pedida"], "limpo sai e volta p/ a análise"
+    monkeypatch.setattr(investigacao, "vt_resta", lambda uso: 10)   # abaixo da reserva: não consulta ninguém novo
+    vistos.clear()
+    assert investigacao.revisar_ameacas(aplicar=True)["adiados"] == 2 and vistos == []

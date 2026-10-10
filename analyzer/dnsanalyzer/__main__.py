@@ -180,6 +180,9 @@ def main(argv: list[str] | None = None) -> int:
     it.add_argument("path")
     it.add_argument("--replace", action="store_true")
     sub.add_parser("collect")
+    ra = sub.add_parser("revisar-ameacas", help="verifica o que a IA pôs em Ameaças sem lista de ameaça, em domínio popular")
+    ra.add_argument("--aplicar", action="store_true")
+    ra.add_argument("--limite", type=int, default=500)
     bl = sub.add_parser("backfill-log", help="preenche a cópia dos logs (query_log) para trás, a partir do Technitium")
     bl.add_argument("--dias", type=int, default=None)
     tr = sub.add_parser("ti-refresh")
@@ -216,6 +219,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "collect":
         from .collector import collect_once
         print(json.dumps(collect_once(), default=str, indent=2))
+    elif args.cmd == "revisar-ameacas":
+        from . import investigacao
+        print(json.dumps(investigacao.revisar_ameacas(args.aplicar, args.limite, parar=lambda: _STOP), ensure_ascii=False, default=str))
     elif args.cmd == "backfill-log":
         from . import collector
         from .technitium import TechnitiumClient

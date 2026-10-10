@@ -553,9 +553,10 @@ def _sem_resposta_valida(c, d: dict, invalidas: list[str]) -> str:
 
 def fase(categorias: list[str]) -> str:
     """Uma consulta à IA online, por níveis (cada modelo com a sua cota do plano grátis):
-    1 volume (flash-lite 3.5 -> 3.1); 2 segunda opinião, quando o volume não tem certeza ou discorda da IA
-    local (Gemma 4 31B -> 3.8 flash; vale a resposta do modelo maior); 3 busca no Google (desligada nesta
-    conta). Sem busca das fases anteriores, faz uma busca na web (SearXNG) antes, p/ dar contexto.
+    1 volume (flash-lite 3.5 -> 3.1); 2 segunda opinião, quando o volume não tem certeza, discorda da IA
+    local ou respondeu "ameaça" (09/10: em domínio popular, Ameaças exige os dois modelos de acordo ou confirmação —
+    listas_ia.ameaca_sem_confirmacao) (Gemma 4 31B -> 3.8 flash; vale a resposta do modelo maior); 3 busca no
+    Google (desligada nesta conta). Sem busca das fases anteriores, faz uma busca na web (SearXNG) antes, p/ dar contexto.
     'idle' = nada na fila; 'unavailable' = sem chave/cota/fora."""
     if not habilitado():
         return "idle"
@@ -596,6 +597,7 @@ def fase(categorias: list[str]) -> str:
         if obj is not None and _certo(obj) and not (d.get("lista_ia") and obj.get("lista") != d.get("lista_ia")) \
                 and not (revalidar and not meta.get("nivel_reforco")) \
                 and not (obj.get("lista") in listas_ia._DOIS_MODELOS and not meta.get("nivel_reforco")) \
+                and not (obj.get("lista") == "ameaca" and not meta.get("nivel_reforco")) \
                 and not (_candidato_whitelist(obj) and not meta.get("nivel_reforco")) \
                 and not (d.get("em_infra") and _libera(obj) and not meta.get("nivel_reforco")):
             break

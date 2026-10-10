@@ -1,0 +1,30 @@
+#!/bin/sh
+# Roda NO SERVIDOR do Technitium (root), como comando forçado da chave SSH "technitium-cert-sync": recebe pela entrada
+# padrão um PFX sem senha e o instala em /etc/dns/cert.pfx — só se for um PFX válido, com chave, do nome esperado e
+# com validade MAIOR que a do instalado. O Technitium recarrega o arquivo sozinho (confere a cada minuto).
+set -eu
+umask 077
+NOME="2dtecnologia.com"
+DEST=/etc/dns/cert.pfx
+T=$(mktemp /etc/dns/.cert-novo.XXXXXX)
+trap 'rm -f "$T" "$T.crt"' EXIT
+head -c 131072 > "$T"
+
+openssl pkcs12 -in "$T" -passin pass: -nokeys -clcerts -out "$T.crt" 2>/dev/null || { echo "recusado: não é um PFX válido sem senha"; exit 2; }
+openssl pkcs12 -in "$T" -passin pass: -nocerts -nodes 2>/dev/null | openssl pkey -noout 2>/dev/null || { echo "recusado: PFX sem chave privada"; exit 2; }
+CN=$(openssl x509 -in "$T.crt" -noout -subject -nameopt multiline | sed -n 's/^ *commonName *= *//p')
+[ "$CN" = "$NOME" ] || { echo "recusado: certificado de outro nome ($CN)"; exit 3; }
+openssl x509 -in "$T.crt" -noout -checkend 604800 >/dev/null || { echo "recusado: certificado vencido ou vencendo em menos de 7 dias"; exit 3; }
+
+fim() { date -d "$(openssl x509 -noout -enddate | cut -d= -f2)" +%s; }
+NOVO=$(fim < "$T.crt")
+ATUAL=0
+[ -f "$DEST" ] && ATUAL=$(openssl pkcs12 -in "$DEST" -passin pass: -nokeys -clcerts 2>/dev/null | fim 2>/dev/null || echo 0)
+if [ "$NOVO" -le "$ATUAL" ]; then
+    echo "nada a fazer: o instalado vence em $(date -d @"$ATUAL" +%d/%m/%Y)"
+    exit 0
+fi
+[ -f "$DEST" ] && cp -p "$DEST" "$DEST.anterior"
+chown root:root "$T"; chmod 600 "$T"
+mv "$T" "$DEST"
+echo "instalado: vence em $(date -d @"$NOVO" +%d/%m/%Y) (o anterior vencia em $(date -d @"$ATUAL" +%d/%m/%Y))"

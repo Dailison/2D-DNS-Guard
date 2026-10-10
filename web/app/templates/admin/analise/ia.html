@@ -19,7 +19,7 @@
        --e-novo:var(--inf-tx);--e-novo-bg:var(--inf-bg);--e-novo-bd:color-mix(in srgb,var(--inf) 40%,transparent);
        --e-rea:var(--av-tx);--e-rea-bg:var(--av-bg);--e-rea-bd:color-mix(in srgb,var(--av) 40%,transparent);
        --e-ped:#a21caf;--e-ped-bg:#fdf4ff;--e-ped-bd:#f5d0fe;
-       --p-ok:var(--ok-tx);--p-am:var(--av-tx);--p-or:var(--c-susp-tx);--p-rd:var(--er-tx);--p-sl:var(--txt2);
+       --p-ok:var(--c-trab-tx);--p-am:var(--av-tx);--p-or:var(--c-susp-tx);--p-rd:var(--er-tx);--p-sl:var(--txt2);
        color:var(--tx);display:flex;flex-direction:column;gap:10px}
   html[data-theme="dark"] .iav{--e-ped:#f0abfc;--e-ped-bg:rgba(240,171,252,.1);--e-ped-bd:rgba(240,171,252,.4)}
   .iav *{scrollbar-color:color-mix(in srgb,var(--mu) 40%,transparent) transparent}
@@ -187,7 +187,9 @@
   .fila .ftb th{position:sticky;top:0;background:var(--card);text-align:left;font-size:.72rem;font-weight:700;color:var(--mu);border-radius:0;
                 text-transform:uppercase;letter-spacing:.04em;padding:8px 8px 6px;border-bottom:1px solid var(--ln)}
   .fila .ftb td{padding:6px 8px;border-bottom:1px solid var(--ln2);vertical-align:middle}
-  .fila .ftb .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx2)}
+  .fila .ftb .num{display:table-cell;min-width:0;background:none;border-radius:0;font-weight:400;font-size:inherit;padding:6px 8px;
+                  text-align:right;font-variant-numeric:tabular-nums;color:var(--tx2)}   /* célula numérica, não o selo .num */
+  .fila .ftb th.num{font-weight:700;font-size:.72rem;padding:8px 8px 6px;color:var(--mu)}
   .fila .ftb td.dm{max-width:22rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fila .ftb td.dm a{color:var(--dom);font-weight:600;text-decoration:none}
   .fila .ftb td.dm a:hover{text-decoration:underline}

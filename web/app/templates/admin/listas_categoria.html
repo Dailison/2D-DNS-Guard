@@ -31,14 +31,14 @@
           {% for e in aj_empresas if e.id == aj_tid %}{% for u in e.unidades %}<option value="{{ u }}" {{ 'selected' if u == aj_unidade }}>{{ u }}</option>{% endfor %}{% endfor %}
         </select></div>
     </form>
-    <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">
-      <form method="get" style="display:flex;gap:.3rem;margin:0" title="procura em todas as listas de bloqueio (mínimo 3 letras)">
+    <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap;min-width:0;max-width:100%">
+      <form method="get" style="display:flex;gap:.3rem;margin:0;max-width:100%" title="procura em todas as listas de bloqueio (mínimo 3 letras)">
         <input type="hidden" name="cat" value="{{ cat }}">
-        <input type="text" name="busca" value="{{ busca or '' }}" placeholder="buscar em todas as listas" style="width:15rem" minlength="3" required>
+        <input type="text" name="busca" value="{{ busca or '' }}" placeholder="buscar em todas as listas" style="width:15rem;min-width:0" minlength="3" required>
         <button class="btn"><i class="bi bi-search"></i>Buscar</button>
       </form>
-      <form method="get" action="{{ url_for('admin.dominios') }}" style="display:flex;gap:.3rem;margin:0" title="abre a página do domínio: todas as listas em que ele está, a análise da IA e o editor de listas">
-        <input type="text" name="q" placeholder="abrir domínio (ex.: tiktok.com)" style="width:15rem" required>
+      <form method="get" action="{{ url_for('admin.dominios') }}" style="display:flex;gap:.3rem;margin:0;max-width:100%" title="abre a página do domínio: todas as listas em que ele está, a análise da IA e o editor de listas">
+        <input type="text" name="q" placeholder="abrir domínio (ex.: tiktok.com)" style="width:15rem;min-width:0" required>
         <button class="btn"><i class="bi bi-eye"></i>Abrir</button>
       </form>
       <button type="button" class="primary" onclick="document.getElementById('dlgEmp').showModal()">Empresas…</button>

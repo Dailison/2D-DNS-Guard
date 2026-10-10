@@ -6,7 +6,7 @@
   {% set c = s.counts %}
   <div class="m-grid">
     <div class="metric"><div class="n">{{ s.total_domains }}</div><div class="l">Domínios analisados</div></div>
-    <div class="metric"><div class="n" style="color:var(--ok-tx)">{{ c.TRABALHO }}</div><div class="l">Trabalho</div></div>
+    <div class="metric"><div class="n" style="color:var(--c-trab-tx)">{{ c.TRABALHO }}</div><div class="l">Trabalho</div></div>
     <div class="metric"><div class="n" style="color:var(--av-tx)">{{ c.NAO_TRABALHO }}</div><div class="l">Não trabalho</div></div>
     <div class="metric"><div class="n" style="color:var(--c-susp-tx)">{{ c.SUSPEITO }}</div><div class="l">Suspeitos</div></div>
     <div class="metric"><div class="n" style="color:var(--er-tx)">{{ c.MALICIOSO }}</div><div class="l">Maliciosos</div></div>

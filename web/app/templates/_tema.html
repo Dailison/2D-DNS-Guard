@@ -29,12 +29,13 @@
     --fonte:var(--twod-font,'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif);
     /* cabeçalho de tabela, como no ERP: faixa na cor da marca no claro, superfície no escuro */
     --th-bg:var(--twod-primary-darker,#183f96);--th-tx:#fff;
-    /* classificação da IA: cores de categoria (não são da marca) — selo cheio com texto branco nos dois temas */
+    /* classificação da IA: cores de categoria (não são da marca) — selo cheio com texto branco nos dois temas.
+       "Trabalho" é verde aqui mesmo quando o success do Hub (= cor terciária da marca) não é */
     --c-trab:#16a34a;--c-ntrab:#d97706;--c-susp:#ea580c;--c-mal:#b91c1c;--c-desc:#64748b;--c-pend:#94a3b8;
-    --c-susp-tx:#c2410c;--c-susp-bg:#ffedd5;--c-vio:#7c3aed;--c-vio-tx:#6d28d9;--c-vio-bg:#f5f3ff;
+    --c-trab-tx:#15803d;--c-trab-bg:#dcfce7;--c-susp-tx:#c2410c;--c-susp-bg:#ffedd5;--c-vio:#7c3aed;--c-vio-tx:#6d28d9;--c-vio-bg:#f5f3ff;
   }
   html[data-theme="dark"]{--th-bg:var(--card3);--th-tx:var(--txt);
-    --c-susp-tx:#fb923c;--c-susp-bg:#43200b;--c-vio:#a78bfa;--c-vio-tx:#c4b5fd;--c-vio-bg:#2a2147}
+    --c-trab-tx:#4ade80;--c-trab-bg:#12301f;--c-susp-tx:#fb923c;--c-susp-bg:#43200b;--c-vio:#a78bfa;--c-vio-tx:#c4b5fd;--c-vio-bg:#2a2147}
   /* logo do kit (a versão certa para o tema atual) */
   .lg2d{display:block;background:var(--twod-logo{% if kit %},url("{{ kit }}logo.png"){% endif %}) center/contain no-repeat}
 </style>

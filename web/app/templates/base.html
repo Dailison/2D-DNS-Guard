@@ -39,7 +39,7 @@
     .pg-h::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--pri),var(--pri-d))}
     .pg-h h1{margin:0;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
     .pg-h h1>.bi{color:var(--b);font-size:1.2rem}
-    .pg-h .pg-a{margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
+    .pg-h .pg-a{margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%}
     .pg-h form{margin:0}
     .card{background:var(--card);border:1px solid var(--bd);border-radius:var(--raio-lg);padding:1rem 1.1rem;margin-bottom:1rem;box-shadow:var(--sh-sm)}
     h1{font-size:1.3rem;font-weight:600;letter-spacing:-.02em;margin:.2rem 0 1rem;color:var(--txt)}
@@ -57,7 +57,7 @@
                                  background:var(--card);color:var(--txt)}
     input::placeholder,textarea::placeholder{color:var(--mut)}
     input:focus,select:focus,textarea:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 3px color-mix(in srgb,var(--pri) 18%,transparent)}
-    .card input:not([type=checkbox]):not([type=radio]),.card select{width:100%}
+    .card input:not([type=checkbox]):not([type=radio]),.card select,.card textarea{width:100%}
     input[type=checkbox],input[type=radio]{accent-color:var(--pri);width:1.05rem;height:1.05rem;vertical-align:-2px}
     label{display:block;font-size:.8rem;color:var(--txt2);margin:.4rem 0 .15rem}
     .card>label{font-weight:600}
@@ -70,7 +70,7 @@
     .chk input{flex:0 0 auto}
     .hint{color:var(--mut);font-size:.8rem;line-height:1.5;margin:.6rem 0 0}
     /* botões: primário = marca; .pos (liberar/aprovar) e .danger = estado; sem classe = neutro */
-    button{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;cursor:pointer;font-weight:500}
+    button{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;cursor:pointer;font-weight:500;font-size:.9rem}
     button:disabled{opacity:.55;cursor:not-allowed}
     button.primary,.btn,button.danger,button.pos{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:0;cursor:pointer;
           text-decoration:none;padding:.5rem .9rem;border-radius:var(--raio-lg);font-size:.85rem;font-weight:600;white-space:nowrap;

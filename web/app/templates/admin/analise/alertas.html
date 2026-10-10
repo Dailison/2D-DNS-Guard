@@ -4,7 +4,7 @@
 <div class="card">
   <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem">
     {% for s, l in [('open','Abertos'),('ack','Vistos'),('closed','Fechados'),('all','Todos')] %}
-      <a class="btn mini{{ '' if st == s else ' neu' }}" href="{{ url_for('analise.alertas', t=tid, status=s) }}">{{ l }}</a>
+      <a class="mini {{ 'btn' if st == s else 'neu' }}" href="{{ url_for('analise.alertas', t=tid, status=s) }}">{{ l }}</a>
     {% endfor %}
     <span class="mut" style="margin-left:auto">{{ lista|length }} alerta(s)</span>
   </div>

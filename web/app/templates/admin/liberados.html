@@ -57,11 +57,11 @@
         <td style="white-space:nowrap">
           <form id="{{ fid }}" method="post" action="{{ url_for('admin.liberados_editar') }}" style="display:inline">
             <input type="hidden" name="ip" value="{{ r.ip }}">
-            <button class="primary" style="padding:.35rem .6rem;font-size:.85rem"><i class="bi bi-check-lg"></i>Salvar</button>
+            <button class="primary mini">Salvar</button>
           </form>
           <form method="post" action="{{ url_for('admin.liberados_revogar') }}" style="display:inline" onsubmit="return confirm('Revogar {{ r.ip }}? Volta a filtrar pela rede.')">
             <input type="hidden" name="ip" value="{{ r.ip }}">
-            <button class="danger"><i class="bi bi-slash-circle"></i>Revogar</button>
+            <button class="danger mini">Revogar</button>
           </form>
         </td>
       </tr>

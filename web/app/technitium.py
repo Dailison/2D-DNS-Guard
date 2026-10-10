@@ -240,17 +240,19 @@ def grupo_da_rede(cidr, ngm):
 
 # ------------------------------------------------ listas por categoria (assinadas pelos grupos)
 # O analisador publica /listas/<categoria>.txt; cada grupo assina as que quiser (blockListUrls).
-# organização das listas (pedido do usuário 2026-09-26): seções só p/ a tela; ⚡ = risco (só destaque)
+# organização das listas (pedido do usuário 2026-09-26): seções só p/ a tela; risco = só destaque (raio)
 SECOES_LISTA = [
-    ("🔒 Segurança", [("ameaca", "Ameaças"), ("blacklist", "Blacklist"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
-                     ("adware", "Adware / Apps indesejados"), ("nao_identificado", "Não identificados"),
-                     ("dns_inativo", "DNS Inativo")]),
-    ("🚫 Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
-                    ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
-    ("🌐 Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),
-    ("🏢 Trabalho", [("compras", "Compras"), ("ia_chatbots", "IA / Chatbots"), ("nuvem_remoto", "Nuvem / Acesso remoto")]),
-    ("🔧 Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros")]),   # (Para revisar/fase 5: removida em 27/09)
+    ("Segurança", [("ameaca", "Ameaças"), ("blacklist", "Blacklist"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
+                   ("adware", "Adware / Apps indesejados"), ("nao_identificado", "Não identificados"),
+                   ("dns_inativo", "DNS Inativo")]),
+    ("Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
+                  ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
+    ("Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),
+    ("Trabalho", [("compras", "Compras"), ("ia_chatbots", "IA / Chatbots"), ("nuvem_remoto", "Nuvem / Acesso remoto")]),
+    ("Sistema", [("infra_bloqueio", "Infraestrutura"), ("outros_bloqueios", "Outros")]),   # (Para revisar/fase 5: removida em 27/09)
 ]
+# ícone de cada seção (Bootstrap Icons do kit do 2D Hub)
+ICONES_SECAO = {"Segurança": "shield-lock", "Conteúdo": "collection-play", "Web": "globe2", "Trabalho": "building", "Sistema": "tools"}
 CATEGORIAS_LISTA = [x for _, itens in SECOES_LISTA for x in itens]
 # whitelists por categoria (analisador: whitelist.py) — assinadas por TODOS os grupos (vencem qualquer bloqueio)
 CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividade", "Produtividade e escritório"),
@@ -271,7 +273,7 @@ CATEGORIAS_WHITELIST = [("essenciais", "Essenciais (catálogo)"), ("produtividad
 # as que vão p/ o DNS (allowListUrls): "Sem resposta" só organiza (nunca é publicada)
 CATEGORIAS_WHITELIST_DNS = [x for x in CATEGORIAS_WHITELIST if x[0] != "sem_resposta"]
 _WL_RE = re.compile(r"/whitelist/([a-z_]+)\.txt$")
-CATEGORIAS_RISCO = {"ameaca", "blacklist", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas", "nao_identificado"}   # ⚡ (só destaque visual)
+CATEGORIAS_RISCO = {"ameaca", "blacklist", "vpn_proxy", "doh_dns", "adware", "adulto", "apostas", "nao_identificado"}   # raio (só destaque visual)
 CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # a IA não põe sozinha
 # Blacklist (30/09): posta só pela verificação do analisador (infraestrutura de terceiros em lista de ameaça, no
 # VirusTotal ou com veredito malicioso no URLScan) — a IA não escolhe essa lista

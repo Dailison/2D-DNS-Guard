@@ -1,143 +1,137 @@
 <!doctype html>
 <html lang="pt-br">
 <head>
-  {% if portal_kit_url %}<script src="{{ portal_kit_url|replace('launcher.js', 'theme.js') }}"></script>{% endif %}
-  <script>
-  /* sem o theme.js do 2D Hub: mesma API (TwodTema), guardada só neste navegador */
-  window.TwodTema || (function () {
-    var h = document.documentElement, K = 'twod_tema', mq = window.matchMedia && matchMedia('(prefers-color-scheme: dark)');
-    function pref() { var v; try { v = localStorage.getItem(K); } catch (e) {} return {claro: 1, escuro: 1, auto: 1}[v] ? v : 'auto'; }
-    function aplicar() {
-      var p = pref(), t = p === 'escuro' || (p === 'auto' && mq && mq.matches) ? 'dark' : 'light';
-      h.setAttribute('data-theme', t); h.style.colorScheme = t;
-      try { dispatchEvent(new CustomEvent('twod:tema', {detail: {preferencia: p, tema: t}})); } catch (e) {}
-    }
-    window.TwodTema = {preferencia: pref, tema: function () { return h.getAttribute('data-theme'); },
-      definir: function (v) { try { localStorage.setItem(K, v); } catch (e) {} aplicar(); }};
-    aplicar();
-  })();
-  </script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Admin{% endblock %} · 2D DNS Guard</title>
+  {% include '_tema.html' %}
   <style>
-    :root{--b:#0f72bc;--b2:#1483d4;--navy:#1b3a6b;--bg:#eef1f6;--card:#fff;--txt:#1f2937;--mut:#6b7280;--bd:#e5e7eb}
+    /* Cores, raios e sombras: só pelas variáveis de _tema.html (tokens do 2D Hub). Layout no padrão do 2D-ERP. */
     *{box-sizing:border-box}
-    body{margin:0;font-family:system-ui,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt)}
-    header{background:linear-gradient(100deg,var(--navy),#12294f 60%,#0e1f42);color:#fff;padding:.6rem 1rem;
-           display:flex;flex-wrap:wrap;gap:.4rem 1rem;align-items:center;box-shadow:0 2px 10px rgba(9,20,45,.25)}
-    header .brand{display:flex;align-items:center;gap:.5rem;font-weight:700;margin-right:.5rem;letter-spacing:.01em}
-    header .brand .mk{font-family:'Arial Black',Arial,sans-serif;font-weight:900;font-size:1.15rem}
-    header .brand .mk .b2{color:#4aa8e8}header .brand .mk .bd{color:#fff}
-    header .brand .nm{font-size:.9rem;color:#cdd9ef;font-weight:600}
-    header nav{display:flex;flex-wrap:wrap;gap:.2rem .8rem}
-    header a{color:#c3d2ea;text-decoration:none;font-size:.92rem;padding:.2rem 0;border-bottom:2px solid transparent}
-    header a:hover,header a.on{color:#fff;border-bottom-color:#4aa8e8}
+    [hidden]{display:none!important}
+    body{margin:0;font-family:var(--fonte);background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased}
+    .bi{line-height:1}
+    /* barra superior */
+    header{background:var(--card);color:var(--txt);border-bottom:1px solid var(--bd);box-shadow:var(--sh-sm);min-height:58px;
+           padding:.4rem 1rem;display:flex;flex-wrap:wrap;gap:.3rem .9rem;align-items:center}
+    header .brand{display:flex;align-items:center;gap:.6rem;font-weight:800;font-size:.95rem;color:var(--txt);text-decoration:none;
+                  margin-right:.4rem;white-space:nowrap}
+    header .brand .lg2d{width:46px;height:34px}
+    header nav{display:flex;flex-wrap:wrap;gap:.15rem .25rem}
+    header nav a{display:inline-flex;align-items:center;gap:.4rem;color:var(--txt2);text-decoration:none;font-size:.88rem;font-weight:500;
+                 padding:.4rem .7rem;border-radius:var(--raio-md);white-space:nowrap}
+    header nav a:hover{background:var(--card2);color:var(--txt)}
+    header nav a.on{background:var(--pri-bg);color:var(--b);font-weight:600}
     header .sp{margin-left:auto}
-    /* bloqueio = vermelho, liberação = verde (IPs num verde-água): bolinha antes do nome e sublinhado na cor */
-    header a.nv::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.4rem;vertical-align:1px;
-                        background:var(--nv);box-shadow:0 0 0 3px color-mix(in srgb,var(--nv) 25%,transparent)}
-    header a.nv-bl{--nv:#f87171}header a.nv-lb{--nv:#4ade80}header a.nv-ip{--nv:#2dd4bf}
-    header a.nv:hover,header a.nv.on{border-bottom-color:var(--nv)}
-    .tenant-sel{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.28);
-                border-radius:8px;padding:.35rem .55rem;font-size:.88rem;max-width:210px;cursor:pointer}
-    .tenant-sel:focus{outline:0;border-color:#4aa8e8;box-shadow:0 0 0 3px rgba(74,168,232,.25)}
-    .tenant-sel option{color:#111}
-    .bnd{display:inline-block;font-size:.72rem;font-weight:700;padding:.08rem .4rem;border-radius:6px;color:#fff;white-space:nowrap}
-    .bnd.b24{background:#d97706}.bnd.b5{background:#2563eb}.bnd.b6{background:#7c3aed}.bnd.fio{background:#64748b}
-    .sig{font-size:.82rem;letter-spacing:1px;color:#16a34a}
-    .sig.w{color:#d97706}.sig.x{color:#dc2626}
-    main{max-width:1440px;margin:1.2rem auto;padding:0 1rem}
-    .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem;
-          box-shadow:0 1px 3px rgba(15,27,46,.05)}
-    h1{font-size:1.35rem;margin:.2rem 0 1rem;color:var(--navy)} h2{font-size:1.05rem;margin:.2rem 0 .8rem;color:var(--navy)}
-    table{width:100%;border-collapse:collapse;font-size:.9rem}
-    th,td{text-align:left;padding:.5rem .5rem;border-bottom:1px solid var(--bd);vertical-align:top;overflow-wrap:break-word}
-    th{color:var(--mut);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.03em}
-    input,select,button{font:inherit;padding:.5rem .6rem;border:1px solid var(--bd);border-radius:8px;background:#fff}
-    input:focus,select:focus{outline:0;border-color:var(--b);box-shadow:0 0 0 3px rgba(15,114,188,.13)}
+    header .usr{display:inline-flex;align-items:center;gap:.4rem;color:var(--mut);font-size:.85rem;white-space:nowrap}
+    /* bloqueio = vermelho, liberação = verde, IPs = azul-água: bolinha antes do nome */
+    header a.nv::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--nv);
+                        box-shadow:0 0 0 3px color-mix(in srgb,var(--nv) 22%,transparent)}
+    header a.nv-bl{--nv:var(--er)}header a.nv-lb{--nv:var(--ok)}header a.nv-ip{--nv:var(--inf)}
+    /* botão só com ícone (barra superior, fechar de modal) */
+    .ib{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border-radius:var(--raio-md);
+        background:none;border:1px solid transparent;color:var(--txt2);cursor:pointer;text-decoration:none;font-size:1.05rem}
+    .ib:hover,.ib.on{background:var(--card2);color:var(--b);border-color:var(--bd)}
+    main{max-width:1440px;margin:1rem auto;padding:0 1rem}
+    /* cabeçalho de página */
+    .pg-h{position:relative;overflow:hidden;background:var(--card);border:1px solid var(--bd);border-radius:var(--raio-xl);box-shadow:var(--sh-sm);
+          padding:1rem 1rem .85rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center}
+    .pg-h::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--pri),var(--pri-d))}
+    .pg-h h1{margin:0;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+    .pg-h h1>.bi{color:var(--b);font-size:1.2rem}
+    .pg-h .pg-a{margin-left:auto;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
+    .pg-h form{margin:0}
+    .card{background:var(--card);border:1px solid var(--bd);border-radius:var(--raio-lg);padding:1rem 1.1rem;margin-bottom:1rem;box-shadow:var(--sh-sm)}
+    h1{font-size:1.3rem;font-weight:600;letter-spacing:-.02em;margin:.2rem 0 1rem;color:var(--txt)}
+    h2{font-size:1.05rem;font-weight:600;margin:.2rem 0 .8rem;color:var(--txt)}
+    /* tabelas */
+    table{width:100%;border-collapse:separate;border-spacing:0;font-size:.9rem}
+    th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--bd);vertical-align:top;overflow-wrap:break-word}
+    th{color:var(--txt2);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.03em}
+    thead th{background:var(--th-bg);color:var(--th-tx);border-bottom:0;vertical-align:middle}
+    thead th:first-child{border-radius:var(--raio-md) 0 0 var(--raio-md)}thead th:last-child{border-radius:0 var(--raio-md) var(--raio-md) 0}
+    thead th a{color:inherit}
+    tbody tr:hover td{background:color-mix(in srgb,var(--card2) 55%,transparent)}
+    /* campos */
+    input,select,textarea,button{font:inherit;padding:.5rem .6rem;border:1px solid var(--bd2);border-radius:var(--raio-md);
+                                 background:var(--card);color:var(--txt)}
+    input::placeholder,textarea::placeholder{color:var(--mut)}
+    input:focus,select:focus,textarea:focus{outline:0;border-color:var(--pri);box-shadow:0 0 0 3px color-mix(in srgb,var(--pri) 18%,transparent)}
     .card input:not([type=checkbox]):not([type=radio]),.card select{width:100%}
-    input[type=checkbox],input[type=radio]{accent-color:var(--b);width:1.05rem;height:1.05rem;vertical-align:-2px}
-    label{display:block;font-size:.82rem;color:var(--mut);margin:.4rem 0 .15rem}
-    .card>label{font-weight:600;color:#334155}
+    input[type=checkbox],input[type=radio]{accent-color:var(--pri);width:1.05rem;height:1.05rem;vertical-align:-2px}
+    label{display:block;font-size:.8rem;color:var(--txt2);margin:.4rem 0 .15rem}
+    .card>label{font-weight:600}
     /* grade de campos: colunas iguais que quebram sozinhas */
     .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.5rem 1rem;align-items:end}
     .row>div{min-width:0}
-    .row>div label,.row>div .lbl{display:block;font-size:.82rem;color:#334155;font-weight:600;margin:.1rem 0 .25rem}
-    .row>label{display:flex;align-items:center;gap:.45rem;font-size:.9rem;color:#334155;margin:.2rem 0;font-weight:500}
-    .chk{display:flex;align-items:center;gap:.5rem;font-size:.92rem;color:#334155;font-weight:500;margin:.3rem 0}
+    .row>div label,.row>div .lbl{display:block;font-size:.8rem;color:var(--txt2);font-weight:600;margin:.1rem 0 .25rem}
+    .row>label{display:flex;align-items:center;gap:.45rem;font-size:.9rem;color:var(--txt2);margin:.2rem 0;font-weight:500}
+    .chk{display:flex;align-items:center;gap:.5rem;font-size:.92rem;color:var(--txt2);font-weight:500;margin:.3rem 0}
     .chk input{flex:0 0 auto}
     .hint{color:var(--mut);font-size:.8rem;line-height:1.5;margin:.6rem 0 0}
-    .hint code{background:#e8eefb}
-    button.primary,.btn{background:linear-gradient(135deg,var(--b2),var(--b) 60%,var(--navy));color:#fff;border:0;
-          cursor:pointer;text-decoration:none;display:inline-block;padding:.55rem .9rem;border-radius:8px;font-size:.9rem;
-          font-weight:600;box-shadow:0 4px 12px rgba(15,114,188,.28)}
-    button.primary:hover,.btn:hover{filter:brightness(1.04)}
-    button.danger{background:#dc2626;color:#fff;border:0;cursor:pointer;font-weight:600}
+    /* botões: primário = marca; .pos (liberar/aprovar) e .danger = estado; sem classe = neutro */
+    button{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;cursor:pointer;font-weight:500}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    button.primary,.btn,button.danger,button.pos{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:0;cursor:pointer;
+          text-decoration:none;padding:.5rem .9rem;border-radius:var(--raio-lg);font-size:.85rem;font-weight:600;white-space:nowrap;
+          transition:background .15s,box-shadow .15s,transform .15s}
+    button.primary,.btn{background:var(--pri);color:var(--on-pri)}
+    button.primary:hover,.btn:hover{background:var(--pri-h);box-shadow:var(--sh-md);transform:translateY(-1px)}
+    button.danger,.btn.danger{background:var(--er);color:#fff}
+    button.pos,.btn.pos{background:var(--ok);color:var(--on-ok)}
+    button.danger:hover,button.pos:hover,.btn.danger:hover,.btn.pos:hover{filter:brightness(.94);box-shadow:var(--sh-md);transform:translateY(-1px)}
+    .btn.neu{background:var(--card2);color:var(--txt);box-shadow:inset 0 0 0 1px var(--bd)}
+    .btn.neu:hover{background:var(--card3)}
+    .mini{padding:.25rem .55rem;font-size:.8rem;border-radius:var(--raio-md)}
+    button.primary.mini,.btn.mini,button.danger.mini,button.pos.mini{padding:.25rem .55rem;font-size:.8rem;border-radius:var(--raio-md)}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem}
-    .metric{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:.9rem;position:relative;overflow:hidden}
-    .metric::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(var(--b2),var(--navy))}
-    .metric .n{font-size:1.7rem;font-weight:700;color:var(--navy)}.metric .l{color:var(--mut);font-size:.85rem}
-    .flash{padding:.6rem .8rem;border-radius:8px;margin-bottom:.6rem;font-size:.9rem}
-    .flash.ok{background:#dcfce7;color:#166534}.flash.erro{background:#fee2e2;color:#991b1b}
-    .mut{color:var(--mut)} code{background:#e8eefb;color:var(--navy);padding:.1rem .35rem;border-radius:5px}
+    .metric{background:var(--card);border:1px solid var(--bd);border-radius:var(--raio-lg);padding:.9rem;position:relative;overflow:hidden;box-shadow:var(--sh-sm)}
+    .metric::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--pri)}
+    .metric .n{font-size:1.7rem;font-weight:700;color:var(--txt)}.metric .l{color:var(--mut);font-size:.85rem}
+    .flash{padding:.6rem .8rem;border-radius:var(--raio-md);margin-bottom:.6rem;font-size:.9rem;background:var(--inf-bg);color:var(--inf-tx)}
+    .flash>.bi:first-child{margin-right:.45rem}
+    .flash.ok{background:var(--ok-bg);color:var(--ok-tx)}.flash.erro{background:var(--er-bg);color:var(--er-tx)}
+    .mut{color:var(--mut)}
+    code{background:var(--pri-bg);color:var(--b);padding:.1rem .35rem;border-radius:5px}
     a{color:var(--b)}
-    .dd{position:relative;display:inline-block}
-    .dd>.ddbtn{cursor:pointer}
-    .dd .ddmenu{display:none;position:absolute;top:100%;left:0;background:var(--card);min-width:150px;
-      border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.28);z-index:60;padding:.3rem 0;margin-top:.25rem}
-    .dd:hover .ddmenu,.dd:focus-within .ddmenu{display:block}
-    .dd .ddmenu::before{content:"";position:absolute;left:0;right:0;top:-.6rem;height:.6rem}  /* ponte: o vão não fecha o menu */
-    .dd .ddmenu a{display:block;color:var(--navy);padding:.5rem .95rem;white-space:nowrap;text-decoration:none}
-    .dd .ddmenu a:hover{background:#eef1f6}
+    /* texto e selo de estado */
+    .t-ok{color:var(--ok-tx)}.t-er{color:var(--er-tx)}.t-av{color:var(--av-tx)}.t-inf{color:var(--inf-tx)}
+    .selo{display:inline-flex;align-items:center;gap:.25rem;font-size:.72rem;font-weight:600;padding:.05rem .45rem;border-radius:999px;white-space:nowrap;
+          background:var(--card2);color:var(--txt2)}
+    .selo.ok{background:var(--ok-bg);color:var(--ok-tx)}.selo.er{background:var(--er-bg);color:var(--er-tx)}
+    .selo.av{background:var(--av-bg);color:var(--av-tx)}.selo.inf{background:var(--inf-bg);color:var(--inf-tx)}
+    .selo.pri{background:var(--pri-bg);color:var(--b)}
+    /* escolha entre listas (Bloqueados, Liberados): item ativo com o fundo suave da marca */
+    a.chp{display:inline-flex;align-items:center;gap:.3rem;text-decoration:none;padding:.35rem .7rem;border:1px solid var(--bd);
+          border-radius:var(--raio-lg);color:var(--txt2);font-size:.9rem}
+    a.chp:hover{border-color:var(--bd2);background:var(--card2)}
+    a.chp.on{background:var(--pri-bg);border-color:var(--pri);color:var(--b);font-weight:600}
+    /* modais */
+    dialog{background:var(--card);color:var(--txt);border:1px solid var(--bd);border-radius:var(--raio-lg);box-shadow:var(--sh-lg)}
+    dialog::backdrop{background:rgba(15,23,42,.5)}
     /* configurações: engrenagem ao lado do usuário + modal com atalhos */
-    .cfg-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border-radius:8px;
-             background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#c3d2ea;cursor:pointer}
-    .cfg-btn:hover,.cfg-btn.on{color:#fff;background:rgba(255,255,255,.16);border-color:#4aa8e8}
-    .cfg-btn svg{width:18px;height:18px;transition:transform .4s}
-    .cfg-btn:hover svg{transform:rotate(60deg)}
-    dialog.cfg{border:0;border-radius:14px;padding:0;max-width:640px;width:calc(100% - 32px);background:var(--card);color:var(--txt);
-               box-shadow:0 20px 60px rgba(0,0,0,.3)}
-    dialog.cfg::backdrop{background:rgba(15,23,42,.5)}
-    .cfg-h{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.1rem;border-bottom:1px solid var(--bd)}
-    .cfg-h h2{margin:0}
-    .cfg-h button{border:0;background:none;font-size:1.4rem;line-height:1;padding:.1rem .35rem;cursor:pointer;color:var(--mut)}
+    dialog.cfg{padding:0;max-width:640px;width:calc(100% - 32px);border-radius:var(--raio-xl)}
+    .cfg-h{display:flex;align-items:center;justify-content:space-between;padding:.8rem 1.1rem;border-bottom:1px solid var(--bd)}
+    .cfg-h h2{margin:0;display:flex;align-items:center;gap:.5rem}
     .cfg-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.7rem;padding:1.1rem}
-    .cfg-g a{display:flex;flex-direction:column;gap:.35rem;padding:.9rem;border:1px solid var(--bd);border-radius:12px;
+    .cfg-g a{display:flex;align-items:center;gap:.7rem;padding:.9rem;border:1px solid var(--bd);border-radius:var(--raio-lg);
              text-decoration:none;color:var(--txt);transition:border-color .15s,transform .15s,box-shadow .15s}
-    .cfg-g a:hover{border-color:var(--b);transform:translateY(-1px);box-shadow:0 6px 18px rgba(15,114,188,.14)}
-    .cfg-g a.on{border-color:var(--b);box-shadow:inset 0 0 0 1px var(--b)}
-    .cfg-g .ic{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;
-               background:linear-gradient(135deg,var(--b2),var(--navy));color:#fff}
-    .cfg-g .ic svg{width:19px;height:19px}
-    .cfg-g b{font-size:.95rem;color:var(--navy)}
-    .cfg-g span{font-size:.8rem;color:var(--mut);line-height:1.4}
-    html[data-theme="dark"] .cfg-g b{color:#e2e8f0}
-    .cfg-ap{display:flex;align-items:center;gap:.4rem 1rem;flex-wrap:wrap;margin:0 1.1rem 1.1rem;padding:.8rem .9rem;border:1px solid var(--bd);border-radius:12px}
-    .cfg-ap b{font-size:.95rem;color:var(--navy)}.cfg-ap small{color:var(--mut);font-size:.78rem;flex:1 1 180px}
-    html[data-theme="dark"] .cfg-ap b{color:#e2e8f0}
-    .cfg-seg{display:inline-flex;padding:3px;border-radius:999px;background:#eef1f6;border:1px solid var(--bd)}
-    .cfg-seg button,html[data-theme="dark"] dialog.cfg .cfg-seg button:not(.primary):not(.danger){border:0;background:none;color:var(--mut);
-               font-size:.82rem;font-weight:600;padding:.3rem .8rem;border-radius:999px;cursor:pointer}
-    .cfg-seg button.on,html[data-theme="dark"] dialog.cfg .cfg-seg button.on:not(.primary):not(.danger){background:#fff;color:var(--navy);
-               box-shadow:0 1px 3px rgba(15,23,42,.15)}
-    html[data-theme="dark"] .cfg-seg{background:#0f172a}
-    html[data-theme="dark"] dialog.cfg .cfg-seg button.on:not(.primary):not(.danger){background:#334155;color:#fff}
-    html[data-theme="dark"] dialog.cfg .cfg-h button:not(.primary):not(.danger){background:none}
-    html[data-theme="dark"] header .cfg-btn.cfg-btn:not(.primary):not(.danger){background:rgba(255,255,255,.08);color:#c3d2ea}
-    html[data-theme="dark"] header .cfg-btn.cfg-btn:not(.primary):not(.danger):hover,
-    html[data-theme="dark"] header .cfg-btn.on.cfg-btn:not(.primary):not(.danger){background:rgba(255,255,255,.16);color:#fff}
+    .cfg-g a:hover{border-color:var(--pri);transform:translateY(-1px);box-shadow:var(--sh-md)}
+    .cfg-g a.on{border-color:var(--pri);box-shadow:inset 0 0 0 1px var(--pri)}
+    .cfg-g .ic{width:36px;height:36px;border-radius:var(--raio-md);display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+               background:var(--pri-bg);color:var(--b);font-size:1.1rem}
+    .cfg-g b{font-size:.95rem;font-weight:600}
+    footer{text-align:center;color:var(--mut);font-size:.8rem;margin:2rem 0 1rem}
+    footer a{color:var(--b);text-decoration:none;font-weight:600}
   </style>
-  {% include '_tema_escuro.html' %}
 </head>
 <body>
-    <header>
+  <header>
     {% if portal_kit_url and adm %}
-    <twod-launcher current="dns-guard" style="--twod-text:#fff"></twod-launcher>
+    <twod-launcher current="dns-guard"></twod-launcher>
     <script src="{{ portal_kit_url }}" defer></script>
     {% endif %}
-    <span class="brand"><span class="mk"><span class="b2">2</span><span class="bd">D</span></span>
-      <span class="nm">DNS Guard</span></span>
+    <a class="brand" href="{{ url_for('analise.painel') if adm and config.ANALYZER_ENABLED else '#' }}"><i class="lg2d" role="img" aria-label="2D Tecnologia"></i>DNS Guard</a>
     <nav>
       {% if adm %}
       {% if config.ANALYZER_ENABLED %}
@@ -151,40 +145,28 @@
       {% endif %}
     </nav>
     <span class="sp"></span>
-    {% if adm %}<span class="mut" style="color:#a9b8d4;font-size:.85rem">{{ adm.nome }}</span>
+    {% if adm %}<span class="usr"><i class="bi bi-person-circle"></i>{{ adm.nome }}</span>
     {% set cfg_on = request.endpoint in ('analise.empresas', 'analise.fontes') or request.blueprint == 'operadores' %}
-    <button type="button" class="cfg-btn{{ ' on' if cfg_on }}" id="cfgBtn" title="Configurações" aria-label="Configurações" aria-haspopup="dialog">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    </button>
-    <a href="{{ url_for('auth.logout') }}">Sair</a>{% endif %}
+    <button type="button" class="ib{{ ' on' if cfg_on }}" id="cfgBtn" title="Configurações" aria-label="Configurações" aria-haspopup="dialog"><i class="bi bi-gear"></i></button>
+    <a class="ib" href="{{ url_for('auth.logout') }}" title="Sair" aria-label="Sair"><i class="bi bi-box-arrow-right"></i></a>{% endif %}
   </header>
   {% if adm %}
   <dialog class="cfg" id="cfgDlg" aria-labelledby="cfgTit">
-    <div class="cfg-h"><h2 id="cfgTit">Configurações</h2><button type="button" id="cfgX" aria-label="Fechar">×</button></div>
+    <div class="cfg-h"><h2 id="cfgTit"><i class="bi bi-gear"></i>Configurações</h2>
+      <button type="button" class="ib" id="cfgX" title="Fechar" aria-label="Fechar"><i class="bi bi-x-lg"></i></button></div>
     <div class="cfg-g">
       {% if config.TECHNITIUM_ENABLED %}
-      <a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1"/></svg></span>
-        <b>Empresas</b><span>Empresas e suas redes (CIDR), usadas em todo o DNS Guard.</span></a>
+      <a href="{{ url_for('analise.empresas') }}" class="{{ 'on' if request.endpoint == 'analise.empresas' }}" title="Empresas e suas redes (CIDR), usadas em todo o DNS Guard">
+        <span class="ic"><i class="bi bi-building"></i></span><b>Empresas</b></a>
       {% endif %}
       {% if config.ANALYZER_ENABLED %}
-      <a href="{{ url_for('analise.fontes') }}" class="{{ 'on' if request.endpoint == 'analise.fontes' }}">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/></svg></span>
-        <b>Fontes de ameaça</b><span>Listas de Threat Intelligence: ligar, desligar e peso.</span></a>
+      <a href="{{ url_for('analise.fontes') }}" class="{{ 'on' if request.endpoint == 'analise.fontes' }}" title="Listas de Threat Intelligence: ligar, desligar e peso">
+        <span class="ic"><i class="bi bi-shield-exclamation"></i></span><b>Fontes de ameaça</b></a>
       {% endif %}
       {% if adm.is_super %}
-      <a href="{{ url_for('operadores.lista') }}" class="{{ 'on' if request.blueprint == 'operadores' }}">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-        <b>Operadores</b><span>Quem acessa o console e com qual permissão.</span></a>
+      <a href="{{ url_for('operadores.lista') }}" class="{{ 'on' if request.blueprint == 'operadores' }}" title="Quem acessa o console e com qual permissão">
+        <span class="ic"><i class="bi bi-people"></i></span><b>Operadores</b></a>
       {% endif %}
-    </div>
-    <div class="cfg-ap">
-      <b>Aparência</b><small>vale para o 2D Hub e os outros sistemas da 2D</small>
-      <div class="cfg-seg" id="cfgTema" role="radiogroup" aria-label="Tema">
-        <button type="button" data-v="claro">☀ Claro</button>
-        <button type="button" data-v="escuro">☾ Escuro</button>
-        <button type="button" data-v="auto" title="segue o tema do sistema operacional">Automático</button>
-      </div>
     </div>
   </dialog>
   <script>
@@ -193,26 +175,15 @@
     document.getElementById("cfgBtn").onclick = function () { d.showModal(); };
     document.getElementById("cfgX").onclick = function () { d.close(); };
     d.addEventListener("click", function (e) { if (e.target === d) d.close(); });   // clique fora fecha
-    var seg = document.getElementById("cfgTema");
-    function marca() {
-      var p = window.TwodTema ? TwodTema.preferencia() : "auto";
-      seg.querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.v === p); b.setAttribute("aria-checked", b.dataset.v === p); });
-    }
-    seg.addEventListener("click", function (e) {
-      var b = e.target.closest("button"); if (b && window.TwodTema) { TwodTema.definir(b.dataset.v); marca(); }
-    });
-    window.addEventListener("twod:tema", marca); marca();
   })();
   </script>
   {% endif %}
   <main>
     {% with msgs = get_flashed_messages(with_categories=true) %}
-      {% for cat,msg in msgs %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+      {% for cat,msg in msgs %}<div class="flash {{ cat }}"><i class="bi bi-{{ 'check-circle' if cat == 'ok' else 'x-circle' if cat == 'erro' else 'info-circle' }}"></i>{{ msg }}</div>{% endfor %}
     {% endwith %}
     {% block content %}{% endblock %}
-    <footer style="text-align:center;color:var(--mut);font-size:.8rem;margin:2rem 0 1rem">
-      ⚡ powered by <a href="https://www.2dtecnologia.com" target="_blank" rel="noopener" style="color:var(--b);text-decoration:none;font-weight:600">2D Tecnologia</a>
-    </footer>
+    <footer><a href="https://www.2dtecnologia.com" target="_blank" rel="noopener">2D Tecnologia</a></footer>
   </main>
 </body>
 </html>

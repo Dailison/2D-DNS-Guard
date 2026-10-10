@@ -5,7 +5,7 @@
 
 {% macro riskbar(v) -%}
   {%- set v = v or 0 -%}
-  <div class="bar" title="risco {{ v }}"><span style="width:{{ v }}%;background:{{ '#b91c1c' if v >= 75 else '#ea580c' if v >= 50 else '#d97706' if v >= 30 else '#16a34a' }}"></span></div>
+  <div class="bar" title="risco {{ v }}"><span style="width:{{ v }}%;background:var(--c-{{ 'mal' if v >= 75 else 'susp' if v >= 50 else 'ntrab' if v >= 30 else 'trab' }})"></span></div>
 {%- endmacro %}
 
 {% macro dom(n) -%}
@@ -39,8 +39,8 @@
 {# status atual no Technitium, no escopo da empresa ('st' vem da rota: {nome: [grupos internos "Empresa: …" onde está bloqueado]}) #}
 {% macro status(n) -%}
   {%- if st is not defined or n not in st -%}<span class="mut">—</span>
-  {%- elif st[n] -%}<span class="stt blk" title="bloqueado para: {{ st[n]|map('replace', 'Empresa: ', '')|join(', ') }}">🔒 Bloqueado{% if todos %} · {{ st[n]|length }} empresa(s){% endif %}</span>
-  {%- else -%}<span class="stt ok" title="{{ 'não está em nenhuma lista de bloqueio' }}">🔓 Liberado</span>{%- endif -%}
+  {%- elif st[n] -%}<span class="stt blk" title="bloqueado para: {{ st[n]|map('replace', 'Empresa: ', '')|join(', ') }}"><i class="bi bi-slash-circle"></i> Bloqueado{% if todos %} · {{ st[n]|length }} empresa(s){% endif %}</span>
+  {%- else -%}<span class="stt ok" title="{{ 'não está em nenhuma lista de bloqueio' }}"><i class="bi bi-check-circle"></i> Liberado</span>{%- endif -%}
 {%- endmacro %}
 
 {# botão rápido bloquear/desbloquear; volta para a página atual.
@@ -55,7 +55,7 @@
         <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ n }}">
         <input type="hidden" name="escopo" value="empresa">
         <input type="hidden" name="voltar" value="{{ request.full_path }}">
-        <button class="mini ok">Desbloquear</button></form>
+        <button class="mini ok"><i class="bi bi-unlock"></i>Desbloquear</button></form>
     {%- endif -%}
     {%- if st[n] %} {% endif -%}
     {%- if grp is defined and grp -%}

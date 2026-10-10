@@ -6,7 +6,7 @@
 {# Zero loading (29/09): a página abre na hora e o conteúdo vem de analise.painel_conteudo. Na mesma aba, o último
    painel carregado aparece de imediato (sessionStorage) enquanto o atual chega. #}
 <style>
-  .sk{background:linear-gradient(90deg,#eef2f7 25%,#f8fafc 50%,#eef2f7 75%);background-size:200% 100%;
+  .sk{background:linear-gradient(90deg,var(--card2) 25%,var(--card3) 50%,var(--card2) 75%);background-size:200% 100%;
       animation:sk 1.2s ease-in-out infinite;border-radius:8px}
   @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
   @media (prefers-reduced-motion:reduce){.sk{animation:none}}
@@ -45,8 +45,8 @@ function painelCarregar() {
     .catch(function (e) {
       box.classList.remove("atualizando"); box.setAttribute("aria-busy", "false");
       if (cache) { aviso.textContent = "Mostrando o último painel carregado — não foi possível atualizar (" + e.message + ")."; return; }
-      box.innerHTML = '<div class="card"><b style="color:#b91c1c">Falha ao carregar o painel</b> (' + e.message +
-        '). <button type="button" class="mini neu" onclick="painelCarregar()">Tentar de novo</button></div>';
+      box.innerHTML = '<div class="card"><b class="t-er"><i class="bi bi-x-circle"></i> Falha ao carregar o painel</b> (' + e.message +
+        '). <button type="button" class="mini neu" onclick="painelCarregar()"><i class="bi bi-arrow-clockwise"></i>Tentar de novo</button></div>';
     });
 }
 painelCarregar();

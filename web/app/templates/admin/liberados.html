@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}IPs liberados{% endblock %}
 {% block content %}
-<h1>IPs liberados</h1>
+<div class="pg-h"><h1><i class="bi bi-hdd-network"></i>IPs liberados</h1></div>
 
 {% from "admin/_liberado_campos.html" import sel_empresa, sel_filial, sel_tipo, script_sugestao with context %}
 {% from "admin/_liberado_listas.html" import sel_listas, script_listas with context %}
@@ -18,7 +18,7 @@
     <div><label>Libera</label>{{ sel_listas(None, listas_novo) }}</div>
     <div><label>Autorizado por (empresa)</label><input type="text" name="autorizado_por" placeholder="Ex.: Maria, gerente" required
       title="quem da empresa pediu/autorizou a liberação (fica no histórico junto com o seu usuário)"></div>
-    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary">Liberar</button></div>
+    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary"><i class="bi bi-unlock"></i>Liberar</button></div>
   </form>
   <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">IP único vira <code>/32</code> automaticamente. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro de
     <a href="{{ url_for('analise.empresas') }}">Empresas</a>. A descrição fica no DNS Guard; o Technitium guarda só o IP.</p>
@@ -57,11 +57,11 @@
         <td style="white-space:nowrap">
           <form id="{{ fid }}" method="post" action="{{ url_for('admin.liberados_editar') }}" style="display:inline">
             <input type="hidden" name="ip" value="{{ r.ip }}">
-            <button class="primary" style="padding:.35rem .6rem;font-size:.85rem">Salvar</button>
+            <button class="primary" style="padding:.35rem .6rem;font-size:.85rem"><i class="bi bi-check-lg"></i>Salvar</button>
           </form>
           <form method="post" action="{{ url_for('admin.liberados_revogar') }}" style="display:inline" onsubmit="return confirm('Revogar {{ r.ip }}? Volta a filtrar pela rede.')">
             <input type="hidden" name="ip" value="{{ r.ip }}">
-            <button class="danger">Revogar</button>
+            <button class="danger"><i class="bi bi-slash-circle"></i>Revogar</button>
           </form>
         </td>
       </tr>
@@ -80,7 +80,7 @@
     {% for h in historico %}
       <tr>
         <td style="white-space:nowrap">{{ h.at|dt_sp }}</td>
-        <td>{{ {'liberar': '✅ liberou', 'editar': '✏️ editou', 'revogar': '⛔ revogou'}.get(h.acao, h.acao) }}</td>
+        <td>{% set ic = {'liberar': 'check-circle t-ok', 'editar': 'pencil', 'revogar': 'slash-circle t-er'}.get(h.acao) %}{% if ic %}<i class="bi bi-{{ ic }}"></i> {% endif %}{{ {'liberar': 'liberou', 'editar': 'editou', 'revogar': 'revogou'}.get(h.acao, h.acao) }}</td>
         <td><code>{{ h.ip }}</code>{% set d = h.detalhe or {} %}{% if d.usuario or d.departamento %}<div class="mut" style="font-size:.75rem">{{ [d.usuario, d.departamento]|select|join(' · ') }}</div>{% endif %}
           {% if d.listas %}<div class="mut" style="font-size:.75rem">libera: {% if d.listas is string %}tudo{% else %}{% for cod in d.listas %}{{ nomes_lista.get(cod, cod) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</div>{% endif %}</td>
         <td>{{ h.tenant_name or '—' }}{% if (h.detalhe or {}).filial %} · {{ h.detalhe.filial }}{% endif %}</td>

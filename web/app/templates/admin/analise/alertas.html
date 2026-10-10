@@ -4,7 +4,7 @@
 <div class="card">
   <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem">
     {% for s, l in [('open','Abertos'),('ack','Vistos'),('closed','Fechados'),('all','Todos')] %}
-      <a class="btn" style="padding:.3rem .7rem;{{ '' if st == s else 'background:#eef1f6;color:var(--navy);box-shadow:none' }}" href="{{ url_for('analise.alertas', t=tid, status=s) }}">{{ l }}</a>
+      <a class="btn mini{{ '' if st == s else ' neu' }}" href="{{ url_for('analise.alertas', t=tid, status=s) }}">{{ l }}</a>
     {% endfor %}
     <span class="mut" style="margin-left:auto">{{ lista|length }} alerta(s)</span>
   </div>
@@ -25,7 +25,7 @@
             <input type="hidden" name="tid" value="{{ a.tenant_id }}">
             {% if a.status == 'open' %}
               <button class="btn" name="status" value="ack" style="padding:.2rem .5rem;font-size:.8rem">Visto</button>
-              <button class="btn" name="status" value="closed" style="padding:.2rem .5rem;font-size:.8rem">Fechar</button>
+              <button class="btn" name="status" value="closed" style="padding:.2rem .5rem;font-size:.8rem"><i class="bi bi-x-lg"></i>Fechar</button>
             {% else %}
               <button class="btn" name="status" value="open" style="padding:.2rem .5rem;font-size:.8rem">Reabrir</button>
             {% endif %}

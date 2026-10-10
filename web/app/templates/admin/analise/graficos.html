@@ -1,7 +1,7 @@
 {% extends "admin/analise/_base.html" %}
 {% block an %}
 <style>
-  .gr-card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem;position:relative}
+  .gr-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--raio-lg);box-shadow:var(--sh-sm);padding:1rem 1.1rem;margin-bottom:1rem;position:relative}
   .gr-card h2{margin:0;font-size:1rem}
   .gr-top{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;flex-wrap:wrap;margin-bottom:.4rem}
   .gr-total{font-size:.85rem;color:var(--mut)}
@@ -11,13 +11,12 @@
   .gr .eixo-v{fill:var(--mut);font-size:11px}
   .gr .eixo-d{fill:var(--mut);font-size:11.5px}
   .gr .eixo-d.hoje{fill:var(--txt);font-weight:700}
-  .gr .barra{fill:#0f72bc}
-  html[data-theme="dark"] .gr .barra{fill:#3b9ae1}
+  .gr .barra{fill:var(--b)}
   .gr .valor{fill:var(--txt);font-size:12px;font-weight:700}
   .gr .alvo{fill:transparent;cursor:default;outline:none}
   .gr .alvo:hover + .barra,.gr .alvo:focus + .barra{opacity:.82}
   .gr-tt{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--bd);border-radius:8px;
-         padding:.35rem .6rem;font-size:.82rem;box-shadow:0 6px 18px rgba(15,23,42,.14);white-space:nowrap;display:none;z-index:5}
+         padding:.35rem .6rem;font-size:.82rem;box-shadow:var(--sh-lg);white-space:nowrap;display:none;z-index:5}
   .gr-tt b{font-size:.95rem}
   .gr details{margin-top:.5rem;font-size:.85rem}
   .gr details table{margin-top:.4rem;max-width:360px}

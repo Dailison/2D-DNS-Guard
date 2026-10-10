@@ -2,7 +2,7 @@
 {% import "admin/analise/_macros.html" as m with context %}
 {% from "admin/_listas_caixas.html" import caixas with context %}
 {% block an %}
-<p><a href="{{ url_for('analise.dominios', t=tid) }}">← Domínios</a></p>
+<p><a href="{{ url_for('analise.dominios', t=tid) }}" style="text-decoration:none"><i class="bi bi-arrow-left"></i> Domínios</a></p>
 {% if not d %}
   <div class="card mut">Domínio <b>{{ nome }}</b> não encontrado para este cliente.</div>
 {% else %}
@@ -36,7 +36,7 @@
   <h2>Investigação profunda <span class="mut" style="font-size:.8rem;font-weight:400">· fase 6 · {{ inv.at|dt_sp }} · {{ (inv.segundos or 0)|round|int }} s
     {%- for r in inv.rodadas or [] %}{% if loop.last %} · {{ r.modelo }}{{ ' (GPU)' if r.gpu }}{% endif %}{% endfor %}</span></h2>
   <p style="margin:.2rem 0 .6rem">
-    {% if inv.aplicado %}<span class="stt ok">✓ aplicado</span>{% else %}<span class="stt" style="color:var(--mut)">só dossiê</span>
+    {% if inv.aplicado %}<span class="stt ok"><i class="bi bi-check-lg"></i> aplicado</span>{% else %}<span class="stt" style="color:var(--mut)">só dossiê</span>
       <span class="mut" style="font-size:.85rem">— {{ inv.sem_aplicar }}</span>{% endif %}
   </p>
   <p style="margin:0 0 .6rem"><b>{{ v.service or 'serviço não identificado' }}</b>
@@ -80,7 +80,7 @@
       <tbody>
       {% for e in dm.evidence %}
         <tr><td style="width:3rem"><code>{{ e.id }}</code></td>
-            <td>{{ e.text }}{% if e.risk %} <span class="tag" style="color:#ea580c;border-color:#fdba74">risco</span>{% endif %}</td></tr>
+            <td>{{ e.text }}{% if e.risk %} <span class="tag" style="color:var(--c-susp-tx);border-color:var(--c-susp)">risco</span>{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -113,7 +113,7 @@
     </table>
     <h3 style="margin:1rem 0 .4rem">Ações</h3>
     {% if d.global_review %}{% set gr = d.global_review %}
-    <div style="font-size:.88rem;margin-bottom:.5rem" title="Decidido na visão Todos os clientes em {{ gr.reviewed_at|dt_sp }}: vale para empresas sem decisão própria, inclusive as que acessarem depois.">🌐 {{ {'blocked':'Decisão global: bloquear','allowed':'Decisão global: manter liberado'}.get(gr.status) }} · {{ gr.reviewed_by or '' }}
+    <div style="font-size:.88rem;margin-bottom:.5rem" title="Decidido na visão Todos os clientes em {{ gr.reviewed_at|dt_sp }}: vale para empresas sem decisão própria, inclusive as que acessarem depois."><i class="bi bi-globe2"></i> {{ {'blocked':'Decisão global: bloquear','allowed':'Decisão global: manter liberado'}.get(gr.status) }} · {{ gr.reviewed_by or '' }}
       <form method="post" action="{{ url_for('analise.dominio_decisao_global', nome=dm.name) }}" style="display:inline" onsubmit="return confirm('Desfazer a decisão global? Empresas sem decisão própria voltam para a fila.')">
         <input type="hidden" name="tid" value="{{ tid }}"><button class="mini neu" style="margin-left:.3rem">desfazer</button></form></div>{% endif %}
     {% if tv.review_status %}<div style="font-size:.88rem;margin-bottom:.5rem">{{ {'blocked':'Decidido nesta empresa: bloquear','allowed':'Decidido nesta empresa: manter liberado'}.get(tv.review_status) }} · {{ tv.reviewed_by or '' }}</div>{% endif %}
@@ -121,22 +121,22 @@
     <div id="bloqueio" style="border:1px solid var(--bd);border-radius:10px;padding:.7rem .8rem;margin-bottom:1rem">
       <label style="margin-top:0">Bloqueio no DNS (Technitium) — <code>{{ blq.nome }}</code></label>
       {% if not blq.listas %}
-        <p style="margin:.3rem 0">🔓 <b>Não está</b> em nenhuma lista de bloqueio.</p>
+        <p style="margin:.3rem 0"><i class="bi bi-check-circle t-ok"></i> <b>Não está</b> em nenhuma lista de bloqueio.</p>
       {% endif %}
       {% for l in blq.listas %}
-        <div style="margin:.3rem 0;font-size:.9rem">⛔ Na <a href="{{ url_for('admin.listas_categoria', cat=l.cat) }}"><b>lista {{ l.rot }}</b></a>
+        <div style="margin:.3rem 0;font-size:.9rem"><i class="bi bi-slash-circle t-er"></i> Na <a href="{{ url_for('admin.listas_categoria', cat=l.cat) }}"><b>lista {{ l.rot }}</b></a>
           (<code>{{ l.entrada }}</code>{% if l.por %}, {{ l.por }}{% endif %}){% if l.da_empresa %} <span class="tag" style="font-size:.7rem">vale para {{ tenant.name if tenant else 'esta empresa' }}</span>{% endif %} — aplicada por:
           {% if l.empresas %}<b>{{ l.empresas|join(', ') }}</b>{% else %}<b>nenhuma empresa</b> (não bloqueia){% endif %}
           {% if adm and adm.is_super %}
           <form method="post" action="{{ url_for('admin.listas_categoria_rem') }}" style="display:inline;margin-left:.3rem" onsubmit="return confirm('Tirar {{ l.entrada }} da lista {{ l.rot }}? Fica registrado como “manter liberado”; vale para todas as empresas que aplicam a lista (em até 2 min).')">
             <input type="hidden" name="cat" value="{{ l.cat }}"><input type="hidden" name="dominio" value="{{ l.entrada }}">
             <input type="hidden" name="voltar" value="{{ request.full_path }}">
-            <button style="padding:.1rem .5rem;font-size:.78rem;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer">🔓 tirar da lista</button>
+            <button class="pos mini"><i class="bi bi-unlock"></i>tirar da lista</button>
           </form>{% endif %}</div>
       {% endfor %}
 
       {% if blq.protegido %}
-        <div class="flash erro" style="margin:.4rem 0">⚠ Este domínio é <b>infraestrutura protegida</b> (catálogo). Bloqueá-lo pode quebrar sistemas de trabalho (login, atualizações, Office…).</div>
+        <div class="flash erro" style="margin:.4rem 0"><i class="bi bi-exclamation-triangle"></i>Este domínio é <b>infraestrutura protegida</b> (catálogo). Bloqueá-lo pode quebrar sistemas de trabalho (login, atualizações, Office…).</div>
       {% endif %}
 
       {% set nas = blq.listas|selectattr('entrada', 'equalto', blq.nome)|map(attribute='cat')|list %}
@@ -147,7 +147,7 @@
         <script>(function () { const nas = {{ nas|tojson }}, sug = {{ (dm.lista_ia or '')|tojson }};
           document.querySelectorAll("#fListasG .lx-sec input").forEach(i => { i.checked = nas.includes(i.value);
             i.closest("label").querySelector(".lx-sug").hidden = i.value !== sug; }); })();</script>
-        <button type="button" class="danger" id="bListas" title="Vale para todas as empresas que aplicam cada lista (no DNS em até 2 min); nenhuma marcada = manter liberado.">Salvar listas</button>
+        <button type="button" class="danger" id="bListas" title="Vale para todas as empresas que aplicam cada lista (no DNS em até 2 min); nenhuma marcada = manter liberado."><i class="bi bi-check-lg"></i>Salvar listas</button>
       </form>
       <script>
       document.getElementById("bListas").addEventListener("click", async (ev) => {
@@ -167,7 +167,7 @@
       <form method="post" action="{{ url_for('analise.dominio_liberar_empresa', nome=dm.name) }}" style="margin:.5rem 0"
             onsubmit="return confirm('Liberar {{ blq.nome }} só para {{ tenant.name }}? Vale na hora; as demais empresas seguem com as listas delas.')">
         <input type="hidden" name="tid" value="{{ tid }}"><input type="hidden" name="dominio" value="{{ blq.nome }}">
-        <button class="btn" style="background:#16a34a">🔓 Liberar só para {{ tenant.name }}</button>
+        <button class="btn pos"><i class="bi bi-unlock"></i>Liberar só para {{ tenant.name }}</button>
       </form>
       {% endif %}
     </div>
@@ -184,9 +184,9 @@
       </div>
       <input type="text" name="nota" placeholder="Motivo (ex.: sistema de agendamento usado pela clínica)" style="margin-top:.4rem">
       <div style="margin-top:.5rem;display:flex;gap:.5rem;flex-wrap:wrap">
-        <button class="primary">Salvar ajuste</button>
+        <button class="primary"><i class="bi bi-check-lg"></i>Salvar ajuste</button>
         {% if tv.overridden %}
-          <button class="danger" name="remover" value="1" formnovalidate>Remover ajuste</button>
+          <button class="danger" name="remover" value="1" formnovalidate><i class="bi bi-trash"></i>Remover ajuste</button>
         {% endif %}
       </div>
     </form>
@@ -252,7 +252,7 @@
     <table><thead><tr><th>Quando</th><th>Lista</th><th></th><th>Domínio</th><th>Quem</th><th>Por quê</th></tr></thead><tbody>
     {% for h in auditoria %}
       <tr><td class="mut" style="white-space:nowrap;font-size:.82rem">{{ h.at|dt_sp }}</td><td>{{ LISTAS_ROT.get(h.category, h.category) }}</td>
-        <td>{{ '➕ entrou' if h.acao == 'add' else '➖ saiu' }}</td><td style="font-size:.82rem">{{ h.domain }}</td>
+        <td><i class="bi bi-{{ 'plus-lg' if h.acao == 'add' else 'dash-lg' }}"></i> {{ 'entrou' if h.acao == 'add' else 'saiu' }}</td><td style="font-size:.82rem">{{ h.domain }}</td>
         <td style="font-size:.82rem">{{ h.por or '—' }}</td><td class="mut" style="font-size:.82rem">{{ h.motivo or '' }}</td></tr>
     {% endfor %}
     </tbody></table>

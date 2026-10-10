@@ -1,17 +1,17 @@
 {# Conteúdo do Painel: carregado depois da página (zero loading) por analise.painel_conteudo #}
 {% import "admin/analise/_macros.html" as m with context %}
 {% if erro %}
-  <div class="card"><b style="color:#b91c1c">Falha ao carregar o painel:</b> {{ erro }} <button type="button" class="mini neu" onclick="painelCarregar()">Tentar de novo</button></div>
+  <div class="card"><b class="t-er"><i class="bi bi-x-circle"></i> Falha ao carregar o painel:</b> {{ erro }} <button type="button" class="mini neu" onclick="painelCarregar()"><i class="bi bi-arrow-clockwise"></i>Tentar de novo</button></div>
 {% elif s %}
   {% set c = s.counts %}
   <div class="m-grid">
     <div class="metric"><div class="n">{{ s.total_domains }}</div><div class="l">Domínios analisados</div></div>
-    <div class="metric"><div class="n" style="color:#16a34a">{{ c.TRABALHO }}</div><div class="l">Trabalho</div></div>
-    <div class="metric"><div class="n" style="color:#d97706">{{ c.NAO_TRABALHO }}</div><div class="l">Não trabalho</div></div>
-    <div class="metric"><div class="n" style="color:#ea580c">{{ c.SUSPEITO }}</div><div class="l">Suspeitos</div></div>
-    <div class="metric"><div class="n" style="color:#b91c1c">{{ c.MALICIOSO }}</div><div class="l">Maliciosos</div></div>
-    <div class="metric"><div class="n" style="color:#64748b">{{ c.DESCONHECIDO }}</div><div class="l">Desconhecidos</div></div>
-    <div class="metric"><div class="n" style="color:#94a3b8">{{ s.pending_ai }}</div><div class="l">Aguardando IA</div></div>
+    <div class="metric"><div class="n" style="color:var(--ok-tx)">{{ c.TRABALHO }}</div><div class="l">Trabalho</div></div>
+    <div class="metric"><div class="n" style="color:var(--av-tx)">{{ c.NAO_TRABALHO }}</div><div class="l">Não trabalho</div></div>
+    <div class="metric"><div class="n" style="color:var(--c-susp-tx)">{{ c.SUSPEITO }}</div><div class="l">Suspeitos</div></div>
+    <div class="metric"><div class="n" style="color:var(--er-tx)">{{ c.MALICIOSO }}</div><div class="l">Maliciosos</div></div>
+    <div class="metric"><div class="n" style="color:var(--mut)">{{ c.DESCONHECIDO }}</div><div class="l">Desconhecidos</div></div>
+    <div class="metric"><div class="n" style="color:var(--mut)">{{ s.pending_ai }}</div><div class="l">Aguardando IA</div></div>
   </div>
 
   {% if todos and s.by_tenant %}
@@ -25,8 +25,8 @@
           <td><a href="{{ url_for('analise.painel', t=e.id) }}"><b>{{ e.name }}</b></a>{% if e.auto_created %} <span class="tag">sem cadastro</span>{% endif %}</td>
           <td class="num">{{ e.clients }}</td><td class="num">{{ e.queries }}</td><td class="num">{{ e.domains }}</td>
           <td class="num">{{ ((e.nonwork_q or 0) / (e.queries or 1) * 100)|round|int }}%</td>
-          <td class="num" style="{{ 'color:#b91c1c;font-weight:700' if e.risky }}">{{ e.risky or 0 }}</td>
-          <td class="num" style="{{ 'color:#b91c1c;font-weight:700' if e.open_alerts }}">{{ e.open_alerts }}</td>
+          <td class="num" style="{{ 'color:var(--er-tx);font-weight:700' if e.risky }}">{{ e.risky or 0 }}</td>
+          <td class="num" style="{{ 'color:var(--er-tx);font-weight:700' if e.open_alerts }}">{{ e.open_alerts }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -40,16 +40,16 @@
     <h2>Por categoria <span class="mut" style="font-size:.8rem;font-weight:400">· {{ 'período selecionado, 1000 domínios mais acessados' }}</span></h2>
     {% set maxq = (porcat|map(attribute='consultas')|max) or 1 %}
     <table>
-      <thead><tr><th>Categoria</th><th class="num">Domínios</th><th class="num">🔒 Bloqueados</th><th class="num">🔓 Liberados</th><th class="num">Consultas</th><th style="width:30%"></th></tr></thead>
+      <thead><tr><th>Categoria</th><th class="num">Domínios</th><th class="num">Bloqueados</th><th class="num">Liberados</th><th class="num">Consultas</th><th style="width:30%"></th></tr></thead>
       <tbody>
       {% for c in porcat %}
         <tr>
           <td>{% if c.code == '_pendente' %}<span class="catg pend">aguardando IA</span>{% else %}{{ m.cat(c.code) }}{% endif %}</td>
           <td class="num">{% if c.code != '_pendente' %}<a href="{{ url_for('analise.dominios', t=tid, categoria=c.code) }}">{{ c.dominios }}</a>{% else %}{{ c.dominios }}{% endif %}</td>
-          <td class="num" style="color:#b91c1c">{{ c.bloqueados or '' }}</td>
-          <td class="num" style="{{ 'color:#b45309;font-weight:700' if c.nonwork and c.dominios - c.bloqueados }}">{{ c.dominios - c.bloqueados }}</td>
+          <td class="num t-er">{{ c.bloqueados or '' }}</td>
+          <td class="num" style="{{ 'color:var(--av-tx);font-weight:700' if c.nonwork and c.dominios - c.bloqueados }}">{{ c.dominios - c.bloqueados }}</td>
           <td class="num">{{ c.consultas }}</td>
-          <td><div class="bar"><span style="width:{{ (c.consultas / maxq * 100)|round|int }}%;background:{{ '#d97706' if c.nonwork else '#6366f1' }}"></span></div></td>
+          <td><div class="bar"><span style="width:{{ (c.consultas / maxq * 100)|round|int }}%;background:var(--{{ 'c-ntrab' if c.nonwork else 'pri' }})"></span></div></td>
         </tr>
       {% endfor %}
       </tbody>
@@ -69,7 +69,7 @@
               <td>{{ m.badge(d.classification) }}</td><td>{{ m.rec(d) }}</td><td>{{ m.riskbar(d.risk_score) }}<span class="mut" style="font-size:.75rem">{{ d.risk_score }}</span></td>
               <td class="num">{{ d.queries }}</td><td class="num">{{ d.clients }}</td>{% if todos %}<td class="num">{{ d.tenants }}</td>{% endif %}
               <td>{{ m.status(d.name) }}<br>{{ m.acao(d.name) }}</td></tr>
-        {% else %}<tr><td colspan="8" class="mut">Nenhum domínio suspeito ou malicioso no período. 👍</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="8" class="mut">Nenhum domínio suspeito ou malicioso no período.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -105,7 +105,7 @@
     </div>
 
     <div class="card">
-      <h2>Alertas <a class="mut" style="font-size:.8rem;font-weight:400" href="{{ url_for('analise.alertas', t=tid) }}">ver todos →</a></h2>
+      <h2>Alertas <a class="mut" style="font-size:.8rem;font-weight:400" href="{{ url_for('analise.alertas', t=tid) }}">ver todos <i class="bi bi-arrow-right"></i></a></h2>
       <table>
         <thead><tr><th>Quando</th><th>Sev.</th><th>Alerta</th><th>Status</th></tr></thead>
         <tbody>

@@ -6,15 +6,15 @@
   <div class="lx-bar"><button type="button" class="mini" onclick="lxMarca('{{ id }}', true)">Marcar todas</button>
     <button type="button" class="mini" onclick="lxMarca('{{ id }}', false)">Desmarcar todas</button></div>
   {% for titulo, itens in LISTAS_SECOES %}{% set vis = itens|rejectattr('0', 'in', fora)|list %}{% if vis %}
-  <div class="lx-sec"><div class="lx-tit">{{ titulo }}</div>
-    <div class="lx-grade">{% for c, rot in vis %}<label class="chk"><input type="checkbox" {{ attrs|safe }} value="{{ c }}"> <span>{{ rot }}{{ ' ⚡' if c in LISTAS_RISCO }} <span class="tag lx-sug" hidden>sugerida</span></span></label>{% endfor %}</div>
+  <div class="lx-sec"><div class="lx-tit"><i class="bi bi-{{ LISTAS_ICONE.get(titulo, 'list-ul') }}"></i> {{ titulo }}</div>
+    <div class="lx-grade">{% for c, rot in vis %}<label class="chk"><input type="checkbox" {{ attrs|safe }} value="{{ c }}"> <span>{{ rot }}{% if c in LISTAS_RISCO %} <i class="bi bi-lightning-charge-fill t-av" title="lista de risco"></i>{% endif %} <span class="tag lx-sug" hidden>sugerida</span></span></label>{% endfor %}</div>
   </div>{% endif %}{% endfor %}
 </div>
 <style>
   .lx-bar{display:flex;gap:.3rem;margin:.2rem 0 .3rem} .lx-sec{padding:.25rem 0;border-bottom:1px dashed var(--bd)}
   .lx-tit{font-size:.78rem;font-weight:700;color:var(--mut);margin:.15rem 0}
   .lx-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.1rem .8rem}
-  .lx-grade .chk{margin:0;font-weight:400} .lx-sug{font-size:.66rem} .mini{padding:.25rem .5rem;font-size:.8rem}
+  .lx-grade .chk{margin:0;font-weight:400} .lx-sug{font-size:.66rem}
 </style>
 <script>window.lxMarca = window.lxMarca || function (id, v) { document.querySelectorAll("#" + id + " .lx-sec input[type=checkbox]").forEach(c => { c.checked = v; }); };</script>
 {% endmacro %}

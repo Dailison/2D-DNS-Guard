@@ -3,18 +3,20 @@
 {% block content %}
 {# selos da classificação da IA: esta tela não herda o _base.html da Análise #}
 <style>
+  /* classificação da IA: cores de categoria (_tema.html) */
   .cls{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .45rem;border-radius:6px;color:#fff;white-space:nowrap}
-  .cls.TRABALHO{background:#16a34a}.cls.NAO_TRABALHO{background:#d97706}.cls.SUSPEITO{background:#ea580c}
-  .cls.MALICIOSO{background:#b91c1c}.cls.DESCONHECIDO{background:#64748b}.cls.PENDENTE{background:#94a3b8}
-  .cls-cat{display:block;font-size:.72rem;color:var(--mut,#64748b);margin-top:.1rem}
+  .cls.TRABALHO{background:var(--c-trab)}.cls.NAO_TRABALHO{background:var(--c-ntrab)}.cls.SUSPEITO{background:var(--c-susp)}
+  .cls.MALICIOSO{background:var(--c-mal)}.cls.DESCONHECIDO{background:var(--c-desc)}.cls.PENDENTE{background:var(--c-pend)}
+  .cls-cat{display:block;font-size:.72rem;color:var(--mut);margin-top:.1rem}
+  .blk{color:var(--er-tx);font-weight:600}
 </style>
 {% macro selo(row) %}
   {% if cls_label is defined %}
-    <span class="cls {{ row.cls or 'PENDENTE' }}">{{ cls_label.get(row.cls, row.cls) if row.cls else 'Aguardando IA' }}</span>{% if row.ajustada %} <span title="ajuste manual da empresa (prevalece sobre a IA)">✎</span>{% endif %}
+    <span class="cls {{ row.cls or 'PENDENTE' }}">{{ cls_label.get(row.cls, row.cls) if row.cls else 'Aguardando IA' }}</span>{% if row.ajustada %} <i class="bi bi-pencil mut" title="ajuste manual da empresa (prevalece sobre a IA)"></i>{% endif %}
     {% if row.categoria %}<span class="cls-cat">{{ cat_label.get(row.categoria, row.categoria) }}</span>{% endif %}
   {% else %}<span class="mut">—</span>{% endif %}
 {% endmacro %}
-<h1>Logs <span class="mut" style="font-size:.8rem">· Technitium, com empresa por IP</span></h1>
+<div class="pg-h"><h1 title="Technitium, com empresa por IP"><i class="bi bi-clock-history"></i>Logs</h1></div>
 
 <div class="card">
   <form method="get" class="row">
@@ -50,11 +52,11 @@
       </select></div>
     <div style="flex:0;display:flex;align-items:flex-end;gap:.6rem">
       <label class="chk" style="margin:0 0 .45rem;font-weight:400;white-space:nowrap" title="zonas locais do Technitium (ex.: 2d.local), nomes sem ponto e consultas reversas (PTR)"><input type="checkbox" name="locais" value="1" {{ 'checked' if locais }} onchange="this.form.submit()"> <span>mostrar nomes locais</span></label>
-      <button class="primary">Filtrar</button></div>
+      <button class="primary"><i class="bi bi-funnel"></i>Filtrar</button></div>
   </form>
   <p class="mut" style="font-size:.85rem;margin:.6rem 0 0"><b>Empresa</b> vem do <a href="{{ url_for('analise.empresas') }}">cadastro de empresas</a> (todas as unidades/redes dela). <b>Faixa / parte do IP</b> aceita CIDR (<code>10.70.0.0/16</code>) ou um pedaço do IP (<code>10.100</code> traz todos os IPs que contêm isso). <b>Resposta</b> = como o Technitium respondeu (<code>Blocked</code> = bloqueado pelo filtro, <code>Cached</code>, <code>Recursive</code>…). Reduza o período para buscas mais fundas. Horários no fuso de São Paulo (GMT-3).</p>
-  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0"><b>Classificação IA</b> = a do analisador para o site (o ajuste manual da empresa, marcado com ✎, prevalece); juntando empresas numa linha, vale a pior. <b>Ameaças</b> = Malicioso + Suspeito. Para descobrir <b>qual computador</b> acessou um site malicioso: Classificação IA = Malicioso e vista <b>Por computador</b>.</p>
-  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0">Nas linhas <b style="color:#dc2626">Blocked</b>, a coluna <b>Desbloquear</b> mostra o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME <code>↳</code>). O botão <code>✕</code> tira esse domínio de <b>todas as listas de bloqueio</b> (vale no DNS em até 2 min).</p>
+  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0"><b>Classificação IA</b> = a do analisador para o site (o ajuste manual da empresa, marcado com <i class="bi bi-pencil"></i>, prevalece); juntando empresas numa linha, vale a pior. <b>Ameaças</b> = Malicioso + Suspeito. Para descobrir <b>qual computador</b> acessou um site malicioso: Classificação IA = Malicioso e vista <b>Por computador</b>.</p>
+  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0">Nas linhas <b class="blk">Blocked</b>, a coluna <b>Desbloquear</b> mostra o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME <i class="bi bi-arrow-return-right"></i>). O botão <i class="bi bi-x-lg t-er"></i> tira esse domínio de <b>todas as listas de bloqueio</b> (vale no DNS em até 2 min).</p>
 </div>
 
 <div class="card">
@@ -78,7 +80,7 @@
               onsubmit="return confirm('Tirar {{ c }} de todas as listas de bloqueio?')">
           <input type="hidden" name="dominios" value="{{ c }}">
           <input type="hidden" name="voltar" value="{{ voltar }}">
-          <button class="danger" title="Tira {{ c }} de todas as listas de bloqueio" style="padding:.15rem .5rem;font-size:.78rem">✕ {{ c }}</button>
+          <button class="danger mini" title="Tira {{ c }} de todas as listas de bloqueio"><i class="bi bi-x-lg"></i>{{ c }}</button>
         </form>
       {% endfor %}
     {% else %}<span class="mut">—</span>{% endif %}
@@ -95,7 +97,7 @@
         <td>{{ a.dominio }}</td>
         <td>{{ selo(a) }}</td>
         <td><b>{{ a.n }}</b></td>
-        <td class="mut">{% if a.blocked %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% if a.bloqueadas < a.n %} <span style="font-size:.75rem">{{ a.bloqueadas }}/{{ a.n }}</span>{% endif %}{% else %}Resolvido{% endif %}</td>
+        <td class="mut">{% if a.blocked %}<span class="blk">Blocked</span>{% if a.bloqueadas < a.n %} <span style="font-size:.75rem">{{ a.bloqueadas }}/{{ a.n }}</span>{% endif %}{% else %}Resolvido{% endif %}</td>
         <td style="white-space:nowrap">{{ desbloquear(a) }}</td>
       </tr>
     {% else %}
@@ -111,13 +113,13 @@
       <tr>
         <td class="mut" style="white-space:nowrap">{{ (a.ultima or '')[:19]|replace('T',' ') }}</td>
         <td>{{ a.dominio }}
-          {% if a.blocked and a.answer and 'CNAME' in a.answer %}<br><span class="mut" style="font-size:.75rem">↳ {{ a.answer }}</span>{% endif %}
+          {% if a.blocked and a.answer and 'CNAME' in a.answer %}<br><span class="mut" style="font-size:.75rem"><i class="bi bi-arrow-return-right"></i> {{ a.answer }}</span>{% endif %}
         </td>
         <td>{{ selo(a) }}</td>
         <td><b>{{ a.n }}</b></td>
         <td class="mut">{{ a.nclientes }}</td>
         <td class="mut" style="font-size:.85rem">{% if a.empresas %}{{ a.empresas[:3]|join(', ') }}{% if a.empresas|length > 3 %} <span title="{{ a.empresas|join(', ') }}">+{{ a.empresas|length - 3 }}</span>{% endif %}{% else %}—{% endif %}</td>
-        <td class="mut">{% if a.blocked %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% if a.bloqueadas is defined and a.bloqueadas < a.n %} <span style="font-size:.75rem">{{ a.bloqueadas }}/{{ a.n }}</span>{% endif %}{% else %}{{ a.tipo }}{% endif %}</td>
+        <td class="mut">{% if a.blocked %}<span class="blk">Blocked</span>{% if a.bloqueadas is defined and a.bloqueadas < a.n %} <span style="font-size:.75rem">{{ a.bloqueadas }}/{{ a.n }}</span>{% endif %}{% else %}{{ a.tipo }}{% endif %}</td>
         <td style="white-space:nowrap">{{ desbloquear(a) }}</td>
       </tr>
     {% else %}
@@ -136,13 +138,13 @@
 </td>
         <td>{{ l.dominio }}
           {% if l.resposta == 'Blocked' and l.answer and 'CNAME' in l.answer %}
-            <br><span class="mut" style="font-size:.75rem">↳ {{ l.answer }}</span>
+            <br><span class="mut" style="font-size:.75rem"><i class="bi bi-arrow-return-right"></i> {{ l.answer }}</span>
           {% endif %}
         </td>
         <td>{{ selo(l) }}</td>
         <td class="mut">{{ l.tipo }}</td>
         <td class="mut">
-          {% if l.resposta == 'Blocked' %}<span style="color:#dc2626;font-weight:600">Blocked</span>{% else %}{{ l.resposta }}{% endif %}
+          {% if l.resposta == 'Blocked' %}<span class="blk">Blocked</span>{% else %}{{ l.resposta }}{% endif %}
           {% if l.rcode and l.rcode != 'NoError' %} · {{ l.rcode }}{% endif %}
         </td>
         <td style="white-space:nowrap">{{ desbloquear(l) }}</td>

@@ -39,7 +39,7 @@ def test_busca_mostra_onde_o_dominio_esta_liberado(tela):
     html = tela.c.get("/dominios-liberados?busca=Teams.Microsoft.com.").get_data(as_text=True)
     assert tela.buscas == ["teams.microsoft.com"]
     assert "em todas as listas de liberação: 2 domínio(s)" in html
-    assert "Produtividade e escritório" in html and "📋 Microsoft 365" in html
+    assert "Produtividade e escritório" in html and "bi-list-check\"></i>Microsoft 365</a>" in html
     assert "(domínio-pai: cobre teams.microsoft.com)" in html and "não publicado no DNS" in html
     assert "/dominios-liberados?wl=produtividade&amp;q=teams.microsoft.com" in html
 

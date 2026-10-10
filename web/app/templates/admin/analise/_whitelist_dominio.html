@@ -5,7 +5,7 @@
 <div id="whitelist" style="margin:.6rem 0 .4rem;padding-top:.5rem;border-top:1px dashed var(--bd)">
   <label style="margin:0">Whitelist de <code>{{ blq.nome }}</code></label>
   {% for w in wl_atual %}
-    <p style="margin:.3rem 0">✅ Na whitelist <a href="{{ url_for('admin.listas_liberacao', wl=w.category) }}"><b>{{ WL_ROT.get(w.category, w.category) }}</b></a>
+    <p style="margin:.3rem 0"><i class="bi bi-check-circle t-ok"></i> Na whitelist <a href="{{ url_for('admin.listas_liberacao', wl=w.category) }}"><b>{{ WL_ROT.get(w.category, w.category) }}</b></a>
       {% if w.pai %}<span class="mut">pelo domínio-pai <code>{{ w.domain }}</code></span>{% endif %}
       {% if not w.publicar %}<span class="mut" style="font-size:.8rem">(só organiza: não vai para o DNS)</span>{% endif %}</p>
   {% else %}
@@ -17,8 +17,8 @@
       {% if not cats %}<option value="" selected disabled>Escolha a whitelist…</option>{% endif %}
       {% for k, r in wls %}<option value="{{ k }}"{% if k in cats %} selected{% endif %}>{{ r }}</option>{% endfor %}
     </select>
-    <button type="button" id="bWl" style="padding:.3rem .7rem;background:#16a34a;color:#fff;border:0;border-radius:6px;cursor:pointer"
-            title="Sai de todas as listas de bloqueio e vale para todas as empresas: na hora onde estava bloqueado; a lista em até 2 min.">✅ Mover para a whitelist</button>
+    <button type="button" id="bWl" class="pos mini"
+            title="Sai de todas as listas de bloqueio e vale para todas as empresas: na hora onde estava bloqueado; a lista em até 2 min."><i class="bi bi-check-circle"></i>Mover para a whitelist</button>
     {% if cats %}<button type="button" id="bWlTirar" class="mini neu" title="Volta a valer o que as listas de bloqueio disserem.">tirar da whitelist</button>{% endif %}
   </form>
   <script>

@@ -1,0 +1,40 @@
+{# Padrão visual do 2D Hub (README do 2D-Portal, "Padrão visual"): cores, claro/escuro, logo e ícones vêm do Hub.
+   Vai no <head> antes de qualquer CSS da tela. O theme.js aplica html[data-theme] e põe na página os tokens
+   --twod-* e os Bootstrap Icons; aqui as variáveis do console só apontam para os tokens (o valor depois da
+   vírgula é a reserva para quando o Hub não responde). Sem paleta escura e sem botão de tema próprios. #}
+{% set kit = portal_kit_url|replace('launcher.js', '') if portal_kit_url else '' %}
+{% if kit %}<script src="{{ kit }}theme.js"></script>
+<link rel="icon" href="{{ kit }}favicon.ico">{% endif %}
+<script>window.TwodTema || document.documentElement.setAttribute('data-theme', 'light');   /* Hub fora: claro, com as cores de reserva */</script>
+<style>
+  :root{
+    /* marca */
+    --pri:var(--twod-primary,#2563eb);--pri-h:var(--twod-primary-hover,#2157cf);--pri-d:var(--twod-primary-dark,#1d4db7);
+    --on-pri:var(--twod-on-primary,#fff);--pri-bg:var(--twod-primary-soft,#e9effd);
+    --b:var(--twod-primary-text,#2563eb);--b2:var(--twod-primary-hover,#2157cf);--navy:var(--twod-text,#0f172a);
+    /* fundo, superfície, borda e texto */
+    --bg:var(--twod-bg,#f8fafc);--card:var(--twod-surface,#fff);--card2:var(--twod-surface-2,#f1f5f9);--card3:var(--twod-surface-3,#e2e8f0);
+    --bd:var(--twod-border,#e2e8f0);--bd2:var(--twod-border-strong,#cbd5e1);
+    --txt:var(--twod-text,#0f172a);--txt2:var(--twod-text-secondary,#475569);--mut:var(--twod-text-muted,#64748b);
+    /* estados: cor cheia, fundo suave (-bg) e texto (-tx) */
+    --ok:var(--twod-success,#10b981);--ok-bg:var(--twod-success-soft,#e2f7f0);--ok-tx:var(--twod-success-text,#0b825a);--on-ok:var(--twod-on-tertiary,#0f172a);
+    --av:var(--twod-warning,#d97706);--av-bg:var(--twod-warning-soft,#fef3c7);--av-tx:var(--twod-warning-text,#92400e);
+    --er:var(--twod-danger,#dc2626);--er-bg:var(--twod-danger-soft,#fee2e2);--er-tx:var(--twod-danger-text,#b91c1c);
+    --inf:var(--twod-info,#0891b2);--inf-bg:var(--twod-info-soft,#cffafe);--inf-tx:var(--twod-info-text,#0e7490);
+    /* forma */
+    --raio-sm:var(--twod-radius-sm,.375rem);--raio-md:var(--twod-radius-md,.5rem);--raio-lg:var(--twod-radius-lg,.75rem);--raio-xl:var(--twod-radius-xl,1rem);
+    --sh-sm:var(--twod-shadow-sm,0 1px 3px 0 rgb(0 0 0/.1),0 1px 2px -1px rgb(0 0 0/.1));
+    --sh-md:var(--twod-shadow-md,0 4px 6px -1px rgb(0 0 0/.1),0 2px 4px -2px rgb(0 0 0/.1));
+    --sh-lg:var(--twod-shadow-lg,0 10px 15px -3px rgb(0 0 0/.1),0 4px 6px -4px rgb(0 0 0/.1));
+    --fonte:var(--twod-font,'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif);
+    /* cabeçalho de tabela, como no ERP: faixa na cor da marca no claro, superfície no escuro */
+    --th-bg:var(--twod-primary-darker,#183f96);--th-tx:#fff;
+    /* classificação da IA: cores de categoria (não são da marca) — selo cheio com texto branco nos dois temas */
+    --c-trab:#16a34a;--c-ntrab:#d97706;--c-susp:#ea580c;--c-mal:#b91c1c;--c-desc:#64748b;--c-pend:#94a3b8;
+    --c-susp-tx:#c2410c;--c-susp-bg:#ffedd5;--c-vio:#7c3aed;--c-vio-tx:#6d28d9;--c-vio-bg:#f5f3ff;
+  }
+  html[data-theme="dark"]{--th-bg:var(--card3);--th-tx:var(--txt);
+    --c-susp-tx:#fb923c;--c-susp-bg:#43200b;--c-vio:#a78bfa;--c-vio-tx:#c4b5fd;--c-vio-bg:#2a2147}
+  /* logo do kit (a versão certa para o tema atual) */
+  .lg2d{display:block;background:var(--twod-logo{% if kit %},url("{{ kit }}logo.png"){% endif %}) center/contain no-repeat}
+</style>

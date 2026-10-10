@@ -43,7 +43,7 @@ def pagina(app, monkeypatch):
 
 def test_mostra_o_dossie_aplicado(pagina):
     html = pagina.c.get("/analise/dominio/sistema.eco.br?t=0").get_data(as_text=True)
-    assert "Investigação profunda" in html and "✓ aplicado" in html
+    assert "Investigação profunda" in html and "bi-check-lg\"></i> aplicado" in html
     assert "Ecocentauro (ERP)" in html and "wl:erp_gestao" in html and "6 certificado(s)" in html
     assert "Antes: DESCONHECIDO" in html and "gemma4:26b (GPU)" in html
     assert "Revisor: concordou" in html

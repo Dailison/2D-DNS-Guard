@@ -6,13 +6,12 @@
 {% set sem = tenants|selectattr('auto_created')|list %}
 <style>
   .emp td{vertical-align:middle}
-  .un{display:inline-flex;align-items:center;gap:.25rem;margin:0 .35rem .35rem 0;border:1px solid var(--bd);border-radius:8px;padding:.15rem .3rem .15rem .45rem;background:#f8fafc}
+  .un{display:inline-flex;align-items:center;gap:.25rem;margin:0 .35rem .35rem 0;border:1px solid var(--bd);border-radius:8px;padding:.15rem .3rem .15rem .45rem;background:var(--card2)}
   .un code{font-size:.8rem}
   .un input{width:95px;padding:.15rem .35rem;font-size:.8rem}
   .un button{padding:.1rem .35rem;font-size:.75rem}
   .mini{padding:.25rem .5rem;font-size:.8rem}
-  .lchip{display:inline-block;font-size:.72rem;padding:.05rem .45rem;border-radius:999px;background:#fee2e2;color:#7f1d1d;margin:0 .2rem .2rem 0;white-space:nowrap}
-  html[data-theme="dark"] .lchip{background:#4c1d1d;color:#fecaca}
+  .lchip{display:inline-block;font-size:.72rem;padding:.05rem .45rem;border-radius:999px;background:var(--er-bg);color:var(--er-tx);margin:0 .2rem .2rem 0;white-space:nowrap}
   #dlgPol .pcat{padding:.35rem 0;border-bottom:1px dashed var(--bd)}
   #dlgPol .psrv{display:flex;flex-wrap:wrap;gap:.3rem .8rem;margin:.25rem 0 0 1.6rem}
   #dlgPol .ps{display:inline-flex;align-items:center;gap:.3rem;font-size:.85rem}
@@ -20,8 +19,8 @@
 </style>
 
 {% if sem %}
-<div class="card" style="border-color:#fdba74">
-  <h2>⚠ Redes com tráfego e sem cadastro ({{ sem|length }})</h2>
+<div class="card" style="border-color:var(--av)">
+  <h2><i class="bi bi-exclamation-triangle t-av"></i> Redes com tráfego e sem cadastro ({{ sem|length }})</h2>
   <p class="mut" style="font-size:.85rem;margin-top:0">O analisador separou estes IPs numa "empresa automática" para não misturá-los com outra empresa. Atribua cada rede à empresa certa (os dados já coletados vão junto).</p>
   <table class="emp">
     <thead><tr><th>Rede</th><th class="num">PCs</th><th>Último acesso</th><th>Atribuir a</th></tr></thead>
@@ -42,7 +41,7 @@
           </form>
           <form method="post" action="{{ url_for('analise.empresa_editar', tid=t.id) }}" style="display:flex;gap:.3rem;margin-top:.3rem">
             <input type="text" name="nome" placeholder="…ou criar como nova empresa: nome" class="mini" style="width:260px">
-            <button class="btn mini">Criar</button>
+            <button class="btn mini"><i class="bi bi-plus-lg"></i>Criar</button>
           </form>
         </td>
       </tr>
@@ -63,7 +62,7 @@
         <td>
           <form method="post" action="{{ url_for('analise.empresa_editar', tid=t.id) }}" style="display:flex;gap:.3rem">
             <input type="text" name="nome" value="{{ t.name }}" class="mini">
-            <button class="btn mini">Salvar</button>
+            <button class="btn mini"><i class="bi bi-check-lg"></i>Salvar</button>
           </form>
         </td>
         <td>
@@ -72,18 +71,18 @@
               <form method="post" action="{{ url_for('analise.unidade_editar', nid=n.id) }}" style="display:inline-flex;gap:.2rem;align-items:center">
                 <input type="text" name="unidade" value="{{ n.unit }}" placeholder="unidade" title="nome da unidade">
                 <code>{{ n.cidr }}</code>
-                <button class="btn" title="salvar nome da unidade">✓</button>
+                <button class="btn mini" title="Salvar nome da unidade" aria-label="Salvar nome da unidade"><i class="bi bi-check-lg"></i></button>
               </form>
               <form method="post" action="{{ url_for('analise.unidade_rem', tid=t.id, nid=n.id) }}" style="display:inline"
                     onsubmit="return confirm('Remover {{ n.cidr }} de {{ t.name }}? Os IPs dessa rede passam a aparecer como sem cadastro.')">
-                <button class="danger" title="remover rede">✕</button>
+                <button class="danger mini" title="Remover rede" aria-label="Remover rede"><i class="bi bi-trash"></i></button>
               </form>
             </span>
           {% endfor %}
           <form method="post" action="{{ url_for('analise.unidade_add', tid=t.id) }}" style="display:flex;gap:.3rem;margin-top:.15rem">
             <input type="text" name="unidade" placeholder="unidade" class="mini" style="width:120px">
             <input type="text" name="cidr" placeholder="10.23.0.0/16" class="mini" style="width:140px" required>
-            <button class="btn mini">+ unidade</button>
+            <button class="btn mini"><i class="bi bi-plus-lg"></i>unidade</button>
           </form>
         </td>
         {% set p = pol.get(t.id) or {} %}
@@ -92,8 +91,8 @@
           {% else %}<span class="mut" style="font-size:.8rem">{{ 'nenhuma (não bloqueia nada)' if p.definida else 'padrão das redes sem cadastro' }}</span>{% endif %}
           {% set nomes_srv = {} %}
           {% for x in pacotes %}{% set _ = nomes_srv.update({x.slug: x.name}) %}{% endfor %}
-          {% if p.blocked %}<div style="font-size:.75rem;color:#b91c1c;margin-top:.15rem">bloqueia também: {% for s in p.blocked %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
-          {% if p.services %}<div style="font-size:.75rem;color:#16a34a;margin-top:.15rem">libera: {% for s in p.services %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+          {% if p.blocked %}<div class="t-er" style="font-size:.75rem;margin-top:.15rem">bloqueia também: {% for s in p.blocked %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+          {% if p.services %}<div class="t-ok" style="font-size:.75rem;margin-top:.15rem">libera: {% for s in p.services %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
           {% if p.unidades %}<div style="font-size:.75rem;color:var(--mut);margin-top:.15rem">exceção: {{ p.unidades.keys()|join(', ') }}</div>{% endif %}
           <div><button type="button" class="btn mini" style="margin-top:.25rem" data-pol='{{ {"tid": t.id, "nome": t.name, "unidades": t.networks|map(attribute="unit")|select|unique|list, "pol": p}|tojson }}' onclick="abrirPolitica(this)">Listas…</button></div>
         </td>
@@ -112,7 +111,7 @@
             </form>
             {% if not t.networks and not t.clients %}
             <form method="post" action="{{ url_for('analise.empresa_excluir', tid=t.id) }}" style="margin-top:.3rem"
-                  onsubmit="return confirm('Excluir {{ t.name }}?')"><button class="danger mini">Excluir</button></form>
+                  onsubmit="return confirm('Excluir {{ t.name }}?')"><button class="danger mini"><i class="bi bi-trash"></i>Excluir</button></form>
             {% endif %}
           </details>
         </td>
@@ -131,7 +130,7 @@
 Moral Auto Peças	PBS	10.57.0.0/16
 Moral Auto Peças	CAN	10.58.0.0/16"></textarea>
       <label class="chk"><input type="checkbox" name="substituir" value="1"> Substituir o cadastro: remover redes das empresas cadastradas que não estão na lista</label>
-      <button class="primary" style="margin-top:.4rem">Importar</button>
+      <button class="primary" style="margin-top:.4rem"><i class="bi bi-upload"></i>Importar</button>
     </form>
     <p class="hint">Formatos por linha: <code>Empresa ⇥ CIDR</code> ou <code>Empresa ⇥ Unidade ⇥ CIDR</code> (também aceita <code>;</code> ou <code>|</code>). Empresa com várias unidades = várias linhas com o mesmo nome de empresa. Reimportar é seguro: só cria/atualiza.</p>
   </div>
@@ -142,7 +141,7 @@ Moral Auto Peças	CAN	10.58.0.0/16"></textarea>
       <label>Unidades (uma por linha: <code>CIDR</code> ou <code>Unidade CIDR</code>)</label>
       <textarea name="redes" rows="4" style="width:100%;font-family:monospace;font-size:.85rem" placeholder="I 10.51.0.0/16
 II 10.52.0.0/16"></textarea>
-      <button class="primary" style="margin-top:.4rem">Criar</button>
+      <button class="primary" style="margin-top:.4rem"><i class="bi bi-plus-lg"></i>Criar</button>
     </form>
   </div>
 </div>
@@ -163,10 +162,10 @@ II 10.52.0.0/16"></textarea>
     {% endif %}
   </div>
   <div class="previa" id="pPrev" hidden></div>
-  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem">⚡ = listas de risco. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 2 min; as exceções, na hora.</p>
+  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem"><i class="bi bi-lightning-charge-fill t-av"></i> = listas de risco. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 2 min; as exceções, na hora.</p>
   <div style="display:flex;gap:.5rem;justify-content:flex-end">
-    <button type="button" onclick="document.getElementById('dlgPol').close()">Cancelar</button>
-    <button type="button" class="primary" id="pSalvar">Salvar e aplicar</button>
+    <button type="button" onclick="document.getElementById('dlgPol').close()"><i class="bi bi-x-lg"></i>Cancelar</button>
+    <button type="button" class="primary" id="pSalvar"><i class="bi bi-check-lg"></i>Salvar e aplicar</button>
   </div>
 </dialog>
 <script>
@@ -199,7 +198,7 @@ II 10.52.0.0/16"></textarea>
   dlg.querySelectorAll(".pLista").forEach(i => i.addEventListener("change", () => {
     const u = esc.value, pol = u && (atual.pol.unidades || {})[u] ? atual.pol.unidades[u] : atual.pol;
     if (i.checked && !(pol.lists || []).includes(i.value))   // lista nova p/ a empresa: o que passaria a bloquear
-      previaImpacto(document.getElementById("pPrev"), atual.tid, i.value, i.closest("label").textContent.replace("⚡", "").replace("sugerida", "").trim());
+      previaImpacto(document.getElementById("pPrev"), atual.tid, i.value, i.closest("label").textContent.replace("sugerida", "").trim());
   }));
   herdar.addEventListener("change", () => { document.getElementById("pCampos").style.opacity = herdar.checked ? .45 : 1; if (herdar.checked) marca(atual.pol); });
   document.getElementById("pSalvar").addEventListener("click", async (ev) => {

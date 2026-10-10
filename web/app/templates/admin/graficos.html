@@ -2,17 +2,18 @@
 {% block title %}Gráficos{% endblock %}
 {% block content %}
 <style>
-  /* papéis de cor dos gráficos (paleta validada: CVD e contraste nos dois temas) */
-  .viz{--s-lib:#2a78d6;--s-blk:#eb6834;--grid:#eef0f3;--axis:#d1d5db;--ink:var(--txt);--ink2:#4b5563;--surf:#fff}
-  html[data-theme="dark"] .viz{--s-lib:#3987e5;--s-blk:#d95926;--grid:#2b3a50;--axis:#475569;--ink2:#cbd5e1;--surf:#1e293b}
+  /* papéis de cor dos gráficos: as duas séries têm paleta própria (validada: CVD e contraste nos dois temas);
+     grade, eixo, texto e superfície vêm dos tokens do 2D Hub */
+  .viz{--s-lib:#2a78d6;--s-blk:#eb6834;--grid:color-mix(in srgb,var(--bd) 60%,transparent);--axis:var(--bd2);--ink:var(--txt);--ink2:var(--txt2);--surf:var(--card)}
+  html[data-theme="dark"] .viz{--s-lib:#3987e5;--s-blk:#d95926}
   .viz .fil{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
   .viz .fil>div{min-width:130px;flex:1}
   .viz .fil label{display:block;font-size:.78rem;color:var(--mut);margin-bottom:.2rem}
   .viz .per{display:flex;gap:.25rem;flex-wrap:wrap}
-  .viz .per a{font-size:.82rem;padding:.35rem .6rem;border:1px solid var(--bd);border-radius:8px;text-decoration:none;color:var(--ink2)}
-  .viz .per a.on{border-color:var(--b);color:var(--b);font-weight:700}
+  .viz .per a{font-size:.82rem;padding:.35rem .6rem;border:1px solid var(--bd);border-radius:var(--raio-md);text-decoration:none;color:var(--ink2)}
+  .viz .per a.on{border-color:var(--pri);background:var(--pri-bg);color:var(--b);font-weight:600}
   .viz .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;margin-bottom:1rem}
-  .viz .kpi{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:.8rem 1rem}
+  .viz .kpi{background:var(--card);border:1px solid var(--bd);border-radius:var(--raio-lg);box-shadow:var(--sh-sm);padding:.8rem 1rem}
   .viz .kpi .l{font-size:.8rem;color:var(--mut)}
   .viz .kpi .v{font-size:1.6rem;font-weight:650;margin-top:.15rem;color:var(--ink)}
   .viz .kpi .s{font-size:.78rem;color:var(--mut)}
@@ -34,7 +35,7 @@
   .viz details{margin-top:.6rem;font-size:.85rem}.viz summary{cursor:pointer;color:var(--mut)}
   .viz details table td,.viz details table th{padding:.3rem .5rem}
   .viz .tt{position:fixed;z-index:50;pointer-events:none;background:var(--card);border:1px solid var(--bd);border-radius:8px;
-           padding:.45rem .6rem;font-size:.8rem;box-shadow:0 6px 20px rgba(0,0,0,.18);display:none;min-width:150px;color:var(--ink)}
+           padding:.45rem .6rem;font-size:.8rem;box-shadow:var(--sh-lg);display:none;min-width:150px;color:var(--ink)}
   .viz .tt .h{color:var(--mut);margin-bottom:.2rem}
   .viz .tt .r{display:flex;align-items:center;gap:.4rem;justify-content:space-between}
   .viz .tt .r span.k{display:inline-block;width:12px;height:2px;border-radius:1px;margin-right:.3rem;vertical-align:3px}
@@ -43,7 +44,8 @@
   .viz .vazio{color:var(--mut);font-size:.9rem;padding:.6rem 0}
 </style>
 <div class="viz">
-<h1>Gráficos <span class="mut" style="font-size:.8rem">· consultas DNS liberadas e bloqueadas{% if coletado_ate %} · coletado até {{ coletado_ate[11:16] }} (~5-7 min de atraso){% endif %}</span></h1>
+<div class="pg-h"><h1 title="Consultas DNS liberadas e bloqueadas"><i class="bi bi-bar-chart"></i>Gráficos</h1>
+  {% if coletado_ate %}<div class="pg-a"><span class="selo" title="os dados chegam com ~5-7 min de atraso"><i class="bi bi-clock-history"></i>coletado até {{ coletado_ate[11:16] }}</span></div>{% endif %}</div>
 
 <div class="card">
   <form method="get" class="fil">
@@ -71,7 +73,7 @@
       <select name="cls">{% for v, rot in cls_filtros %}<option value="{{ v }}" {{ 'selected' if cls_f == v }}>{{ rot }}</option>{% endfor %}</select></div>
     <div><label>Resposta</label>
       <select name="resposta">{% for v, rot in respostas %}<option value="{{ v }}" {{ 'selected' if resposta == v }}>{{ rot }}</option>{% endfor %}</select></div>
-    <div style="flex:0 0 auto"><button class="primary">Filtrar</button></div>
+    <div style="flex:0 0 auto"><button class="primary"><i class="bi bi-funnel"></i>Filtrar</button></div>
   </form>
 </div>
 

@@ -26,4 +26,4 @@ def test_titulo_mostra_o_contador(app):
         h1 = render_template_string(
             "{% set resumo = {'categorias': [{'categoria': 'jogos', 'total': 2}]} %}{% set total_bloqueados = 1234 %}"
             + open("app/templates/admin/listas_categoria.html", encoding="utf-8").read().split("<h1>")[1].split("</h1>")[0])
-    assert "Domínios bloqueados" in h1 and "· 1234 domínio(s)" in h1 and "domínios distintos" in h1
+    assert "Domínios bloqueados" in h1 and ">1234 domínio(s)</span>" in h1 and "domínios distintos" in h1

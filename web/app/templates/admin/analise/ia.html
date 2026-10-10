@@ -1,41 +1,29 @@
 {% extends "admin/analise/_base.html" %}
 {% block an %}
 <style>
-  /* IA ao vivo: dashboard compacto (Alpine.js + Motion, arquivos em static/vendor), claro por padrão e escuro
-     com o tema do 2D Hub (html[data-theme="dark"]). No desktop a página cabe na janela: as duas etapas dividem
-     a altura e cada tabela rola por dentro. */
+  /* IA ao vivo: dashboard compacto (Alpine.js + Motion, arquivos em static/vendor). Cores pelos tokens do 2D Hub
+     (_tema.html): estados = success/warning/danger/info; as de categoria (violeta da IA online, laranja de suspeito,
+     magenta de reanálise pedida) são próprias e têm versão para o escuro. No desktop a página cabe na janela:
+     as duas etapas dividem a altura e cada tabela rola por dentro. */
   main footer{display:none}
   [x-cloak]{display:none!important}
 
-  .iav{--ac:#0f72bc;--vi:#7c3aed;--ok:#16a34a;--am:#d97706;--or:#ea580c;--rd:#dc2626;--sl:#64748b;
-       --card:#fff;--ln:#e3e8ef;--ln2:#eef1f5;--tx:#0f172a;--tx2:#334155;--mu:#64748b;--th:#f8fafc;--hov:#f5f8fc;--dom:#0b5c9e;
-       --soft:#f1f5f9;--chip:#fff;--kp:#0f172a;--sombra:0 1px 2px rgba(15,23,42,.05),0 6px 20px rgba(15,23,42,.06);
-       --tag-on:#6d28d9;--tag-on-bg:#f5f3ff;--tag-on-bd:#ddd6fe;
-       --r-hi:#991b1b;--r-hi-bg:#fee2e2;--r-md:#92400e;--r-md-bg:#fef3c7;--r-lo:#166534;--r-lo-bg:#dcfce7;
-       --c-hi:#1e40af;--c-hi-bg:#dbeafe;--c-md:#0369a1;--c-md-bg:#e0f2fe;
-       --d-bl:#991b1b;--d-bl-bg:#fee2e2;--d-wl:#166534;--d-wl-bg:#dcfce7;--d-on:#5b21b6;--d-on-bg:#ede9fe;--d-hm:#92400e;--d-hm-bg:#ffedd5;
-       --e-novo:#0e7490;--e-novo-bg:#ecfeff;--e-novo-bd:#a5f3fc;--e-rea:#92400e;--e-rea-bg:#fffbeb;--e-rea-bd:#fde68a;
+  .iav{--ac:var(--b);--vi:var(--c-vio);--vd:var(--c-trab);--am:var(--av);--or:var(--c-susp);--rd:var(--er);--sl:var(--c-desc);
+       --ln:var(--bd);--ln2:color-mix(in srgb,var(--bd) 65%,transparent);--tx:var(--txt);--tx2:var(--txt2);--mu:var(--mut);--th:var(--card2);
+       --hov:color-mix(in srgb,var(--card2) 60%,transparent);--dom:var(--b);--soft:var(--card2);--chip:var(--card);--kp:var(--txt);--sombra:var(--sh-sm);
+       --tag-on:var(--c-vio-tx);--tag-on-bg:var(--c-vio-bg);--tag-on-bd:color-mix(in srgb,var(--c-vio) 40%,transparent);
+       --r-hi:var(--er-tx);--r-hi-bg:var(--er-bg);--r-md:var(--av-tx);--r-md-bg:var(--av-bg);--r-lo:var(--ok-tx);--r-lo-bg:var(--ok-bg);
+       --c-hi:var(--b);--c-hi-bg:var(--pri-bg);--c-md:var(--inf-tx);--c-md-bg:var(--inf-bg);
+       --d-bl:var(--er-tx);--d-bl-bg:var(--er-bg);--d-wl:var(--ok-tx);--d-wl-bg:var(--ok-bg);--d-on:var(--c-vio-tx);--d-on-bg:var(--c-vio-bg);
+       --d-hm:var(--av-tx);--d-hm-bg:var(--av-bg);
+       --e-novo:var(--inf-tx);--e-novo-bg:var(--inf-bg);--e-novo-bd:color-mix(in srgb,var(--inf) 40%,transparent);
+       --e-rea:var(--av-tx);--e-rea-bg:var(--av-bg);--e-rea-bd:color-mix(in srgb,var(--av) 40%,transparent);
        --e-ped:#a21caf;--e-ped-bg:#fdf4ff;--e-ped-bd:#f5d0fe;
-       --p-ok:#15803d;--p-am:#b45309;--p-or:#c2410c;--p-rd:#b91c1c;--p-sl:#475569;
-       color:var(--tx);display:flex;flex-direction:column;gap:10px;color-scheme:light}
-  html[data-theme="dark"] body{background:#070b14}
-  html[data-theme="dark"] .an-top h1{color:#e6edf7}
-  html[data-theme="dark"] .an-tabs{border-bottom-color:#1a2438}
-  html[data-theme="dark"] .an-tabs a.on,html[data-theme="dark"] .an-tabs a:hover{color:#fff}
-  html[data-theme="dark"] .iav{--ac:#4aa8e8;--vi:#a78bfa;--ok:#22c55e;--am:#f59e0b;--or:#fb923c;--rd:#ef4444;--sl:#94a3b8;
-       --card:linear-gradient(180deg,rgba(24,34,56,.78),rgba(12,18,32,.78));--ln:rgba(148,163,184,.13);--ln2:rgba(148,163,184,.1);
-       --tx:#e6edf7;--tx2:#c3cde0;--mu:#8b97ad;--th:#0f1729;--hov:rgba(255,255,255,.035);--dom:#b5d8f7;--soft:rgba(255,255,255,.06);
-       --chip:rgba(10,16,30,.9);--kp:#fff;--sombra:inset 0 1px 0 rgba(255,255,255,.04),0 8px 24px rgba(0,0,0,.22);
-       --tag-on:#c4b5fd;--tag-on-bg:rgba(167,139,250,.1);--tag-on-bd:rgba(167,139,250,.4);
-       --r-hi:#fca5a5;--r-hi-bg:rgba(239,68,68,.16);--r-md:#fcd34d;--r-md-bg:rgba(245,158,11,.14);--r-lo:#86efac;--r-lo-bg:rgba(34,197,94,.12);
-       --c-hi:#93c5fd;--c-hi-bg:rgba(59,130,246,.2);--c-md:#7dd3fc;--c-md-bg:rgba(14,165,233,.13);
-       --d-bl:#fca5a5;--d-bl-bg:rgba(239,68,68,.15);--d-wl:#86efac;--d-wl-bg:rgba(34,197,94,.13);--d-on:#c4b5fd;--d-on-bg:rgba(167,139,250,.16);
-       --d-hm:#fcd34d;--d-hm-bg:rgba(245,158,11,.14);
-       --e-novo:#67e8f9;--e-novo-bg:rgba(103,232,249,.1);--e-novo-bd:rgba(103,232,249,.4);--e-rea:#fcd34d;--e-rea-bg:rgba(252,211,77,.08);
-       --e-rea-bd:rgba(252,211,77,.35);--e-ped:#f0abfc;--e-ped-bg:rgba(240,171,252,.1);--e-ped-bd:rgba(240,171,252,.4);
-       --p-ok:#22c55e;--p-am:#f59e0b;--p-or:#fb923c;--p-rd:#ef4444;--p-sl:#94a3b8;color-scheme:dark}
+       --p-ok:var(--ok-tx);--p-am:var(--av-tx);--p-or:var(--c-susp-tx);--p-rd:var(--er-tx);--p-sl:var(--txt2);
+       color:var(--tx);display:flex;flex-direction:column;gap:10px}
+  html[data-theme="dark"] .iav{--e-ped:#f0abfc;--e-ped-bg:rgba(240,171,252,.1);--e-ped-bd:rgba(240,171,252,.4)}
   .iav *{scrollbar-color:color-mix(in srgb,var(--mu) 40%,transparent) transparent}
-  .glass{background:var(--card);border:1px solid var(--ln);border-radius:14px;box-shadow:var(--sombra)}
+  .glass{background:var(--card);border:1px solid var(--ln);border-radius:var(--raio-lg);box-shadow:var(--sombra)}
   .iav small{color:var(--mu)}
   @media (min-width:900px) and (min-height:620px){
     .iav{height:calc(100vh - var(--topo, 220px) - 12px)}
@@ -48,8 +36,8 @@
   .topo .st{display:flex;align-items:center;gap:9px;white-space:nowrap}
   .topo .st b{font-size:.88rem}
   .pulse{width:9px;height:9px;border-radius:50%;background:var(--sl);position:relative;flex:0 0 auto}
-  .pulse.ok{background:var(--ok)}.pulse.x{background:var(--rd)}
-  .pulse.ok::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--ok);animation:ping 1.8s ease-out infinite}
+  .pulse.ok{background:var(--vd)}.pulse.x{background:var(--rd)}
+  .pulse.ok::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--vd);animation:ping 1.8s ease-out infinite}
   @keyframes ping{from{transform:scale(.6);opacity:.9}to{transform:scale(1.8);opacity:0}}
   .tag{font-size:.68rem;font-weight:700;padding:2px 9px;border-radius:999px;border:1px solid}
   .tag.on{color:var(--tag-on);border-color:var(--tag-on-bd);background:var(--tag-on-bg)}
@@ -58,17 +46,17 @@
   .kp b{font-size:1.15rem;font-weight:800;font-variant-numeric:tabular-nums;color:var(--kp)}
   .kp span{font-size:.76rem;color:var(--tx2)}
   .topo .sp{flex:1}
-  .iav .ghost,html[data-theme="dark"] .iav .ghost:not(.primary):not(.danger){font:inherit;font-size:.76rem;font-weight:600;color:var(--tx);
+  .iav .ghost{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:.76rem;font-weight:600;color:var(--tx);
               background:var(--soft);border:1px solid var(--ln);border-radius:999px;padding:4px 12px;cursor:pointer}
   .iav .ghost:hover{border-color:var(--ac)}
-  .iav .ghost.off,html[data-theme="dark"] .iav .ghost.off:not(.primary):not(.danger){color:var(--r-md);border-color:var(--am);background:var(--r-md-bg)}
+  .iav .ghost.off{color:var(--r-md);border-color:var(--am);background:var(--r-md-bg)}
 
   /* etapa: cabeçalho ("analisando agora" à esquerda, título à direita) */
   .etapa{overflow:hidden}
   .eh{display:flex;align-items:center;gap:8px 14px;padding:8px 12px;border-bottom:1px solid var(--ln);flex:0 0 auto;min-height:56px}
-  .eh .ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.95rem;
+  .eh .ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.95rem;color:var(--ac);
            background:color-mix(in srgb,var(--ac) 14%,transparent);border:1px solid color-mix(in srgb,var(--ac) 30%,transparent);flex:0 0 auto}
-  .etapa.e2 .eh .ico{background:color-mix(in srgb,var(--vi) 14%,transparent);border-color:color-mix(in srgb,var(--vi) 32%,transparent)}
+  .etapa.e2 .eh .ico{color:var(--vi);background:color-mix(in srgb,var(--vi) 14%,transparent);border-color:color-mix(in srgb,var(--vi) 32%,transparent)}
   .iav .eh h2{margin:0;font-size:.95rem;color:var(--tx);display:flex;align-items:center;gap:7px;white-space:nowrap}
   .cnt{font-size:.68rem;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--soft);color:var(--tx2)}
 
@@ -105,7 +93,7 @@
   .wrap{max-height:40vh;overflow:auto}
   .iav .tb{width:100%;border-collapse:separate;border-spacing:0;font-size:.95rem}
   .iav .tb th{position:sticky;top:0;z-index:1;background:var(--th);text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;
-              color:var(--mu);font-weight:700;padding:8px 14px;border-bottom:1px solid var(--ln);white-space:nowrap}
+              color:var(--mu);font-weight:700;padding:8px 14px;border-bottom:1px solid var(--ln);white-space:nowrap;border-radius:0}
   .iav .tb td{padding:11px 14px;border-bottom:1px solid var(--ln2);vertical-align:middle;color:var(--tx);white-space:nowrap}
   .tb tbody tr{cursor:pointer}
   .tb tbody tr:hover td{background:var(--hov)}
@@ -127,7 +115,7 @@
   .pill{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;
         color:var(--ct);background:color-mix(in srgb,var(--c) 12%,transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent)}
   .pill::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--c)}
-  .pill.TRABALHO{--c:var(--ok);--ct:var(--p-ok)}.pill.NAO_TRABALHO{--c:var(--am);--ct:var(--p-am)}.pill.SUSPEITO{--c:var(--or);--ct:var(--p-or)}
+  .pill.TRABALHO{--c:var(--vd);--ct:var(--p-ok)}.pill.NAO_TRABALHO{--c:var(--am);--ct:var(--p-am)}.pill.SUSPEITO{--c:var(--or);--ct:var(--p-or)}
   .pill.MALICIOSO{--c:var(--rd);--ct:var(--p-rd)}.pill.DESCONHECIDO,.pill.PENDENTE{--c:var(--sl);--ct:var(--p-sl)}
   .num{display:inline-block;min-width:3.3rem;text-align:center;font-weight:700;font-size:.84rem;font-variant-numeric:tabular-nums;padding:3px 8px;border-radius:7px;
        color:var(--tx2);background:var(--soft)}
@@ -137,18 +125,16 @@
        text-overflow:ellipsis;vertical-align:middle;color:var(--tx2);background:var(--soft)}
   .dst.bl{color:var(--d-bl);background:var(--d-bl-bg)}.dst.wl{color:var(--d-wl);background:var(--d-wl-bg)}
   .dst.on{color:var(--d-on);background:var(--d-on-bg)}.dst.hm{color:var(--d-hm);background:var(--d-hm-bg)}
-  .dst.ok::after{content:" ✓"}
+  .dst i.bi,.tb .ds .dst i.bi{font-size:inherit;color:inherit;margin:0 5px 0 0;vertical-align:-1px}
+  .dst i.bi.ap,.tb .ds .dst i.bi.ap{margin:0 0 0 5px}
 
   /* detalhe */
-  .mdl{position:fixed;inset:0;z-index:70;background:rgba(15,23,42,.45);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px}
-  html[data-theme="dark"] .mdl{background:rgba(3,6,12,.7)}
-  .mdl .cx{width:100%;max-width:680px;max-height:86vh;overflow:auto;background:#fff;border:1px solid var(--ln);border-radius:18px;color:var(--tx);
-           box-shadow:0 30px 80px rgba(15,23,42,.25)}
-  html[data-theme="dark"] .mdl .cx{background:#0e1628;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  .mdl{position:fixed;inset:0;z-index:70;background:rgba(15,23,42,.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px}
+  .mdl .cx{width:100%;max-width:680px;max-height:86vh;overflow:auto;background:var(--card);border:1px solid var(--ln);border-radius:var(--raio-xl);color:var(--tx);
+           box-shadow:var(--sh-lg)}
   .mdl .hd{display:flex;gap:12px;align-items:flex-start;padding:16px 18px;border-bottom:1px solid var(--ln)}
   .mdl h3{margin:0;font-size:1.1rem;word-break:break-all;color:var(--tx)}
-  .iav .mdl .x,html[data-theme="dark"] .iav .mdl .x:not(.primary):not(.danger){margin-left:auto;background:none;border:0;color:var(--mu);
-                                                                             font-size:1.5rem;line-height:1;cursor:pointer;padding:0 4px}
+  .iav .mdl .x{margin-left:auto;background:none;border:0;color:var(--mu);font-size:1.1rem;line-height:1;cursor:pointer;padding:4px}
   .mdl .bd{padding:16px 18px}
   .mdl .gr{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px}
   .mdl .gr div{background:var(--soft);border:1px solid var(--ln);border-radius:12px;padding:8px 10px;font-weight:600;font-size:.9rem}
@@ -156,8 +142,9 @@
   .mdl .lb{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--mu)}
   .mdl .tx{font-size:.86rem;white-space:pre-wrap;background:var(--soft);border:1px solid var(--ln);border-radius:12px;padding:10px 12px;margin:5px 0 12px;color:var(--tx2)}
   .mdl .ft{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-top:1px solid var(--ln)}
-  .mdl .ft a{font-size:.82rem;font-weight:700;color:#fff;background:var(--ac);border-radius:999px;padding:7px 14px;text-decoration:none}
-  html[data-theme="dark"] .mdl .ft a{color:#0b1220;background:#e6edf7}
+  .mdl .ft a{display:inline-flex;align-items:center;gap:6px;font-size:.82rem;font-weight:600;color:var(--on-pri);background:var(--pri);
+             border-radius:var(--raio-lg);padding:7px 14px;text-decoration:none}
+  .mdl .ft a:hover{background:var(--pri-h)}
 
   @media (max-width:1100px){.tb .h{display:none}.kp{padding-left:10px}}
   @media (max-width:640px){
@@ -173,7 +160,6 @@
   /* menu do Pausar */
   .pz{position:relative}
   .pz-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:230px;padding:6px;display:flex;flex-direction:column;gap:2px}
-  html[data-theme="dark"] .pz-menu{background:#0c1322}
   .pz-menu button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;font:inherit;font-size:.82rem;color:var(--tx);
                   background:none;border:0;border-radius:8px;padding:7px 9px;cursor:pointer}
   .pz-menu button:hover:not(:disabled){background:var(--hov)}
@@ -186,8 +172,7 @@
   .pz-err{margin:4px 8px;color:var(--rd);font-size:.78rem}
 
   /* modal da fila */
-  dialog.dlg.fila{max-width:780px;padding:0;background:var(--th);color:var(--tx);border:1px solid var(--ln);display:none;flex-direction:column}
-  html[data-theme="dark"] dialog.dlg.fila{background:#0c1322}
+  dialog.dlg.fila{max-width:780px;padding:0;background:var(--card);color:var(--tx);border:1px solid var(--ln);display:none;flex-direction:column}
   dialog.dlg.fila[open]{display:flex;max-height:min(82vh,760px)}
   .fila .fh{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
   .fila .fh h3{margin:0;font-size:1rem;flex:1}
@@ -199,9 +184,8 @@
   .fila .ftabs button.on b{color:var(--ac)}
   .fila .fwrap{overflow:auto;padding:4px 16px 14px;min-height:120px}
   .fila .ftb{width:100%;border-collapse:collapse;font-size:.84rem}
-  .fila .ftb th{position:sticky;top:0;background:var(--th);text-align:left;font-size:.72rem;font-weight:700;color:var(--mu);
+  .fila .ftb th{position:sticky;top:0;background:var(--card);text-align:left;font-size:.72rem;font-weight:700;color:var(--mu);border-radius:0;
                 text-transform:uppercase;letter-spacing:.04em;padding:8px 8px 6px;border-bottom:1px solid var(--ln)}
-  html[data-theme="dark"] .fila .ftb th{background:#0c1322}
   .fila .ftb td{padding:6px 8px;border-bottom:1px solid var(--ln2);vertical-align:middle}
   .fila .ftb .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx2)}
   .fila .ftb td.dm{max-width:22rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -228,11 +212,11 @@
     </template>
     <span class="sp"></span>
     <small x-text="upd"></small>
-    <button type="button" class="ghost" @click="abrirFila()">☰ Fila</button>
+    <button type="button" class="ghost" @click="abrirFila()"><i class="bi bi-list-ul"></i>Fila</button>
     <div class="pz" @click.outside="pz.aberto = false" @keydown.escape="pz.aberto = false">
       <button type="button" class="ghost" :class="{off: pausados().length}" @click="pz.aberto = !pz.aberto"
-              :aria-expanded="pz.aberto" aria-haspopup="menu"
-              x-text="pausados().length ? '⏸ Pausado: ' + pausados().join(', ') : '⏸ Pausar'"></button>
+              :aria-expanded="pz.aberto" aria-haspopup="menu"><i class="bi bi-pause-fill"></i><span
+              x-text="pausados().length ? 'Pausado: ' + pausados().join(', ') : 'Pausar'"></span></button>
       <div class="pz-menu glass" role="menu" x-show="pz.aberto" x-transition.opacity>
         <template x-for="k in PAUSAS" :key="k.k">
           <button type="button" role="menuitemcheckbox" :aria-checked="!!(ctrl[k.k] && ctrl[k.k].pausado)"
@@ -256,8 +240,8 @@
     <div class="fh">
       <h3>Fila</h3>
       <small x-text="fila.upd"></small>
-      <button type="button" class="ghost" @click="carregaFila()" :disabled="fila.carregando" title="Atualizar">↻</button>
-      <button type="button" class="ghost" @click="$refs.fila.close()" aria-label="Fechar">✕</button>
+      <button type="button" class="ghost" @click="carregaFila()" :disabled="fila.carregando" title="Atualizar" aria-label="Atualizar"><i class="bi bi-arrow-clockwise"></i></button>
+      <button type="button" class="ghost" @click="$refs.fila.close()" title="Fechar" aria-label="Fechar"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="ftabs" role="tablist">
       <template x-for="t in FILAS" :key="t.k">
@@ -292,11 +276,11 @@
     </template>
   </dialog>
 
-  {% for et, ico, tit, dsc in [("e1", "🧠", "Etapa 1 · IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
-                               ("e2", "🌐", "Etapa 2 · IA online", "o que a IA local não decidiu com confiança")] %}
+  {% for et, ico, tit, dsc in [("e1", "cpu", "Etapa 1 · IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
+                               ("e2", "globe2", "Etapa 2 · IA online", "o que a IA local não decidiu com confiança")] %}
   <section class="etapa glass {{ et }}" data-et="{{ et }}">
     <div class="eh">
-      <span class="ico">{{ ico }}</span>
+      <span class="ico"><i class="bi bi-{{ ico }}"></i></span>
       <h2 title="{{ dsc }}">{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2>
       {% if et == "e2" %}<span class="fq" x-show="onlineFila !== null" title="domínios esperando a IA online"><b x-text="onlineFila"></b> na fila</span>
       <span class="tag" :class="onlineOn && !onlineEspera ? 'on' : 'off'" x-show="onlineOn !== null"
@@ -315,7 +299,7 @@
                 <span class="pill" :class="c.res.clsK" x-text="c.res.clsL"></span>
                 {% if et == "e1" %}<span class="num" :class="c.res.rk" x-text="'risco ' + c.res.risco"></span>{% endif %}
                 <span class="num" :class="c.res.ck" x-text="c.res.conf"></span>
-                <span class="dst" :class="c.res.dk" x-text="c.res.dst"></span>
+                <span class="dst" :class="c.res.dk"><i class="bi" :class="DIC[c.res.dk]" x-show="DIC[c.res.dk]"></i><span x-text="c.res.dst"></span></span>
                 <span class="t" x-show="c.res.tempo" x-text="c.res.tempo"></span>
               </span>
             </template>
@@ -336,7 +320,7 @@
             <td class="rk"><span class="num" :class="fr(r.risco)" x-text="r.risco != null ? r.risco : '—'"></span></td>
             <td><span class="num" :class="fc(r.conf)" x-text="r.conf != null ? r.conf + '%' : '—'"></span></td>
             <td class="tp" x-text="r.seg != null ? dur(r.seg) : '—'" title="tempo que a IA levou nesta análise"></td>
-            <td class="ds"><span class="dst" :class="dst(r)[1] + (r.aplicado ? ' ok' : '')" x-text="dst(r)[0]" :title="r.proximo || ''"></span><i x-text="r.veredito || dst(r)[2]" :title="r.veredito || dst(r)[2]"></i></td>
+            <td class="ds"><span class="dst" :class="dst(r)[1]" :title="r.proximo || ''"><i class="bi" :class="DIC[dst(r)[1]]" x-show="DIC[dst(r)[1]]"></i><span x-text="dst(r)[0]"></span><i class="bi bi-check-lg ap" x-show="r.aplicado" title="aplicado"></i></span><i x-text="r.veredito || dst(r)[2]" :title="r.veredito || dst(r)[2]"></i></td>
           </tr>
         </template>
         <tr class="vz" x-show="!visiveis('{{ et }}').length"><td colspan="7" x-text="carregado ? 'Sem atividade ainda.' : 'Carregando…'"></td></tr>
@@ -349,7 +333,7 @@
     <template x-if="sel">
       <div class="cx">
         <div class="hd"><div><h3><a :href="urlSite(sel.name)" target="_blank" rel="noopener noreferrer" :title="'abrir ' + sel.name + ' em nova aba'" x-text="sel.name"></a></h3><small x-text="sel.servico || ''"></small></div>
-          <button type="button" class="x" @click="sel = null" aria-label="Fechar">×</button></div>
+          <button type="button" class="x" @click="sel = null" title="Fechar" aria-label="Fechar"><i class="bi bi-x-lg"></i></button></div>
         <div class="bd">
           <div class="gr">
             <div><small>Classificação</small><span x-text="LBL[sel.cls] || sel.cls || '—'"></span></div>
@@ -363,7 +347,7 @@
             <div><div class="lb" x-text="b[0]"></div><div class="tx" x-text="b[1]"></div></div>
           </template>
         </div>
-        <div class="ft"><small x-text="(sel.modelo ? sel.modelo + ' · ' : '') + hora(sel.at)"></small><a :href="urlDom(sel.name)">Abrir domínio</a></div>
+        <div class="ft"><small x-text="(sel.modelo ? sel.modelo + ' · ' : '') + hora(sel.at)"></small><a :href="urlDom(sel.name)"><i class="bi bi-eye"></i>Abrir domínio</a></div>
       </div>
     </template>
   </div>
@@ -382,6 +366,8 @@ document.addEventListener('alpine:init', function () {
                investigacao_start: 1, investigacao_done: 1};   // fase 6 (investigação profunda) usa a IA local
   var INICIO = {llm_start: 1, whois_start: 1, search_start: 1, investigacao_start: 1};
   var DEC = {lista_add: 1, aprovado: 1};
+  // destino: bloqueio, liberação, segue para a IA online
+  var DIC = {bl: 'bi-slash-circle', wl: 'bi-check-circle', on: 'bi-arrow-right-circle'};
   var COR = {TRABALHO: '#22c55e', NAO_TRABALHO: '#f59e0b', SUSPEITO: '#fb923c', MALICIOSO: '#ef4444', DESCONHECIDO: '#94a3b8'};
   var MAX = 150, SEGURA = 3200;   // linhas por etapa; ms que o resultado fica no cartão antes de ir p/ a tabela
   var calmo = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -461,7 +447,7 @@ document.addEventListener('alpine:init', function () {
              lista: 'Lista', verificacao: 'Verificação',
              infra: 'Infraestrutura', decisoes: 'Decisões', duvida: 'Dúvida de lista'},
       fila: {aberta: false, aba: 'e1', d: {}, upd: '', erro: '', carregando: false},
-      SUPER: SUPER, ctrl: {}, pz: {aberto: false, enviando: false, erro: ''},
+      SUPER: SUPER, DIC: DIC, ctrl: {}, pz: {aberto: false, enviando: false, erro: ''},
       PAUSAS: [{k: 'local', l: 'Fila local', c: 'local', dica: 'IA local: fase 1, WHOIS, busca na web, listas e investigação (as regras seguem)'},
                {k: 'online', l: 'Fila online', c: 'online', dica: 'IA online (fase 4)'},
                {k: 'reforco', l: 'Reforço (GPU)', c: 'reforço', dica: 'os PCs com GPU param; a IA local segue só na VM'}],
@@ -483,12 +469,12 @@ document.addEventListener('alpine:init', function () {
       fr(v) { return v == null ? '' : v >= 70 ? 'r-hi' : v >= 40 ? 'r-md' : 'r-lo'; },
       fc(v) { return v == null ? '' : v >= 90 ? 'c-hi' : v >= 60 ? 'c-md' : ''; },
       dst(r) {   // [texto, classe, complemento]
-        if (r.estado === 'on') return ['→ IA online', 'on', r.lista ? 'sugeriu ' + nomeLista(r.lista) : ''];
+        if (r.estado === 'on') return ['IA online', 'on', r.lista ? 'sugeriu ' + nomeLista(r.lista) : ''];
         if (r.estado === 'hm') return ['Decisão humana mantida', 'hm', ''];
         if (!r.lista) return ['…', '', ''];
-        if (r.lista === 'nenhuma') return ['✅ Sem lista', 'wl', ''];
-        if (r.lista.indexOf('wl:') === 0) return ['✅ ' + nomeLista(r.lista), 'wl', ''];
-        return ['⛔ ' + nomeLista(r.lista), 'bl', ''];
+        if (r.lista === 'nenhuma') return ['Sem lista', 'wl', ''];
+        if (r.lista.indexOf('wl:') === 0) return [nomeLista(r.lista), 'wl', ''];
+        return [nomeLista(r.lista), 'bl', ''];
       },
       ha(s) { s = Math.max(0, s | 0); return s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min' : s < 172800 ? Math.round(s / 3600) + ' h' : Math.round(s / 86400) + ' dias'; },
       entSub(et, c) {   // novo: há quanto tempo apareceu; reavaliação: há quanto tempo foi a última resposta

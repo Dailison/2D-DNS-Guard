@@ -4,21 +4,20 @@
 {% set rot = dict(categorias) %}
 {% from "admin/_liberado_campos.html" import sel_empresa, sel_filial, sel_tipo, script_sugestao with context %}
 <style>
-  dialog.dlg{border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;background:var(--card);color:var(--txt)} dialog.dlg::backdrop{background:rgba(15,23,42,.45)}
-  .mini{padding:.25rem .5rem;font-size:.8rem}
+  dialog.dlg{padding:1rem 1.1rem}
 </style>
 {% if modo == 'liberacao' %}
-<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">
-  <h1 style="margin:0">Domínios liberados</h1>
-  <div style="display:flex;gap:.4rem;align-items:flex-end;flex-wrap:wrap">
+<div class="pg-h">
+  <h1><i class="bi bi-check-circle"></i>Domínios liberados</h1>
+  <div class="pg-a">
     <form method="get" style="display:flex;gap:.3rem;margin:0" title="procura em todas as whitelists e listas de liberação (mínimo 3 letras)">
       {% if wl %}<input type="hidden" name="wl" value="{{ wl }}">{% elif servico %}<input type="hidden" name="slug" value="{{ servico.slug }}">{% endif %}
       <input type="text" name="busca" value="{{ busca or '' }}" placeholder="buscar em todas as listas" style="width:15rem" minlength="3" required>
-      <button class="btn">Buscar</button>
+      <button class="btn"><i class="bi bi-search"></i>Buscar</button>
     </form>
     <form method="get" action="{{ url_for('admin.dominios') }}" style="display:flex;gap:.3rem;margin:0" title="abre a página do domínio: todas as listas em que ele está, a análise da IA e o editor de listas">
       <input type="text" name="q" placeholder="abrir domínio (ex.: tiktok.com)" style="width:15rem" required>
-      <button class="btn">Abrir</button>
+      <button class="btn"><i class="bi bi-eye"></i>Abrir</button>
     </form>
   </div>
 </div>
@@ -38,7 +37,7 @@
           {%- if a.pai %} <span class="mut" style="font-size:.78rem">(domínio-pai: cobre {{ busca }})</span>{% endif %}
           {%- if not a.publicado %}<br><span class="mut" style="font-size:.78rem" title="a whitelist guarda a decisão, mas este domínio não é enviado ao DNS">não publicado no DNS</span>{% endif %}</td>
         <td>{% for l in a.whitelists %}<a href="{{ url_for('admin.listas_liberacao', wl=l, q=a.domain) }}" style="display:inline-block;margin:0 .25rem .2rem 0;padding:.05rem .45rem;border:1px solid var(--bd);border-radius:6px;text-decoration:none;font-size:.8rem">{{ rot_wl.get(l, l) }}</a>{% endfor %}
-          {%- for x in a.servicos %}<a href="{{ url_for('admin.listas_liberacao', slug=x.slug) }}" style="display:inline-block;margin:0 .25rem .2rem 0;padding:.05rem .45rem;border:1px solid var(--b);border-radius:6px;text-decoration:none;font-size:.8rem" title="lista de liberação: vale só nas empresas que a escolheram">📋 {{ x.name }}</a>{% endfor %}</td>
+          {%- for x in a.servicos %}<a href="{{ url_for('admin.listas_liberacao', slug=x.slug) }}" class="selo pri" style="margin:0 .25rem .2rem 0;text-decoration:none;font-size:.8rem" title="lista de liberação: vale só nas empresas que a escolheram"><i class="bi bi-list-check"></i>{{ x.name }}</a>{% endfor %}</td>
         <td class="mut" style="font-size:.85rem">{{ a.classification or '—' }}</td>
         <td class="num">{{ a.total_queries }}</td>
       </tr>
@@ -48,29 +47,30 @@
   {% endif %}
 </div>
 {% endif %}
-<h2 style="margin:0 0 .4rem;font-size:1.05rem" title="Serviços prontos (YouTube, Instagram, Mercado Livre…) e listas criadas por vocês. Cada empresa escolhe o que libera em Empresas (botão Listas…) ou aqui no botão Empresas que liberam.">📋 Listas de liberação e serviços</h2>
+<h2 style="margin:0 0 .4rem;font-size:1.05rem" title="Serviços prontos (YouTube, Instagram, Mercado Livre…) e listas criadas por vocês. Cada empresa escolhe o que libera em Empresas (botão Listas…) ou aqui no botão Empresas que liberam."><i class="bi bi-list-check"></i> Listas de liberação e serviços</h2>
 <div class="card">
   <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
     {% for x in todas %}
-    <a href="{{ url_for('admin.listas_liberacao', slug=x.slug) }}" style="text-decoration:none;padding:.45rem .8rem;border:1px solid {{ 'var(--b)' if servico and x.slug == servico.slug else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if servico and x.slug == servico.slug }}">{{ x.name }} <span class="mut">({{ x.total }})</span></a>
+    <a href="{{ url_for('admin.listas_liberacao', slug=x.slug) }}" class="chp{{ ' on' if servico and x.slug == servico.slug }}">{{ x.name }} <span class="mut">({{ x.total }})</span></a>
     {% else %}<span class="mut">Nenhuma lista de liberação.</span>{% endfor %}
   </div>
   <form method="post" action="{{ url_for('admin.servico_criar') }}" class="row" style="align-items:flex-end;margin-top:.8rem">
     <div style="flex:1"><label>Nova lista de liberação</label><input type="text" name="nome" placeholder="ex.: Sistemas do Cliente X, Bancos" required></div>
-    <div style="flex:0"><button class="primary">Criar</button></div>
+    <div style="flex:0"><button class="primary"><i class="bi bi-plus-lg"></i>Criar</button></div>
   </form>
 </div>
 {% else %}
-<h1>Lista de liberação {% if servico %}<b>{{ servico.name }}</b>{% endif %} <span class="mut" style="font-size:.8rem">· <a href="{{ url_for('admin.listas_liberacao') }}">Domínios liberados</a></span></h1>
+<div class="pg-h"><h1><i class="bi bi-list-check"></i>Lista de liberação {% if servico %}<b>{{ servico.name }}</b>{% endif %}</h1>
+  <div class="pg-a"><a class="btn neu mini" href="{{ url_for('admin.listas_liberacao') }}"><i class="bi bi-arrow-left"></i>Domínios liberados</a></div></div>
 {% endif %}
 
 {% if servico %}
 <div class="card">
   <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
     <div class="mut" style="font-size:.85rem;flex:1;min-width:260px">
-      {% if bloqueia %}<b style="color:#b91c1c">Bloqueado sozinho por:</b> {{ bloqueia|join(', ') }}<br>{% endif %}
-      <b style="color:#16a34a">Liberado por:</b> {{ libera|join(', ') if libera else 'nenhuma empresa' }}
-      {% if ips %}<br><b style="color:#16a34a">Liberado só para os IPs:</b>
+      {% if bloqueia %}<b class="t-er">Bloqueado sozinho por:</b> {{ bloqueia|join(', ') }}<br>{% endif %}
+      <b class="t-ok">Liberado por:</b> {{ libera|join(', ') if libera else 'nenhuma empresa' }}
+      {% if ips %}<br><b class="t-ok">Liberado só para os IPs:</b>
         {% for r in ips %}<code>{{ r.ip|replace('/32', '') }}</code>{% set quem = [r.tenant_name, r.usuario]|select|join(' · ') %}{% if quem %} ({{ quem }}){% endif %}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
       <br>O DNS baixa a lista de novo a cada minuto.
     </div>
@@ -78,20 +78,20 @@
       <button type="button" class="primary" onclick="document.getElementById('dlgLib').showModal()">Empresas que liberam…</button>
       {% if ips is none %}<button type="button" class="primary" disabled title="precisa atualizar o analisador (rota /console/ip-servicos)" style="opacity:.5;cursor:not-allowed">IPs que liberam…</button>
       {% else %}<button type="button" class="primary" onclick="document.getElementById('dlgIps').showModal()">IPs que liberam…{% if ips %} ({{ ips|length }}){% endif %}</button>{% endif %}
-      <form method="post" action="{{ url_for('admin.servico_apagar', slug=servico.slug) }}" onsubmit="return confirm('Apagar {{ servico.name }}? Sai de todas as empresas que o usam.')"><button class="danger">Apagar</button></form>
+      <form method="post" action="{{ url_for('admin.servico_apagar', slug=servico.slug) }}" onsubmit="return confirm('Apagar {{ servico.name }}? Sai de todas as empresas que o usam.')"><button class="danger"><i class="bi bi-trash"></i>Apagar</button></form>
     </div>
   </div>
   <form method="post" action="{{ url_for('admin.servico_editar', slug=servico.slug) }}" class="row" style="align-items:flex-end;margin-top:.7rem">
     <input type="hidden" name="voltar" value="{{ request.full_path }}">
     <div style="flex:1"><label>Nome</label><input type="text" name="nome" value="{{ servico.name }}"></div>
-    <div style="flex:0"><button class="btn">Salvar</button></div>
+    <div style="flex:0"><button class="btn"><i class="bi bi-check-lg"></i>Salvar</button></div>
   </form>
 </div>
 <div class="card">
   <form method="post" action="{{ url_for('admin.servico_dominios', slug=servico.slug) }}" class="row" style="align-items:flex-end">
     <input type="hidden" name="voltar" value="{{ request.full_path }}">
     <div style="flex:1"><label>Adicionar domínios (um por linha ou separados por vírgula; vale com os subdomínios)</label><textarea name="dominio" rows="2" placeholder="ex.: erp.cliente.com.br" required></textarea></div>
-    <div style="flex:0"><button class="primary">Adicionar</button></div>
+    <div style="flex:0"><button class="primary"><i class="bi bi-plus-lg"></i>Adicionar</button></div>
   </form>
   <table style="margin-top:.6rem">
     <thead><tr><th>Domínio</th><th>Entrou por</th><th></th></tr></thead>
@@ -100,7 +100,7 @@
       <tr><td>{{ d.domain }}</td><td class="mut" style="font-size:.85rem">{{ d.added_by or '—' }}</td>
         <td style="text-align:right"><form method="post" action="{{ url_for('admin.servico_dominios', slug=servico.slug) }}" style="display:inline">
           <input type="hidden" name="acao" value="rem"><input type="hidden" name="dominio" value="{{ d.domain }}"><input type="hidden" name="voltar" value="{{ request.full_path }}">
-          <button class="danger mini">✕</button></form></td></tr>
+          <button class="danger mini" title="Excluir" aria-label="Excluir"><i class="bi bi-trash"></i></button></form></td></tr>
     {% else %}<tr><td colspan="3" class="mut">Sem domínios ainda.</td></tr>{% endfor %}
     </tbody>
   </table>
@@ -114,8 +114,8 @@
   <div style="display:flex;gap:.5rem;justify-content:space-between;margin-top:.7rem;flex-wrap:wrap">
     <div style="display:flex;gap:.3rem"><button type="button" class="mini" onclick="document.querySelectorAll('#dlgLib .lTid').forEach(c=>c.checked=true)">Marcar todas</button>
       <button type="button" class="mini" onclick="document.querySelectorAll('#dlgLib .lTid').forEach(c=>c.checked=false)">Desmarcar todas</button></div>
-    <div style="display:flex;gap:.5rem"><button type="button" onclick="document.getElementById('dlgLib').close()">Cancelar</button>
-      <button type="button" class="primary" id="lSalvar">Salvar e aplicar</button></div>
+    <div style="display:flex;gap:.5rem"><button type="button" onclick="document.getElementById('dlgLib').close()"><i class="bi bi-x-lg"></i>Cancelar</button>
+      <button type="button" class="primary" id="lSalvar"><i class="bi bi-check-lg"></i>Salvar e aplicar</button></div>
   </div>
 </dialog>
 {% if ips is not none %}
@@ -134,7 +134,7 @@
     <div><label>Tipo</label>{{ sel_tipo(None, None) }}</div>
     <div><label>Autorizado por (empresa)</label><input type="text" name="autorizado_por" placeholder="Ex.: Maria, gerente" required
       title="quem da empresa pediu/autorizou a liberação (fica no histórico junto com o seu usuário)"></div>
-    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary" id="ipsEnviar">Liberar</button></div>
+    <div style="flex:0;display:flex;align-items:flex-end"><button class="primary" id="ipsEnviar"><i class="bi bi-unlock"></i>Liberar</button></div>
   </form>
   <p class="mut" style="font-size:.8rem;margin:.4rem 0 .6rem">IP único vira <code>/32</code>. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro. O IP precisa ser fixo (reserva no DHCP).</p>
   <div style="max-height:40vh;overflow:auto;border-top:1px solid var(--bd)">
@@ -149,10 +149,10 @@
         <td>{{ r.autorizado_por or '—' }}</td>
         <td class="mut" style="font-size:.8rem;white-space:nowrap"{% if r.updated_by %} title="última edição: {{ r.updated_by }} em {{ r.updated_at|dt_sp }}"{% endif %}>{{ r.created_by or '—' }}<br>{{ r.created_at|dt_sp }}</td>
         <td style="white-space:nowrap">
-          <button type="button" class="mini" data-ip='{{ {"ip": r.ip, "tenant_id": r.tenant_id, "filial": r.filial or "", "departamento": r.departamento or "", "usuario": r.usuario or "", "tipo": r.tipo or "", "autorizado_por": r.autorizado_por or ""}|tojson }}' onclick="ipsEditar(this)">Editar</button>
+          <button type="button" class="mini" data-ip='{{ {"ip": r.ip, "tenant_id": r.tenant_id, "filial": r.filial or "", "departamento": r.departamento or "", "usuario": r.usuario or "", "tipo": r.tipo or "", "autorizado_por": r.autorizado_por or ""}|tojson }}' onclick="ipsEditar(this)"><i class="bi bi-pencil"></i>Editar</button>
           <form method="post" action="{{ url_for('admin.servico_ip_revogar', slug=servico.slug) }}" style="display:inline" onsubmit="return confirm('Revogar {{ servico.name }} de {{ r.ip }}? Volta a valer só a política da rede dele.')">
             <input type="hidden" name="ip" value="{{ r.ip }}"><input type="hidden" name="voltar" value="{{ request.full_path }}#ips">
-            <button class="danger mini">Revogar</button></form>
+            <button class="danger mini"><i class="bi bi-slash-circle"></i>Revogar</button></form>
         </td>
       </tr>
     {% else %}<tr><td colspan="8" class="mut">Nenhum IP libera {{ servico.name }} sozinho.</td></tr>{% endfor %}
@@ -166,7 +166,7 @@
       <tbody>
       {% for h in ips_historico %}{% set d = h.detalhe or {} %}
         <tr><td style="white-space:nowrap">{{ h.at|dt_sp }}</td>
-          <td>{{ {'liberar': '✅ liberou', 'editar': '✏️ editou', 'revogar': '⛔ revogou'}.get(h.acao, h.acao) }}</td>
+          <td>{% set ic = {'liberar': 'check-circle t-ok', 'editar': 'pencil', 'revogar': 'slash-circle t-er'}.get(h.acao) %}{% if ic %}<i class="bi bi-{{ ic }}"></i> {% endif %}{{ {'liberar': 'liberou', 'editar': 'editou', 'revogar': 'revogou'}.get(h.acao, h.acao) }}</td>
           <td><code>{{ h.ip }}</code>{% if d.usuario or d.departamento %}<div class="mut" style="font-size:.75rem">{{ [d.usuario, d.departamento]|select|join(' · ') }}</div>{% endif %}</td>
           <td>{{ h.tenant_name or '—' }}{% if d.filial %} · {{ d.filial }}{% endif %}</td>
           <td>{{ h.autorizado_por or '—' }}</td><td>{{ h.por or '—' }}</td></tr>
@@ -175,7 +175,7 @@
     </table>
   </details>
   {% endif %}
-  <div style="display:flex;justify-content:flex-end;margin-top:.7rem"><button type="button" onclick="document.getElementById('dlgIps').close()">Fechar</button></div>
+  <div style="display:flex;justify-content:flex-end;margin-top:.7rem"><button type="button" onclick="document.getElementById('dlgIps').close()"><i class="bi bi-x-lg"></i>Fechar</button></div>
 </dialog>
 {{ script_sugestao() }}
 <script>
@@ -211,13 +211,13 @@ document.getElementById("lSalvar").addEventListener("click", async (ev) => {
 </script>
 {% endif %}
 {% if modo == 'liberacao' %}
-<h2 style="margin:1.2rem 0 .4rem;font-size:1.05rem" title="Vão ao DNS em todas as empresas e vencem qualquer bloqueio (inclusive por CNAME). A IA põe aqui o que validou como trabalho, sem lista de bloqueio; protegidos do catálogo vão para Essenciais; sai sozinho se aparecer num feed de ameaça.">✅ Whitelists
+<h2 style="margin:1.2rem 0 .4rem;font-size:1.05rem" title="Vão ao DNS em todas as empresas e vencem qualquer bloqueio (inclusive por CNAME). A IA põe aqui o que validou como trabalho, sem lista de bloqueio; protegidos do catálogo vão para Essenciais; sai sozinho se aparecer num feed de ameaça."><i class="bi bi-check-circle t-ok"></i> Whitelists
   {%- if whitelists.categorias %} <span class="mut" style="font-size:.8rem;font-weight:400" title="domínios distintos (um domínio em mais de uma whitelist conta uma vez)">· {{ whitelists.total if whitelists.total is defined else whitelists.categorias|sum(attribute='total') }} domínio(s)</span>{% endif %}</h2>
 <div class="card">
   <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
     {% set totwl = {} %}{% for x in whitelists.categorias %}{% set _ = totwl.update({x.categoria: x.total}) %}{% endfor %}
     {% for c, r in cats_wl %}
-    <a href="{{ url_for('admin.listas_liberacao', wl=c) }}" style="text-decoration:none;padding:.35rem .7rem;border:1px solid {{ 'var(--b)' if wl == c else 'var(--bd)' }};border-radius:10px;{{ 'font-weight:700' if wl == c }}">{{ r }} <span class="mut">({{ totwl.get(c, 0) }})</span></a>
+    <a href="{{ url_for('admin.listas_liberacao', wl=c) }}" class="chp{{ ' on' if wl == c }}">{{ r }} <span class="mut">({{ totwl.get(c, 0) }})</span></a>
     {% endfor %}
   </div>
 </div>
@@ -227,7 +227,7 @@ document.getElementById("lSalvar").addEventListener("click", async (ev) => {
   <form method="post" action="{{ url_for('admin.whitelist_add') }}" class="row" style="align-items:flex-end;margin:0 0 .6rem">
     <input type="hidden" name="wl" value="{{ wl }}">
     <div style="flex:1"><label>Liberar nesta whitelist</label><input type="text" name="dominio" placeholder="ex.: sistema-do-cliente.com.br" required></div>
-    <div style="flex:0"><button class="primary">Liberar</button></div>
+    <div style="flex:0"><button class="primary"><i class="bi bi-unlock"></i>Liberar</button></div>
   </form>
   {% with modo = 'whitelist' %}{% include "admin/_dominios_detalhe.html" %}{% endwith %}
 </div>

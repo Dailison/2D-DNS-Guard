@@ -22,7 +22,7 @@
         {% for o, l in [('queries','Mais consultas'),('risk','Maior risco'),('last_seen','Acesso mais recente'),('first_seen','Mais novos'),('work','Menos relacionados ao trabalho')] %}
           <option value="{{ o }}" {{ 'selected' if f.sort == o }}>{{ l }}</option>{% endfor %}
       </select></div>
-    <div style="flex:0"><button class="primary">Filtrar</button></div>
+    <div style="flex:0"><button class="primary"><i class="bi bi-funnel"></i>Filtrar</button></div>
   </form>
 </div>
 
@@ -51,8 +51,8 @@
   </table>
   {% if res.total > 100 %}
   <p style="margin-top:.8rem;display:flex;gap:.5rem">
-    {% if f.offset > 0 %}<a class="btn" href="{{ url_for('analise.dominios', t=tid, q=f.q, classe=f.classification, categoria=f.category, rec=f.corp, ordem=f.sort, offset=[f.offset-100,0]|max) }}">← Anteriores</a>{% endif %}
-    {% if f.offset + 100 < res.total %}<a class="btn" href="{{ url_for('analise.dominios', t=tid, q=f.q, classe=f.classification, categoria=f.category, rec=f.corp, ordem=f.sort, offset=f.offset+100) }}">Próximos →</a>{% endif %}
+    {% if f.offset > 0 %}<a class="btn" href="{{ url_for('analise.dominios', t=tid, q=f.q, classe=f.classification, categoria=f.category, rec=f.corp, ordem=f.sort, offset=[f.offset-100,0]|max) }}"><i class="bi bi-arrow-left"></i>Anteriores</a>{% endif %}
+    {% if f.offset + 100 < res.total %}<a class="btn" href="{{ url_for('analise.dominios', t=tid, q=f.q, classe=f.classification, categoria=f.category, rec=f.corp, ordem=f.sort, offset=f.offset+100) }}">Próximos<i class="bi bi-arrow-right"></i></a>{% endif %}
     <span class="mut" style="align-self:center">{{ f.offset + 1 }}–{{ [f.offset + 100, res.total]|min }} de {{ res.total }}</span>
   </p>
   {% endif %}

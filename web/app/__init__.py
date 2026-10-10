@@ -24,7 +24,7 @@ def create_app(config_object=Config) -> Flask:
     @app.context_processor
     def _hub():
         from app import technitium as dnslib
-        return {"portal_kit_url": app.config.get("PORTAL_KIT_URL", ""), "LISTAS_SECOES": dnslib.SECOES_LISTA,
+        return {"portal_kit_url": app.config.get("PORTAL_KIT_URL", ""), "LISTAS_SECOES": dnslib.SECOES_LISTA, "LISTAS_ICONE": dnslib.ICONES_SECAO,
                 "LISTAS_ROT": {**dict(dnslib.CATEGORIAS_LISTA), "para_revisar": "Para revisar"}, "LISTAS_RISCO": dnslib.CATEGORIAS_RISCO,
                 "WL_ROT": dict(dnslib.CATEGORIAS_WHITELIST)}
 

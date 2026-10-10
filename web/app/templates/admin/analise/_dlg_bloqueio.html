@@ -13,8 +13,8 @@
       {{ caixas("dlgBlqL", 'name="listas"') }}
     </div>
     <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem">
-      <button type="button" onclick="document.getElementById('dlgBlq').close()">Cancelar</button>
-      <button class="danger">Pôr nas listas</button>
+      <button type="button" onclick="document.getElementById('dlgBlq').close()"><i class="bi bi-x-lg"></i>Cancelar</button>
+      <button class="danger"><i class="bi bi-slash-circle"></i>Pôr nas listas</button>
     </div>
   </form>
 </dialog>
@@ -40,7 +40,7 @@
     });
     dlg.showModal();
   };
-  // ⛔ Sugerida: põe direto na lista da categoria que a IA deu (sem abrir o diálogo)
+  // Sugerida: põe direto na lista da categoria que a IA deu (sem abrir o diálogo)
   window.bloquearTodas = function (src) {
     const pares = Array.isArray(src) ? src : [[src.dataset.cat || "", JSON.parse(src.dataset.itens || "[]")]];
     const f = dlg.querySelector("form"), box = document.getElementById("dlgItens"); box.innerHTML = "";

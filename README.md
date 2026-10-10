@@ -99,6 +99,22 @@ padrão) mais o serviço. Os dados são os mesmos dos IPs liberados (tabela `ip_
 - Contingência: `https://dns-guard.2dtecnologia.com/login?local=1` (e-mail + senha local).
 - Todo operador ativo usa todas as telas. **Super** só acrescenta a tela Operadores.
 
+## Padrão visual
+
+O console segue a identidade única dos sistemas da 2D, configurada no **2D Hub** (contrato em `2D-Portal/README.md`,
+seção "Padrão visual"):
+
+- `web/app/templates/_tema.html` (incluído no `<head>` do `base.html` e do `login.html`) carrega o `kit/theme.js` do
+  Hub — claro/escuro, tokens `--twod-*` e Bootstrap Icons — e aponta as variáveis do console (`--pri`, `--card`,
+  `--txt`, `--ok`, `--er`…) para os tokens, num lugar só. O valor de reserva de cada uma vale se o Hub não responder
+  (a tela abre no claro; os ícones dependem do Hub).
+- Sem paleta escura, sem botão de tema e sem logo no repositório: a logo é `--twod-logo`, o favicon é o do kit.
+- Cores fixas não entram nas telas: estados usam `--ok` / `--av` / `--er` / `--inf` (cheia, `-bg`, `-tx`). As únicas
+  cores próprias são de categoria — classificação da IA (`--c-*`), violeta da IA online, magenta de "reanálise
+  pedida" e as duas séries dos gráficos — com versão para o escuro onde precisa.
+- Ícones: só `<i class="bi bi-…">`, seguindo a tabela ação → ícone do Hub (bloqueado = `slash-circle`,
+  liberado = `check-circle`, liberar = `unlock`).
+
 ## Deploy
 
 **Ordem:** primeiro o analisador na VM (código + `migrate` + restart), **depois** o push no

@@ -1,7 +1,7 @@
 {% extends "admin/analise/_base.html" %}
 {% import "admin/analise/_macros.html" as m with context %}
 {% block an %}
-<p><a href="{{ url_for('analise.computadores', t=tid) }}">← Computadores</a></p>
+<p><a href="{{ url_for('analise.computadores', t=tid) }}" style="text-decoration:none"><i class="bi bi-arrow-left"></i> Computadores</a></p>
 {% if not c %}
   <div class="card mut">Computador <code>{{ ip }}</code> sem consultas no período para este cliente.</div>
 {% else %}

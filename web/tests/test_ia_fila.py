@@ -30,7 +30,7 @@ def cli(app, monkeypatch):
 
 def test_botao_fila_ao_lado_do_pausar(cli):
     html = cli.c.get("/analise/ia").get_data(as_text=True)
-    assert "☰ Fila" in html and html.index("☰ Fila") < html.index("⏸ Pausar")
+    assert "bi-list-ul\"></i>Fila</button>" in html and html.index("</i>Fila</button>") < html.index("'Pausar'")
     assert 'x-ref="fila"' in html and "/analise/ia/fila" in html
 
 

@@ -6,6 +6,9 @@
      magenta de reanálise pedida) são próprias e têm versão para o escuro. No desktop a página cabe na janela:
      as duas etapas dividem a altura e cada tabela rola por dentro. */
   main footer{display:none}
+  /* só nesta tela: o conteúdo (cabeçalho, abas e as tabelas das etapas) ocupa pelo menos 80% da janela (82vw, com folga para as bordas) em monitor
+     largo; o limite geral de 1440px (base.html) continua valendo nas outras telas. Os 2rem são a folga lateral do main */
+  main{max-width:max(1440px,calc(82vw + 2rem))}
   [x-cloak]{display:none!important}
 
   .iav{--ac:var(--b);--vi:var(--c-vio);--vd:var(--c-trab);--am:var(--av);--or:var(--c-susp);--rd:var(--er);--sl:var(--c-desc);

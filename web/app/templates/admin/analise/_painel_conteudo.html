@@ -1,3 +1,4 @@
+{% set T_ST = "Bloquear… põe o site nas listas escolhidas; Desbloquear tira das listas que a empresa aplica. Tudo registra a decisão e vale no DNS em até 2 min. A IA só põe direto nas listas o óbvio de risco (jogos, apostas, adulto, VPN/proxy, ameaças); o resto é decidido aqui" %}
 {# Conteúdo do Painel: carregado depois da página (zero loading) por analise.painel_conteudo #}
 {% import "admin/analise/_macros.html" as m with context %}
 {% if erro %}
@@ -6,7 +7,7 @@
   {% set c = s.counts %}
   <div class="m-grid">
     <div class="metric"><div class="n">{{ s.total_domains }}</div><div class="l">Domínios analisados</div></div>
-    <div class="metric"><div class="n" style="color:var(--c-trab-tx)">{{ c.TRABALHO }}</div><div class="l">Trabalho</div></div>
+    <div class="metric"><div class="n" style="color:var(--ok-tx)">{{ c.TRABALHO }}</div><div class="l">Trabalho</div></div>
     <div class="metric"><div class="n" style="color:var(--av-tx)">{{ c.NAO_TRABALHO }}</div><div class="l">Não trabalho</div></div>
     <div class="metric"><div class="n" style="color:var(--c-susp-tx)">{{ c.SUSPEITO }}</div><div class="l">Suspeitos</div></div>
     <div class="metric"><div class="n" style="color:var(--er-tx)">{{ c.MALICIOSO }}</div><div class="l">Maliciosos</div></div>
@@ -16,7 +17,7 @@
 
   {% if todos and s.by_tenant %}
   <div class="card">
-    <h2>Por empresa <span class="mut" style="font-size:.8rem;font-weight:400">· clique para ver a análise da empresa</span></h2>
+    <h2 title="Clique na empresa para ver a análise dela">Por empresa</h2>
     <table>
       <thead><tr><th>Empresa</th><th class="num">PCs</th><th class="num">Consultas</th><th class="num">Domínios</th><th class="num">% não trabalho</th><th class="num">Suspeitos/malic.</th><th class="num">Alertas abertos</th></tr></thead>
       <tbody>
@@ -37,10 +38,10 @@
 
   {% if porcat %}
   <div class="card">
-    <h2>Por categoria <span class="mut" style="font-size:.8rem;font-weight:400">· {{ 'período selecionado, 1000 domínios mais acessados' }}</span></h2>
+    <h2 title="Período selecionado, 1000 domínios mais acessados">Por categoria</h2>
     {% set maxq = (porcat|map(attribute='consultas')|max) or 1 %}
     <table>
-      <thead><tr><th>Categoria</th><th class="num">Domínios</th><th class="num">Bloqueados</th><th class="num">Liberados</th><th class="num">Consultas</th><th style="width:30%"></th></tr></thead>
+      <thead><tr><th>Categoria</th><th class="num">Domínios</th><th class="num">Bloqueados</th><th class="num" title="Em laranja: categoria de não trabalho com sites ainda liberados. Clique no número para ver os domínios e bloquear/desbloquear">Liberados</th><th class="num">Consultas</th><th style="width:30%"></th></tr></thead>
       <tbody>
       {% for c in porcat %}
         <tr>
@@ -54,7 +55,6 @@
       {% endfor %}
       </tbody>
     </table>
-    <p class="hint">Em laranja: categorias de não trabalho com sites ainda liberados. Clique no número para ver os domínios e bloquear/desbloquear.</p>
   </div>
   {% endif %}
 
@@ -62,7 +62,7 @@
     <div class="card">
       <h2>Suspeitos e maliciosos</h2>
       <table>
-        <thead><tr><th>Domínio</th><th>Classe</th><th>Recomend.</th><th>Risco</th><th class="num">Consultas</th><th class="num">PCs</th>{% if todos %}<th class="num">Empresas</th>{% endif %}<th>Status</th></tr></thead>
+        <thead><tr><th>Domínio</th><th>Classe</th><th>Recomend.</th><th>Risco</th><th class="num">Consultas</th><th class="num">PCs</th>{% if todos %}<th class="num">Empresas</th>{% endif %}<th title="{{ T_ST }}">Status</th></tr></thead>
         <tbody>
         {% for d in s.top_risk %}
           <tr><td>{{ m.dom(d.name) }}{% if d.topic %}<br><span class="mut" style="font-size:.78rem">{{ d.topic }}</span>{% endif %}</td>
@@ -77,7 +77,7 @@
     <div class="card">
       <h2>Principais domínios não relacionados ao trabalho</h2>
       <table>
-        <thead><tr><th>Domínio</th><th>Categoria</th><th>Recomend.</th><th class="num">Consultas</th><th class="num">PCs</th>{% if todos %}<th class="num">Empresas</th>{% endif %}<th>Status</th></tr></thead>
+        <thead><tr><th>Domínio</th><th>Categoria</th><th>Recomend.</th><th class="num">Consultas</th><th class="num">PCs</th>{% if todos %}<th class="num">Empresas</th>{% endif %}<th title="{{ T_ST }}">Status</th></tr></thead>
         <tbody>
         {% for d in s.top_nonwork %}
           <tr><td>{{ m.dom(d.name) }}{% if d.topic %}<br><span class="mut" style="font-size:.78rem">{{ d.topic }}</span>{% endif %}</td><td>{{ m.cat(d.category) }}</td><td>{{ m.rec(d) }}</td>
@@ -91,7 +91,7 @@
     <div class="card">
       <h2>Computadores com comportamento anormal</h2>
       <table>
-        <thead><tr><th>Computador</th><th>Score</th><th class="num">% não trab.</th><th class="num">Susp.</th><th class="num">Novos 24h</th><th class="num">Alertas</th></tr></thead>
+        <thead><tr><th>Computador</th><th title="Score 0–100: combina % de consultas não relacionadas ao trabalho, domínios suspeitos/maliciosos, domínios inéditos e alertas abertos">Score</th><th class="num">% não trab.</th><th class="num">Susp.</th><th class="num">Novos 24h</th><th class="num">Alertas</th></tr></thead>
         <tbody>
         {% for p in s.anomalous_clients %}
           <tr class="{{ 'muted-row' if p.anomaly_score < 20 }}">
@@ -101,7 +101,6 @@
         {% else %}<tr><td colspan="6" class="mut">Sem computadores no período.</td></tr>{% endfor %}
         </tbody>
       </table>
-      <p class="hint">Score 0–100: combina % de consultas não relacionadas ao trabalho, domínios suspeitos/maliciosos, domínios inéditos e alertas abertos.</p>
     </div>
 
     <div class="card">
@@ -121,7 +120,7 @@
     <div class="card">
       <h2>Domínios mais acessados</h2>
       <table>
-        <thead><tr><th>Domínio</th><th>Categoria</th><th>Classe</th><th class="num">Consultas</th><th class="num">PCs</th><th>Status</th></tr></thead>
+        <thead><tr><th>Domínio</th><th>Categoria</th><th>Classe</th><th class="num">Consultas</th><th class="num">PCs</th><th title="{{ T_ST }}">Status</th></tr></thead>
         <tbody>
         {% for d in s.top_domains %}
           <tr><td>{{ m.dom(d.name) }}</td><td>{{ m.cat(d.category) }}</td><td>{{ m.badge(d.classification) }}</td>
@@ -144,5 +143,4 @@
       </table>
     </div>
   </div>
-  <p class="hint" style="margin-top:1rem">A IA põe direto nas listas só o óbvio de risco (jogos, apostas, adulto, VPN/proxy, ameaças); o resto é decidido aqui. Bloquear… põe o site nas listas escolhidas; Desbloquear tira das listas que a empresa aplica. Tudo registra a decisão e vale no DNS em até 2 min.</p>
 {% endif %}

@@ -67,12 +67,11 @@
 {% if servico %}
 <div class="card">
   <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
-    <div class="mut" style="font-size:.85rem;flex:1;min-width:260px">
+    <div class="mut" style="font-size:.85rem;flex:1;min-width:260px" title="O DNS baixa a lista de novo a cada minuto">
       {% if bloqueia %}<b class="t-er">Bloqueado sozinho por:</b> {{ bloqueia|join(', ') }}<br>{% endif %}
       <b class="t-ok">Liberado por:</b> {{ libera|join(', ') if libera else 'nenhuma empresa' }}
       {% if ips %}<br><b class="t-ok">Liberado só para os IPs:</b>
         {% for r in ips %}<code>{{ r.ip|replace('/32', '') }}</code>{% set quem = [r.tenant_name, r.usuario]|select|join(' · ') %}{% if quem %} ({{ quem }}){% endif %}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
-      <br>O DNS baixa a lista de novo a cada minuto.
     </div>
     <div style="display:flex;gap:.4rem">
       <button type="button" class="primary" onclick="document.getElementById('dlgLib').showModal()">Empresas que liberam…</button>
@@ -90,7 +89,7 @@
 <div class="card">
   <form method="post" action="{{ url_for('admin.servico_dominios', slug=servico.slug) }}" class="row" style="align-items:flex-end">
     <input type="hidden" name="voltar" value="{{ request.full_path }}">
-    <div style="flex:1"><label>Adicionar domínios (um por linha ou separados por vírgula; vale com os subdomínios)</label><textarea name="dominio" rows="2" placeholder="ex.: erp.cliente.com.br" required></textarea></div>
+    <div style="flex:1"><label title="Um por linha ou separados por vírgula; vale com os subdomínios">Adicionar domínios</label><textarea name="dominio" rows="2" placeholder="ex.: erp.cliente.com.br" required></textarea></div>
     <div style="flex:0"><button class="primary"><i class="bi bi-plus-lg"></i>Adicionar</button></div>
   </form>
   <table style="margin-top:.6rem">
@@ -122,11 +121,10 @@
 {# "IPs que liberam": o serviço liberado só para um IP/faixa (mesmos dados dos IPs liberados). O IP ganha um grupo
    próprio no Technitium: a política da rede dele mais este serviço. #}
 <dialog id="dlgIps" class="dlg" style="max-width:1100px;width:calc(100vw - 32px)">
-  <h2 style="margin:0 0 .2rem">IPs que liberam {{ servico.name }}</h2>
-  <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Libera <b>{{ servico.name }}</b> só para o IP (ou faixa), sem liberar para a empresa inteira. O resto da política da rede dele continua valendo. Para isentar o IP de todo o filtro, use <a href="{{ url_for('admin.liberados') }}">IPs liberados</a>.</p>
+  <h2 style="margin:0 0 .6rem" title="Libera {{ servico.name }} só para o IP (ou faixa), sem liberar para a empresa inteira. O resto da política da rede dele continua valendo. Para isentar o IP de todo o filtro, use IPs liberados">IPs que liberam {{ servico.name }}</h2>
   <form method="post" action="{{ url_for('admin.servico_ip_liberar', slug=servico.slug) }}" class="row" id="fIps">
     <input type="hidden" name="voltar" value="{{ request.full_path }}#ips">
-    <div><label>IP ou faixa (CIDR)</label><input type="text" name="ip" id="ip_novo" placeholder="10.100.10.20 ou 10.100.10.0/24" required autocomplete="off"></div>
+    <div><label title="IP único vira /32. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro. O IP precisa ser fixo (reserva no DHCP)">IP ou faixa (CIDR)</label><input type="text" name="ip" id="ip_novo" placeholder="10.100.10.20 ou 10.100.10.0/24" required autocomplete="off"></div>
     <div><label>Empresa</label>{{ sel_empresa(None, None) }}</div>
     <div><label>Filial</label>{{ sel_filial(None, None, None) }}</div>
     <div><label>Departamento</label><input type="text" name="departamento" placeholder="Ex.: Recepção"></div>
@@ -136,8 +134,7 @@
       title="quem da empresa pediu/autorizou a liberação (fica no histórico junto com o seu usuário)"></div>
     <div style="flex:0;display:flex;align-items:flex-end"><button class="primary" id="ipsEnviar"><i class="bi bi-unlock"></i>Liberar</button></div>
   </form>
-  <p class="mut" style="font-size:.8rem;margin:.4rem 0 .6rem">IP único vira <code>/32</code>. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro. O IP precisa ser fixo (reserva no DHCP).</p>
-  <div style="max-height:40vh;overflow:auto;border-top:1px solid var(--bd)">
+  <div style="max-height:40vh;overflow:auto;border-top:1px solid var(--bd);margin-top:.6rem">
   <table>
     <thead><tr><th>IP / Faixa</th><th>Empresa</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th>Autorizado por</th><th>Liberado por</th><th></th></tr></thead>
     <tbody>

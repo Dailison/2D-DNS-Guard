@@ -109,9 +109,14 @@ seção "Padrão visual"):
   `--txt`, `--ok`, `--er`…) para os tokens, num lugar só. O valor de reserva de cada uma vale se o Hub não responder
   (a tela abre no claro; os ícones dependem do Hub).
 - Sem paleta escura, sem botão de tema e sem logo no repositório: a logo é `--twod-logo`, o favicon é o do kit.
-- Cores fixas não entram nas telas: estados usam `--ok` / `--av` / `--er` / `--inf` (cheia, `-bg`, `-tx`). As únicas
-  cores próprias são de categoria — classificação da IA (`--c-*`), violeta da IA online, magenta de "reanálise
-  pedida" e as duas séries dos gráficos — com versão para o escuro onde precisa.
+- Cores fixas não entram nas telas: estados usam `--ok` / `--av` / `--er` / `--inf` (cheia, `-bg`, `-tx`) e o
+  texto sobre a cor cheia é o `--on-…` do Hub (nunca branco fixo). Na classificação da IA, trabalho / não trabalho /
+  malicioso são os estados do Hub; as únicas cores próprias são de categoria — suspeito (laranja), desconhecido,
+  violeta da IA online, magenta de "reanálise pedida" e as duas séries dos gráficos — com versão para o escuro
+  onde precisa.
+- Sem texto explicativo visível nas telas (parágrafo de legenda, subtítulo, dica embaixo de campo): a explicação
+  vai em `title` no rótulo do campo, no cabeçalho da coluna ou no título a que se refere (o pontilhado mostra que
+  há dica). Ficam visíveis só dados, estados e avisos.
 - Ícones: só `<i class="bi bi-…">`, seguindo a tabela ação → ícone do Hub (bloqueado = `slash-circle`,
   liberado = `check-circle`, liberar = `unlock`).
 

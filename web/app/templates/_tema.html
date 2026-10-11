@@ -16,11 +16,11 @@
     --bg:var(--twod-bg,#f8fafc);--card:var(--twod-surface,#fff);--card2:var(--twod-surface-2,#f1f5f9);--card3:var(--twod-surface-3,#e2e8f0);
     --bd:var(--twod-border,#e2e8f0);--bd2:var(--twod-border-strong,#cbd5e1);
     --txt:var(--twod-text,#0f172a);--txt2:var(--twod-text-secondary,#475569);--mut:var(--twod-text-muted,#64748b);
-    /* estados: cor cheia, fundo suave (-bg) e texto (-tx) */
-    --ok:var(--twod-success,#10b981);--ok-bg:var(--twod-success-soft,#e2f7f0);--ok-tx:var(--twod-success-text,#0b825a);--on-ok:var(--twod-on-tertiary,#0f172a);
-    --av:var(--twod-warning,#d97706);--av-bg:var(--twod-warning-soft,#fef3c7);--av-tx:var(--twod-warning-text,#92400e);
-    --er:var(--twod-danger,#dc2626);--er-bg:var(--twod-danger-soft,#fee2e2);--er-tx:var(--twod-danger-text,#b91c1c);
-    --inf:var(--twod-info,#0891b2);--inf-bg:var(--twod-info-soft,#cffafe);--inf-tx:var(--twod-info-text,#0e7490);
+    /* estados: cor cheia, texto sobre a cor cheia (on-), fundo suave (-bg) e texto (-tx) */
+    --ok:var(--twod-success,#10b981);--ok-bg:var(--twod-success-soft,#e2f7f0);--ok-tx:var(--twod-success-text,#0b825a);--on-ok:var(--twod-on-success,#0f172a);
+    --av:var(--twod-warning,#d97706);--av-bg:var(--twod-warning-soft,#fef3c7);--av-tx:var(--twod-warning-text,#92400e);--on-av:var(--twod-on-warning,#0f172a);
+    --er:var(--twod-danger,#dc2626);--er-bg:var(--twod-danger-soft,#fee2e2);--er-tx:var(--twod-danger-text,#b91c1c);--on-er:var(--twod-on-danger,#fff);
+    --inf:var(--twod-info,#0891b2);--inf-bg:var(--twod-info-soft,#cffafe);--inf-tx:var(--twod-info-text,#0e7490);--on-inf:var(--twod-on-info,#0f172a);
     /* forma */
     --raio-sm:var(--twod-radius-sm,.375rem);--raio-md:var(--twod-radius-md,.5rem);--raio-lg:var(--twod-radius-lg,.75rem);--raio-xl:var(--twod-radius-xl,1rem);
     --sh-sm:var(--twod-shadow-sm,0 1px 3px 0 rgb(0 0 0/.1),0 1px 2px -1px rgb(0 0 0/.1));
@@ -29,13 +29,15 @@
     --fonte:var(--twod-font,'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif);
     /* cabeçalho de tabela, como no ERP: faixa na cor da marca no claro, superfície no escuro */
     --th-bg:var(--twod-primary-darker,#183f96);--th-tx:#fff;
-    /* classificação da IA: cores de categoria (não são da marca) — selo cheio com texto branco nos dois temas.
-       "Trabalho" é verde aqui mesmo quando o success do Hub (= cor terciária da marca) não é */
-    --c-trab:#16a34a;--c-ntrab:#d97706;--c-susp:#ea580c;--c-mal:#b91c1c;--c-desc:#64748b;--c-pend:#94a3b8;
-    --c-trab-tx:#15803d;--c-trab-bg:#dcfce7;--c-susp-tx:#c2410c;--c-susp-bg:#ffedd5;--c-vio:#7c3aed;--c-vio-tx:#6d28d9;--c-vio-bg:#f5f3ff;
+    /* classificação da IA: trabalho / não trabalho / malicioso são os estados do Hub (success, warning, danger);
+       suspeito (laranja), desconhecido e pendente (cinzas) e o violeta da IA online são cores de categoria próprias.
+       on-c-* = texto sobre o selo cheio */
+    --c-trab:var(--ok);--c-ntrab:var(--av);--c-susp:#ea580c;--c-mal:var(--er);--c-desc:#64748b;--c-pend:#94a3b8;
+    --on-c-trab:var(--on-ok);--on-c-ntrab:var(--on-av);--on-c-susp:#0f172a;--on-c-mal:var(--on-er);--on-c-desc:#fff;--on-c-pend:#0f172a;
+    --c-susp-tx:#c2410c;--c-susp-bg:#ffedd5;--c-vio:#7c3aed;--c-vio-tx:#6d28d9;--c-vio-bg:#f5f3ff;
   }
   html[data-theme="dark"]{--th-bg:var(--card3);--th-tx:var(--txt);
-    --c-trab-tx:#4ade80;--c-trab-bg:#12301f;--c-susp-tx:#fb923c;--c-susp-bg:#43200b;--c-vio:#a78bfa;--c-vio-tx:#c4b5fd;--c-vio-bg:#2a2147}
+    --c-susp-tx:#fb923c;--c-susp-bg:#43200b;--c-vio:#a78bfa;--c-vio-tx:#c4b5fd;--c-vio-bg:#2a2147}
   /* logo do kit (a versão certa para o tema atual) */
   .lg2d{display:block;background:var(--twod-logo{% if kit %},url("{{ kit }}logo.png"){% endif %}) center/contain no-repeat}
 </style>

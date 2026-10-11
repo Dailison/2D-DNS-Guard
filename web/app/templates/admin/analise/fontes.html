@@ -3,7 +3,7 @@
 {% block an %}
 <div class="card">
   <table>
-    <thead><tr><th>Fonte</th><th>Tipo</th><th>Confiança</th><th class="num">Peso</th><th class="num">Entradas</th><th>Atualizada</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Fonte</th><th>Tipo</th><th title="Só fontes de confiança alta podem levar um domínio a MALICIOSO. As de confiança média/baixa são sinais: infraestrutura protegida (Microsoft, bancos, gov.br, CDNs…) e domínios populares nunca são condenados só por lista">Confiança</th><th class="num">Peso</th><th class="num">Entradas</th><th>Atualizada</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for s in fontes %}
       <tr class="{{ 'muted-row' if not s.enabled }}">
@@ -27,7 +27,6 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="hint">Só fontes de confiança <b>alta</b> podem levar um domínio a MALICIOSO. As de confiança média/baixa são sinais: infraestrutura protegida (Microsoft, bancos, gov.br, CDNs…) e domínios populares nunca são condenados só por lista.</p>
 </div>
 
 {% endblock %}

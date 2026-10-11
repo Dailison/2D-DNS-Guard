@@ -9,7 +9,7 @@
     <span class="mut" style="margin-left:auto">{{ lista|length }} alerta(s)</span>
   </div>
   <table>
-    <thead><tr><th>Quando</th><th>Sev.</th><th>Tipo</th><th>Alerta</th><th>Computador</th><th>Domínio</th><th></th></tr></thead>
+    <thead><tr><th>Quando</th><th>Sev.</th><th title="Alertas são só informativos: nada é bloqueado automaticamente. Detectores comparativos (domínios novos, pico de consultas) começam após 7 dias de histórico do cliente">Tipo</th><th>Alerta</th><th>Computador</th><th>Domínio</th><th></th></tr></thead>
     <tbody>
     {% set tipos = {'malicious_access':'Acesso malicioso','suspicious_access':'Acesso suspeito','new_domains_spike':'Muitos domínios novos','volume_spike':'Pico de consultas','dga_burst':'Possível DGA'} %}
     {% for a in lista %}
@@ -35,6 +35,5 @@
     {% else %}<tr><td colspan="7" class="mut">Nenhum alerta neste filtro.</td></tr>{% endfor %}
     </tbody>
   </table>
-  <p class="hint">Alertas são só informativos — nada é bloqueado automaticamente. Detectores comparativos (domínios novos, pico de consultas) começam após 7 dias de histórico do cliente.</p>
 </div>
 {% endblock %}

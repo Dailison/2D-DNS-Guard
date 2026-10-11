@@ -69,15 +69,16 @@
       <select name="categoria"><option value="">— Todas —</option>
         {% for c in site_categorias %}<option value="{{ c.code }}" {{ 'selected' if categoria == c.code }}>{{ c.label }}</option>{% endfor %}
       </select></div>
-    <div><label>Classificação IA</label>
+    <div><label title="A da IA para o site, com o ajuste manual da empresa quando houver">Classificação IA</label>
       <select name="cls">{% for v, rot in cls_filtros %}<option value="{{ v }}" {{ 'selected' if cls_f == v }}>{{ rot }}</option>{% endfor %}</select></div>
-    <div><label>Resposta</label>
+    <div><label title="Bloqueadas = respondidas como bloqueio pelo Technitium; Liberadas = o resto">Resposta</label>
       <select name="resposta">{% for v, rot in respostas %}<option value="{{ v }}" {{ 'selected' if resposta == v }}>{{ rot }}</option>{% endfor %}</select></div>
     <div style="flex:0 0 auto"><button class="primary"><i class="bi bi-funnel"></i>Filtrar</button></div>
   </form>
 </div>
 
 {% if dados %}
+{% set T_BARRA = "Clique no nome de uma barra para abrir os Logs já filtrados" %}
 <div class="kpis" id="kpis"></div>
 
 <div class="card">
@@ -88,12 +89,11 @@
 </div>
 
 <div class="grid2">
-  <div class="card"><h2>Por classificação da IA</h2><div class="leg"></div><div id="cCls"></div><details><summary>Ver tabela</summary><div id="tbCls"></div></details></div>
-  <div class="card"><h2>Por categoria do site</h2><div class="leg"></div><div id="cCat"></div><details><summary>Ver tabela</summary><div id="tbCat"></div></details></div>
-  <div class="card"><h2>Por empresa</h2><div class="leg"></div><div id="cEmp"></div><details><summary>Ver tabela</summary><div id="tbEmp"></div></details></div>
-  <div class="card"><h2>Sites mais consultados</h2><div class="leg"></div><div id="cTop"></div><details><summary>Ver tabela</summary><div id="tbTop"></div></details></div>
+  <div class="card"><h2 title="A classificação da IA para o site, com o ajuste manual da empresa quando houver. {{ T_BARRA }}">Por classificação da IA</h2><div class="leg"></div><div id="cCls"></div><details><summary>Ver tabela</summary><div id="tbCls"></div></details></div>
+  <div class="card"><h2 title="{{ T_BARRA }}">Por categoria do site</h2><div class="leg"></div><div id="cCat"></div><details><summary>Ver tabela</summary><div id="tbCat"></div></details></div>
+  <div class="card"><h2 title="{{ T_BARRA }}">Por empresa</h2><div class="leg"></div><div id="cEmp"></div><details><summary>Ver tabela</summary><div id="tbEmp"></div></details></div>
+  <div class="card"><h2 title="{{ T_BARRA }}">Sites mais consultados</h2><div class="leg"></div><div id="cTop"></div><details><summary>Ver tabela</summary><div id="tbTop"></div></details></div>
 </div>
-<p class="mut" style="font-size:.82rem;margin-top:.8rem">Clique no nome de uma barra para abrir os <b>Logs</b> já filtrados. Classificação = a da IA para o site, com o ajuste manual da empresa quando houver. <b>Bloqueadas</b> = respondidas como bloqueio pelo Technitium; <b>Liberadas</b> = o resto.</p>
 <div class="tt" id="tt"></div>
 {% endif %}
 </div>
@@ -155,12 +155,13 @@
 
   // ---------- KPIs
   const T = D.totais, total = (T.liberadas || 0) + (T.bloqueadas || 0), k = document.getElementById("kpis");
-  [["Consultas", total, SERIES.length > 1 ? "liberadas + bloqueadas" : (RESP === "liberado" ? "só liberadas" : "só bloqueadas")],
+  // [rótulo, valor, legenda (só dado ou estado do filtro), dica (explicação: vai no tooltip do cartão)]
+  [["Consultas", total, SERIES.length > 1 ? "" : (RESP === "liberado" ? "só liberadas" : "só bloqueadas"), "Liberadas + bloqueadas"],
    ...(SERIES.length > 1 ? [["Liberadas", T.liberadas, total ? Math.round(T.liberadas * 100 / total) + "% do total" : ""],
                             ["Bloqueadas", T.bloqueadas, total ? Math.round(T.bloqueadas * 100 / total) + "% do total" : ""]] : []),
-   ["Sites", T.sites, "domínios distintos"], ["Consultas a ameaças", T.ameacas, "Malicioso + Suspeito"]].forEach(([l, v, s]) => {
-    const c = el("div", "kpi"); c.appendChild(el("div", "l", l)); const vv = el("div", "v", cf.format(v || 0)); vv.title = nf.format(v || 0);
-    c.appendChild(vv); c.appendChild(el("div", "s", s)); k.appendChild(c);
+   ["Sites", T.sites, "", "Domínios distintos"], ["Consultas a ameaças", T.ameacas, "", "Malicioso + Suspeito"]].forEach(([l, v, s, dica]) => {
+    const c = el("div", "kpi"); if (dica) c.title = dica; c.appendChild(el("div", "l", l)); const vv = el("div", "v", cf.format(v || 0)); vv.title = nf.format(v || 0);
+    c.appendChild(vv); if (s) c.appendChild(el("div", "s", s)); k.appendChild(c);
   });
 
   // ---------- tabela equivalente de cada gráfico

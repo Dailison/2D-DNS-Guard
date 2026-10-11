@@ -7,9 +7,9 @@
 {% from "admin/_liberado_listas.html" import sel_listas, script_listas with context %}
 
 <div class="card">
-  <h2>Liberar IP</h2>
+  <h2 title="A descrição fica no DNS Guard; o Technitium guarda só o IP">Liberar IP</h2>
   <form method="post" action="{{ url_for('admin.liberados_liberar') }}" class="row">
-    <div><label>IP ou faixa (CIDR)</label><input type="text" name="ip" id="ip_novo" placeholder="10.100.10.20 ou 10.100.10.0/24" required autocomplete="off"></div>
+    <div><label title="IP único vira /32 automaticamente. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro de Empresas">IP ou faixa (CIDR)</label><input type="text" name="ip" id="ip_novo" placeholder="10.100.10.20 ou 10.100.10.0/24" required autocomplete="off"></div>
     <div><label>Empresa</label>{{ sel_empresa(None, None) }}</div>
     <div><label>Filial</label>{{ sel_filial(None, None, None) }}</div>
     <div><label>Departamento</label><input type="text" name="departamento" placeholder="Ex.: Recepção"></div>
@@ -20,13 +20,11 @@
       title="quem da empresa pediu/autorizou a liberação (fica no histórico junto com o seu usuário)"></div>
     <div style="flex:0;display:flex;align-items:flex-end"><button class="primary"><i class="bi bi-unlock"></i>Liberar</button></div>
   </form>
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0">IP único vira <code>/32</code> automaticamente. Ao digitar o IP, empresa e filial são sugeridas pelas redes do cadastro de
-    <a href="{{ url_for('analise.empresas') }}">Empresas</a>. A descrição fica no DNS Guard; o Technitium guarda só o IP.</p>
 </div>
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem">
-    <h2 style="margin:0">{{ rows|length }} IP(s) liberado(s)</h2>
+    <h2 style="margin:0" title="Edite na linha e clique Salvar">{{ rows|length }} IP(s) liberado(s)</h2>
     <form method="get" style="display:flex;gap:.4rem;flex-wrap:wrap">
       <select name="empresa" onchange="this.form.submit()" style="width:auto">
         <option value="">Todas as empresas</option>
@@ -35,7 +33,6 @@
       <input type="text" name="q" value="{{ q }}" placeholder="buscar IP, empresa, filial, departamento, usuário">
     </form>
   </div>
-  <p class="mut" style="font-size:.85rem;margin:0 0 .6rem">Edite na linha e clique <b>Salvar</b>.</p>
   <table>
     <thead><tr><th>IP / Faixa</th><th>Libera</th><th>Empresa</th><th>Filial</th><th>Departamento</th><th>Usuário</th><th>Tipo</th><th>Autorizado por</th><th>Liberado por</th><th></th></tr></thead>
     <tbody>

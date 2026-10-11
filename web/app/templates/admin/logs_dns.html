@@ -4,9 +4,10 @@
 {# selos da classificação da IA: esta tela não herda o _base.html da Análise #}
 <style>
   /* classificação da IA: cores de categoria (_tema.html) */
-  .cls{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .45rem;border-radius:6px;color:#fff;white-space:nowrap}
-  .cls.TRABALHO{background:var(--c-trab)}.cls.NAO_TRABALHO{background:var(--c-ntrab)}.cls.SUSPEITO{background:var(--c-susp)}
-  .cls.MALICIOSO{background:var(--c-mal)}.cls.DESCONHECIDO{background:var(--c-desc)}.cls.PENDENTE{background:var(--c-pend)}
+  .cls{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .45rem;border-radius:6px;white-space:nowrap}
+  .cls.TRABALHO{background:var(--c-trab);color:var(--on-c-trab)}.cls.NAO_TRABALHO{background:var(--c-ntrab);color:var(--on-c-ntrab)}
+  .cls.SUSPEITO{background:var(--c-susp);color:var(--on-c-susp)}.cls.MALICIOSO{background:var(--c-mal);color:var(--on-c-mal)}
+  .cls.DESCONHECIDO{background:var(--c-desc);color:var(--on-c-desc)}.cls.PENDENTE{background:var(--c-pend);color:var(--on-c-pend)}
   .cls-cat{display:block;font-size:.72rem;color:var(--mut);margin-top:.1rem}
   .blk{color:var(--er-tx);font-weight:600}
 </style>
@@ -17,23 +18,28 @@
   {% else %}<span class="mut">—</span>{% endif %}
 {% endmacro %}
 <div class="pg-h"><h1 title="Technitium, com empresa por IP"><i class="bi bi-clock-history"></i>Logs</h1></div>
+{# explicações em tooltip, no rótulo do campo e no cabeçalho da coluna a que se referem #}
+{% set T_CLS = "A do analisador para o site; o ajuste manual da empresa (marcado com o lápis) prevalece. Juntando empresas numa linha, vale a pior. Ameaças = Malicioso + Suspeito" %}
+{% set T_RESP = "Como o Technitium respondeu: Blocked = bloqueado pelo filtro; Cached, Recursive… = resolvido" %}
+{% set T_DESB = "Nas linhas Blocked: o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME). O botão tira esse domínio de todas as listas de bloqueio (vale no DNS em até 2 min)" %}
+{% set T_PER = "Horário no fuso de São Paulo (GMT-3). Reduza o período para buscas mais fundas" %}
 
 <div class="card">
   <form method="get" class="row">
-    <div><label>Empresa</label>
+    <div><label title="Vem do cadastro de empresas: todas as unidades e redes dela">Empresa</label>
       <select name="empresa">
         <option value="">— Todas —</option>
         {% for e in lista_empresas %}<option value="{{ e.id }}" {{ 'selected' if empresa == e.id|string }}>{{ e.name }}{{ ' (sem cadastro)' if e.auto_created }}</option>{% endfor %}
       </select></div>
-    <div><label>Faixa / parte do IP</label><input type="text" name="cidr" value="{{ cidr }}" placeholder="10.100 ou 10.70.0.0/16"></div>
+    <div><label title="Aceita CIDR (10.70.0.0/16) ou um pedaço do IP (10.100 traz todos os IPs que contêm isso)">Faixa / parte do IP</label><input type="text" name="cidr" value="{{ cidr }}" placeholder="10.100 ou 10.70.0.0/16"></div>
     <div><label>IP exato</label><input type="text" name="ip" value="{{ ip }}" placeholder="10.70.20.9"></div>
     <div><label>Domínio (contém)</label><input type="text" name="dominio" value="{{ dominio }}" placeholder="ex.: jogos"></div>
-    <div><label>Resposta (tipo)</label>
+    <div><label title="{{ T_RESP }}">Resposta (tipo)</label>
       <select name="resposta">
         <option value="">— Todas —</option>
         {% for r in respostas %}<option value="{{ r }}" {{ 'selected' if resposta==r }}>{{ r }}</option>{% endfor %}
       </select></div>
-    <div><label>Classificação IA</label>
+    <div><label title="{{ T_CLS }}">Classificação IA</label>
       <select name="cls">
         {% for v, rot in cls_filtros %}<option value="{{ v }}" {{ 'selected' if cls_f == v }}>{{ rot }}</option>{% endfor %}
       </select></div>
@@ -42,9 +48,9 @@
         <option value="">— Todas —</option>
         {% for c in site_categorias %}<option value="{{ c.code }}" {{ 'selected' if categoria == c.code }}>{{ c.label }}</option>{% endfor %}
       </select></div>
-    <div><label>Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
-    <div><label>Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
-    <div><label>Vista</label>
+    <div><label title="{{ T_PER }}">Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
+    <div><label title="{{ T_PER }}">Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
+    <div><label title="Para descobrir qual computador acessou um site malicioso: Classificação IA = Malicioso e vista Por computador">Vista</label>
       <select name="vista" onchange="this.form.submit()">
         <option value="agrupado" {{ 'selected' if vista == 'agrupado' }}>Agrupado por domínio</option>
         <option value="cliente" {{ 'selected' if vista == 'cliente' }}>Por computador (quem acessou)</option>
@@ -54,9 +60,6 @@
       <label class="chk" style="margin:0 0 .45rem;font-weight:400;white-space:nowrap" title="zonas locais do Technitium (ex.: 2d.local), nomes sem ponto e consultas reversas (PTR)"><input type="checkbox" name="locais" value="1" {{ 'checked' if locais }} onchange="this.form.submit()"> <span>mostrar nomes locais</span></label>
       <button class="primary"><i class="bi bi-funnel"></i>Filtrar</button></div>
   </form>
-  <p class="mut" style="font-size:.85rem;margin:.6rem 0 0"><b>Empresa</b> vem do <a href="{{ url_for('analise.empresas') }}">cadastro de empresas</a> (todas as unidades/redes dela). <b>Faixa / parte do IP</b> aceita CIDR (<code>10.70.0.0/16</code>) ou um pedaço do IP (<code>10.100</code> traz todos os IPs que contêm isso). <b>Resposta</b> = como o Technitium respondeu (<code>Blocked</code> = bloqueado pelo filtro, <code>Cached</code>, <code>Recursive</code>…). Reduza o período para buscas mais fundas. Horários no fuso de São Paulo (GMT-3).</p>
-  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0"><b>Classificação IA</b> = a do analisador para o site (o ajuste manual da empresa, marcado com <i class="bi bi-pencil"></i>, prevalece); juntando empresas numa linha, vale a pior. <b>Ameaças</b> = Malicioso + Suspeito. Para descobrir <b>qual computador</b> acessou um site malicioso: Classificação IA = Malicioso e vista <b>Por computador</b>.</p>
-  <p class="mut" style="font-size:.85rem;margin:.3rem 0 0">Nas linhas <b class="blk">Blocked</b>, a coluna <b>Desbloquear</b> mostra o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME <i class="bi bi-arrow-return-right"></i>). O botão <i class="bi bi-x-lg t-er"></i> tira esse domínio de <b>todas as listas de bloqueio</b> (vale no DNS em até 2 min).</p>
 </div>
 
 <div class="card">
@@ -67,7 +70,7 @@
       {% else %}{{ linhas|length }} registro(s){% endif %}
     </h2>
     <span class="mut" style="font-size:.8rem">
-      {% if fonte_analisador is defined %}fonte: analisador (agregado por hora, coletado até {{ (coletado_ate or '—')[11:16] }} — ~5-7 min de atraso; tempo real: vista <b>Detalhado</b>){% if cap %} · <b>limite de 1000 domínios</b> — refine o filtro{% endif %}
+      {% if fonte_analisador is defined %}<span class="selo" title="Fonte: analisador, agregado por hora (~5-7 min de atraso). Tempo real: vista Detalhado"><i class="bi bi-clock-history"></i>coletado até {{ (coletado_ate or '—')[11:16] }}</span>{% if cap %} <span class="selo av" title="Só os 1000 domínios mais acessados aparecem: refine o filtro"><i class="bi bi-exclamation-triangle"></i>limite de 1000 domínios</span>{% endif %}
       {% elif fonte_detalhe is defined %}fonte: analisador (coletado até {{ (coletado_ate or '—')[11:16] }}){% if coberto_desde %} · de <b>{{ coberto_desde[11:16] }}</b>{% if coberto_desde[:10] != fim[:10] %} ({{ coberto_desde[8:10] }}/{{ coberto_desde[5:7] }}){% endif %} em diante · <a href="{{ url_antigos }}">mais antigos</a>{% endif %}{% if guardado_desde %} · guardado desde {{ guardado_desde[8:10] }}/{{ guardado_desde[5:7] }} {{ guardado_desde[11:16] }}{% endif %} · <a href="{{ url_aovivo }}" title="consulta direto o Technitium: tempo real, mais lento">ao vivo</a>
       {% else %}{{ scanned }} varridos{% if coberto_desde %} · de <b>{{ coberto_desde[11:16] }}</b>{% if coberto_desde[:10] != fim[:10] %} ({{ coberto_desde[8:10] }}/{{ coberto_desde[5:7] }}){% endif %} em diante · <a href="{{ url_antigos }}">mais antigos</a>{% endif %}{% if url_analisador %} · ao vivo (Technitium) · <a href="{{ url_analisador }}">voltar ao analisador</a>{% endif %}{% endif %}
     </span>
@@ -87,7 +90,7 @@
   {% endmacro %}
   {% if vista == 'cliente' %}
   <table>
-    <thead><tr><th>Último acesso</th><th>Computador</th><th>Empresa</th><th>Domínio</th><th>Classificação IA</th><th>Entradas</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <thead><tr><th>Último acesso</th><th>Computador</th><th>Empresa</th><th>Domínio</th><th title="{{ T_CLS }}">Classificação IA</th><th>Entradas</th><th title="{{ T_RESP }}">Resposta</th><th title="{{ T_DESB }}">Desbloquear</th></tr></thead>
     <tbody>
     {% for a in agrupado %}
       <tr>
@@ -107,7 +110,7 @@
   </table>
   {% elif agrupar %}
   <table>
-    <thead><tr><th>Último acesso</th><th>Domínio</th><th>Classificação IA</th><th>Entradas</th><th>Clientes</th><th>Empresas</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <thead><tr><th>Último acesso</th><th>Domínio</th><th title="{{ T_CLS }}">Classificação IA</th><th>Entradas</th><th>Clientes</th><th>Empresas</th><th title="{{ T_RESP }}">Resposta</th><th title="{{ T_DESB }}">Desbloquear</th></tr></thead>
     <tbody>
     {% for a in agrupado %}
       <tr>
@@ -129,7 +132,7 @@
   </table>
   {% else %}
   <table>
-    <thead><tr><th>Quando (São Paulo)</th><th>Cliente</th><th>Domínio</th><th>Classificação IA</th><th>Tipo</th><th>Resposta</th><th>Desbloquear</th></tr></thead>
+    <thead><tr><th title="Horário no fuso de São Paulo (GMT-3)">Quando (São Paulo)</th><th>Cliente</th><th>Domínio</th><th title="{{ T_CLS }}">Classificação IA</th><th>Tipo</th><th title="{{ T_RESP }}">Resposta</th><th title="{{ T_DESB }}">Desbloquear</th></tr></thead>
     <tbody>
     {% for l in linhas %}
       <tr>

@@ -19,7 +19,7 @@
        --e-novo:var(--inf-tx);--e-novo-bg:var(--inf-bg);--e-novo-bd:color-mix(in srgb,var(--inf) 40%,transparent);
        --e-rea:var(--av-tx);--e-rea-bg:var(--av-bg);--e-rea-bd:color-mix(in srgb,var(--av) 40%,transparent);
        --e-ped:#a21caf;--e-ped-bg:#fdf4ff;--e-ped-bd:#f5d0fe;
-       --p-ok:var(--c-trab-tx);--p-am:var(--av-tx);--p-or:var(--c-susp-tx);--p-rd:var(--er-tx);--p-sl:var(--txt2);
+       --p-ok:var(--ok-tx);--p-am:var(--av-tx);--p-or:var(--c-susp-tx);--p-rd:var(--er-tx);--p-sl:var(--txt2);
        color:var(--tx);display:flex;flex-direction:column;gap:10px}
   html[data-theme="dark"] .iav{--e-ped:#f0abfc;--e-ped-bg:rgba(240,171,252,.1);--e-ped-bd:rgba(240,171,252,.4)}
   .iav *{scrollbar-color:color-mix(in srgb,var(--mu) 40%,transparent) transparent}
@@ -167,7 +167,7 @@
   .pz-menu small{margin-left:auto;color:var(--r-md);font-weight:700}
   .pz-ck{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--mu);flex:0 0 auto;position:relative}
   .pz-ck.on{background:var(--am);border-color:var(--am)}
-  .pz-ck.on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+  .pz-ck.on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid var(--on-av);border-width:0 2px 2px 0;transform:rotate(45deg)}
   .pz-menu hr{border:0;border-top:1px solid var(--ln);margin:4px 2px}
   .pz-err{margin:4px 8px;color:var(--rd);font-size:.78rem}
 

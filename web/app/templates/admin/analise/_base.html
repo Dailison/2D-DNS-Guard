@@ -9,12 +9,13 @@
              border-bottom:2px solid transparent;margin-bottom:-1px}
   .an-tabs a:hover{color:var(--txt)}
   .an-tabs a.on{color:var(--b);border-bottom-color:var(--pri)}
-  /* classificação e severidade: cores de categoria (_tema.html), selo cheio com texto branco nos dois temas */
-  .cls{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .45rem;border-radius:6px;color:#fff;white-space:nowrap}
-  .cls.TRABALHO{background:var(--c-trab)}.cls.NAO_TRABALHO{background:var(--c-ntrab)}.cls.SUSPEITO{background:var(--c-susp)}
-  .cls.MALICIOSO{background:var(--c-mal)}.cls.DESCONHECIDO{background:var(--c-desc)}.cls.PENDENTE{background:var(--c-pend)}
+  /* classificação e severidade: cores e texto do selo cheio em _tema.html (estados do Hub + categorias próprias) */
+  .cls{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .45rem;border-radius:6px;white-space:nowrap}
+  .cls.TRABALHO{background:var(--c-trab);color:var(--on-c-trab)}.cls.NAO_TRABALHO{background:var(--c-ntrab);color:var(--on-c-ntrab)}
+  .cls.SUSPEITO{background:var(--c-susp);color:var(--on-c-susp)}.cls.MALICIOSO{background:var(--c-mal);color:var(--on-c-mal)}
+  .cls.DESCONHECIDO{background:var(--c-desc);color:var(--on-c-desc)}.cls.PENDENTE{background:var(--c-pend);color:var(--on-c-pend)}
   .sev{font-size:.72rem;font-weight:700;padding:.1rem .4rem;border-radius:6px;color:#fff}
-  .sev.critical{background:#7f1d1d}.sev.high{background:var(--er)}.sev.medium{background:var(--c-susp)}.sev.low{background:var(--c-desc)}
+  .sev.critical{background:#7f1d1d}.sev.high{background:var(--er);color:var(--on-er)}.sev.medium{background:var(--c-susp);color:var(--on-c-susp)}.sev.low{background:var(--c-desc)}
   .bar{height:6px;border-radius:4px;background:var(--card3);min-width:60px;overflow:hidden}
   .bar>span{display:block;height:100%}
   .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}

@@ -8,16 +8,16 @@
     <div class="row">
       <div><label>Nome</label><input type="text" name="nome"></div>
       <div><label>E-mail</label><input type="email" name="email" required></div>
-      <div><label>Senha local <span class="mut">(opcional com login único)</span></label><input type="text" name="senha" minlength="8"></div>
+      <div><label title="Opcional com login único">Senha local</label><input type="text" name="senha" minlength="8"></div>
     </div>
-    <label class="mut" style="margin-top:.6rem"><input type="checkbox" name="is_super"> Super-admin (gerencia operadores)</label>
+    <label class="chk" style="margin-top:.6rem" title="Gerencia operadores"><input type="checkbox" name="is_super"> Super-admin</label>
     <div style="margin-top:.6rem"><button class="primary"><i class="bi bi-plus-lg"></i>Criar</button></div>
   </form>
 </div>
 <div class="card">
   <h2>Operadores · {{ lista|length }}</h2>
   <table>
-    <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Nova senha</th><th>Último acesso</th><th>Ativo</th></tr></thead>
+    <thead><tr><th>Nome</th><th>E-mail</th><th title="Todo operador ativo usa todas as telas de DNS; o papel Super só acrescenta esta tela">Papel</th><th>Nova senha</th><th>Último acesso</th><th{% if config.SSO_LOGIN_URL %} title="Quem entra pelo login único 2D (usuário do ERP) aparece aqui como aguardando liberação"{% endif %}>Ativo</th></tr></thead>
     <tbody>
     {% for a in lista %}
       {% set pendente = not a.ativo and not a.last_login %}
@@ -51,7 +51,5 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="mut" style="font-size:.8rem">Todo operador ativo usa todas as telas de DNS; o papel <b>Super</b> só acrescenta esta tela.
-    {% if config.SSO_LOGIN_URL %}Quem entra pelo login único 2D (usuário do ERP) aparece aqui como <b>aguardando liberação</b>.{% endif %}</p>
 </div>
 {% endblock %}

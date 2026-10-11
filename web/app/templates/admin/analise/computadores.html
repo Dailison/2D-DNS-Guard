@@ -2,9 +2,9 @@
 {% import "admin/analise/_macros.html" as m with context %}
 {% block an %}
 <div class="card">
-  <h2>{{ lista|length }} computador(es) <span class="mut" style="font-size:.8rem;font-weight:400">· ordenados por comportamento anormal</span></h2>
+  <h2 title="Ordenados por comportamento anormal">{{ lista|length }} computador(es)</h2>
   <table>
-    <thead><tr><th>Computador</th><th>Score</th><th class="num">Consultas</th><th class="num">Domínios</th><th class="num">% não trab.</th><th class="num">Suspeitos</th><th class="num">Maliciosos</th><th class="num">Novos 24h</th><th class="num">Alertas</th><th>Último</th></tr></thead>
+    <thead><tr><th title="Computadores atrás de NAT aparecem como o IP do roteador do site: para ver cada máquina, o DNS precisa chegar ao Technitium sem NAT">Computador</th><th title="Score 0–100: combina % de consultas não relacionadas ao trabalho, domínios suspeitos/maliciosos, domínios inéditos e alertas abertos">Score</th><th class="num">Consultas</th><th class="num">Domínios</th><th class="num">% não trab.</th><th class="num">Suspeitos</th><th class="num">Maliciosos</th><th class="num">Novos 24h</th><th class="num">Alertas</th><th>Último</th></tr></thead>
     <tbody>
     {% for p in lista %}
       <tr class="{{ 'muted-row' if p.anomaly_score < 20 }}">
@@ -18,6 +18,5 @@
     {% else %}<tr><td colspan="10" class="mut">Nenhum computador com consultas no período.</td></tr>{% endfor %}
     </tbody>
   </table>
-  <p class="hint">Computadores atrás de NAT aparecem como o IP do roteador do site: para ver cada máquina, o DNS precisa chegar ao Technitium sem NAT.</p>
 </div>
 {% endblock %}

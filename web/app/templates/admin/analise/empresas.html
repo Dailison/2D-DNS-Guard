@@ -20,8 +20,7 @@
 
 {% if sem %}
 <div class="card" style="border-color:var(--av)">
-  <h2><i class="bi bi-exclamation-triangle t-av"></i> Redes com tráfego e sem cadastro ({{ sem|length }})</h2>
-  <p class="mut" style="font-size:.85rem;margin-top:0">O analisador separou estes IPs numa "empresa automática" para não misturá-los com outra empresa. Atribua cada rede à empresa certa (os dados já coletados vão junto).</p>
+  <h2 title="O analisador separou estes IPs numa &quot;empresa automática&quot; para não misturá-los com outra empresa. Atribua cada rede à empresa certa (os dados já coletados vão junto)"><i class="bi bi-exclamation-triangle t-av"></i> Redes com tráfego e sem cadastro ({{ sem|length }})</h2>
   <table class="emp">
     <thead><tr><th>Rede</th><th class="num">PCs</th><th>Último acesso</th><th>Atribuir a</th></tr></thead>
     <tbody>
@@ -53,9 +52,8 @@
 
 <div class="card">
   <h2>Empresas cadastradas ({{ cadastradas|length }})</h2>
-  <p class="mut" style="font-size:.85rem;margin-top:0">Cada consulta DNS é atribuída pela <b>rede mais específica</b> que contém o IP. O roteador de cada site na malha WireGuard (<code>10.100.100.N</code>) conta como da empresa dona de <code>10.N.0.0/16</code>. Mudar uma rede de empresa realoca o histórico daqueles IPs.</p>
   <table class="emp">
-    <thead><tr><th style="min-width:210px">Empresa</th><th>Unidades (nome · CIDR)</th><th>Listas de bloqueio</th><th class="num">PCs</th><th>Último acesso</th><th></th></tr></thead>
+    <thead><tr><th style="min-width:210px">Empresa</th><th title="Cada consulta DNS é atribuída pela rede mais específica que contém o IP. O roteador de cada site na malha WireGuard (10.100.100.N) conta como da empresa dona de 10.N.0.0/16. Mudar uma rede de empresa realoca o histórico daqueles IPs">Unidades (nome · CIDR)</th><th>Listas de bloqueio</th><th class="num">PCs</th><th>Último acesso</th><th></th></tr></thead>
     <tbody>
     {% for t in cadastradas %}
       <tr>
@@ -125,20 +123,19 @@
   <div class="card">
     <h2>Importar da planilha</h2>
     <form method="post" action="{{ url_for('analise.empresas_importar') }}">
-      <label>Cole as linhas (Excel copia com TAB entre as colunas)</label>
+      <label title="Excel copia com TAB entre as colunas. Formatos por linha: Empresa ⇥ CIDR ou Empresa ⇥ Unidade ⇥ CIDR (também aceita ; ou |). Empresa com várias unidades = várias linhas com o mesmo nome de empresa. Reimportar é seguro: só cria/atualiza">Cole as linhas</label>
       <textarea name="planilha" rows="9" style="width:100%;font-family:monospace;font-size:.85rem" placeholder="Semetra	10.7.0.0/16
 Moral Auto Peças	PBS	10.57.0.0/16
 Moral Auto Peças	CAN	10.58.0.0/16"></textarea>
-      <label class="chk"><input type="checkbox" name="substituir" value="1"> Substituir o cadastro: remover redes das empresas cadastradas que não estão na lista</label>
+      <label class="chk" title="Remove as redes das empresas cadastradas que não estão na lista"><input type="checkbox" name="substituir" value="1"> Substituir o cadastro</label>
       <button class="primary" style="margin-top:.4rem"><i class="bi bi-upload"></i>Importar</button>
     </form>
-    <p class="hint">Formatos por linha: <code>Empresa ⇥ CIDR</code> ou <code>Empresa ⇥ Unidade ⇥ CIDR</code> (também aceita <code>;</code> ou <code>|</code>). Empresa com várias unidades = várias linhas com o mesmo nome de empresa. Reimportar é seguro: só cria/atualiza.</p>
   </div>
   <div class="card">
     <h2>Nova empresa</h2>
     <form method="post" action="{{ url_for('analise.empresa_criar') }}">
       <label>Nome</label><input type="text" name="nome" required placeholder="Ex.: Norte Sul">
-      <label>Unidades (uma por linha: <code>CIDR</code> ou <code>Unidade CIDR</code>)</label>
+      <label title="Uma por linha: CIDR ou Unidade CIDR">Unidades</label>
       <textarea name="redes" rows="4" style="width:100%;font-family:monospace;font-size:.85rem" placeholder="I 10.51.0.0/16
 II 10.52.0.0/16"></textarea>
       <button class="primary" style="margin-top:.4rem"><i class="bi bi-plus-lg"></i>Criar</button>
@@ -147,7 +144,7 @@ II 10.52.0.0/16"></textarea>
 </div>
 
 <dialog id="dlgPol" class="dlg" style="max-width:640px;width:calc(100vw - 32px)">
-  <h2 style="margin:0 0 .2rem">Listas de bloqueio — <span id="pNome"></span></h2>
+  <h2 style="margin:0 0 .2rem" title="As listas valem em até 2 min; as exceções, na hora. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}">Listas de bloqueio — <span id="pNome"></span></h2>
   <div class="row" style="align-items:flex-end;margin:.3rem 0 .4rem">
     <div><label>Aplicar a</label><select id="pEscopo"></select></div>
     <label class="chk" id="pHerdarBox" style="margin:0 0 .45rem;display:none"><input type="checkbox" id="pHerdar"> <span>usar as listas da empresa</span></label>
@@ -156,14 +153,13 @@ II 10.52.0.0/16"></textarea>
     {{ caixas("pListas", 'class="pLista"', ['para_revisar']) }}
     {% set avulsas = pacotes %}
     {% if avulsas %}
-    <div class="pcat"><div style="font-weight:600;margin:.2rem 0">Liberar como exceção <span class="mut" style="font-weight:400;font-size:.8rem">(serviços e listas de liberação — vencem qualquer bloqueio)</span></div>
+    <div class="pcat"><div style="font-weight:600;margin:.2rem 0" title="Serviços e listas de liberação: vencem qualquer bloqueio">Liberar como exceção</div>
       <div class="psrv">{% for x in avulsas %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" class="pAvulsa" value="{{ x.slug }}"> <span>{{ x.name }}</span></label>{% endfor %}</div>
     </div>
     {% endif %}
   </div>
   <div class="previa" id="pPrev" hidden></div>
-  <p class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem"><i class="bi bi-lightning-charge-fill t-av"></i> = listas de risco. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}. As listas valem em até 2 min; as exceções, na hora.</p>
-  <div style="display:flex;gap:.5rem;justify-content:flex-end">
+  <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.6rem">
     <button type="button" onclick="document.getElementById('dlgPol').close()"><i class="bi bi-x-lg"></i>Cancelar</button>
     <button type="button" class="primary" id="pSalvar"><i class="bi bi-check-lg"></i>Salvar e aplicar</button>
   </div>

@@ -631,3 +631,25 @@ def test_backfill_da_copia_dos_logs(api):
         assert c.execute("SELECT sum(queries) AS n FROM query_agg").fetchone()["n"] == agg
         assert c.execute("SELECT count(*) AS n FROM domains").fetchone()["n"] == doms
     assert collector.backfill_log(Tech(), dias=1 / 24, pausa=0)["rows"] == 0
+
+
+def test_logs_filtram_por_varias_categorias(api):
+    """10/10 (pedido do usuário): a tela de Logs marca/desmarca categorias numa lista — `categoria` pode vir várias
+    vezes, no detalhe (query_log) e no agrupado (query_agg). Uma só continua valendo."""
+    from dnsanalyzer import collector, db
+    t0 = AGORA.replace(minute=20)
+    nomes = [("www.aposta-cat.com", "apostas"), ("www.jogo-cat.com", "jogos"), ("www.video-cat.com", "streaming")]
+    ents = [{"timestamp": (t0 + timedelta(seconds=i)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "clientIpAddress": "10.35.0.9", "qname": q,
+             "qtype": "A", "responseType": "Recursive", "rcode": "NoError", "answer": "1.2.3.4"} for i, (q, _) in enumerate(nomes)]
+    ini, fim = t0 - timedelta(seconds=5), t0 + timedelta(seconds=60)
+    with db.conn() as c:
+        st = collector.store(c, collector.aggregate(ents, ini, fim))
+        collector.store_log(c, ents, ini, fim, st.pop("_ip_tenant"), st.pop("_fq_dom"))
+        for q, cat in nomes:
+            c.execute("UPDATE domains SET category = %s WHERE name = %s", (cat, q[4:]))
+    q = {"start": ini.isoformat(), "end": fim.isoformat(), "dominio": "-cat.com"}
+    det = lambda **k: sorted(r["dominio"] for r in api.get("/logs/detalhe", params={**q, **k}, headers=H).json()["rows"])   # noqa: E731
+    assert det(categoria=["apostas", "jogos"]) == ["www.aposta-cat.com", "www.jogo-cat.com"]
+    assert det(categoria="streaming") == ["www.video-cat.com"] and len(det()) == 3
+    ag = api.get("/logs/grouped", params={**q, "categoria": ["jogos", "streaming"]}, headers=H).json()
+    assert sorted(r["dominio"] for r in ag["rows"]) == ["www.jogo-cat.com", "www.video-cat.com"]

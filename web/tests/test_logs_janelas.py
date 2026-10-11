@@ -144,3 +144,48 @@ def test_pedaco_de_ip_no_campo_ip_exato_vale_como_faixa(tela):
     html = c.get("/logs-dns?ip=abc&cidr=10.7.0.0/24&vista=agrupado").get_data(as_text=True)   # os dois: ignora o inválido
     p = next(p for path, p in chamadas if path == "/logs/grouped")
     assert p["ip"] is None and p["cidr"] == ["10.7.0.0/24"] and "não é um IP completo" in html
+
+
+CATS = [{"code": "apostas", "label": "Apostas"}, {"code": "jogos", "label": "Jogos"}, {"code": "streaming", "label": "Vídeo e streaming"}]
+
+
+def test_categorias_em_lista_de_marcar(tela, monkeypatch):
+    """10/10 (pedido do usuário): o filtro de categoria é uma lista de marcar/desmarcar. Várias marcadas vão todas p/ o
+    analisador; todas marcadas (ou nenhuma) = sem filtro."""
+    c, chamadas = tela
+    monkeypatch.setattr("app.dns._site_categorias", lambda: CATS)
+    html = c.get("/logs-dns?vista=detalhado&categoria=apostas&categoria=jogos&categoria=inventada").get_data(as_text=True)
+    assert [p for path, p in chamadas if path == "/logs/detalhe"][-1]["categoria"] == ["apostas", "jogos"]
+    assert 'value="apostas" data-n="Apostas" checked' in html and 'value="jogos" data-n="Jogos" checked' in html
+    assert 'value="streaming" data-n="Vídeo e streaming" >' in html and "<summary>Apostas, Jogos</summary>" in html
+    assert 'select name="categoria"' not in html
+    chamadas.clear()
+    html = c.get("/logs-dns?vista=detalhado&categoria=apostas&categoria=jogos&categoria=streaming").get_data(as_text=True)
+    assert [p for path, p in chamadas if path == "/logs/detalhe"][-1].get("categoria") is None, "todas marcadas = sem filtro"
+    assert "<summary>— Todas —</summary>" in html and html.count('name="categoria" value=') == 3 and html.count(" checked>") >= 3
+
+
+def test_filtros_ficam_guardados_no_navegador(tela, monkeypatch):
+    """10/10: os filtros do formulário (menos o período) ficam na sessão; abrir a tela sem parâmetros volta com eles.
+    Link de outra tela (sem o campo do formulário) não mexe no que está guardado; Limpar esquece."""
+    c, chamadas = tela
+    monkeypatch.setattr("app.dns._site_categorias", lambda: CATS)
+    assert c.get("/logs-dns").status_code == 200, "nada guardado: abre com o padrão"
+    c.get("/logs-dns?f=1&empresa=7&vista=detalhado&dominio=bet&categoria=apostas&categoria=jogos&locais=1"
+          "&inicio=2026-10-07T00%3A00&fim=2026-10-07T23%3A59")
+    r = c.get("/logs-dns")
+    assert r.status_code == 302
+    loc = r.headers["Location"]
+    for parte in ("empresa=7", "vista=detalhado", "dominio=bet", "categoria=apostas", "categoria=jogos", "locais=1", "f=1"):
+        assert parte in loc, parte
+    assert "inicio" not in loc and "fim=" not in loc, "o período não é guardado: vale o dia de hoje"
+    chamadas.clear()
+    html = c.get(loc).get_data(as_text=True)
+    p = [p for path, p in chamadas if path == "/logs/detalhe"][-1]
+    assert p["tid"] == 7 and p["dominio"] == "bet" and p["categoria"] == ["apostas", "jogos"] and p["start"] and p["end"]
+    assert 'name="f" value="1"' in html and "limpar=1" in html
+    c.get("/logs-dns?vista=agrupado&dominio=outro")          # link vindo de outra tela: não guarda
+    assert "dominio=bet" in c.get("/logs-dns").headers["Location"]
+    r = c.get("/logs-dns?limpar=1")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/logs-dns")
+    assert c.get("/logs-dns").status_code == 200, "esquecido: volta ao padrão"

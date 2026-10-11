@@ -1218,7 +1218,7 @@ _CLS_COLS = (f"{_CLS_DO_RANK} AS classificacao, bool_or(td.override_classificati
 def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str] = None,
                  cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
                  dominio: Optional[str] = None, blocked: bool = False,
-                 cls: list[str] = Query(default=[]), categoria: Optional[str] = None,
+                 cls: list[str] = Query(default=[]), categoria: list[str] = Query(default=[]),
                  por_cliente: bool = False, sem_locais: bool = False, excluir: list[str] = Query(default=[]),
                  limit: int = Query(1000, le=5000)):
     """Logs DNS agrupados por nome consultado (a partir de query_agg, por hora), com os
@@ -1258,8 +1258,8 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
         if "PENDENTE" in cls:
             cond.append(f"{_CLS_EFETIVA} IS NULL")
         where.append("(" + " OR ".join(cond) + ")")
-    if categoria:
-        where.append("d.category = %(cat)s"); p["cat"] = categoria
+    if categoria:   # (10/10) uma ou várias: a tela de Logs marca/desmarca as categorias numa lista
+        where.append("d.category = ANY(%(cat)s)"); p["cat"] = categoria
     base = ("FROM query_agg q JOIN fqdns f ON f.id=q.fqdn_id JOIN clients cl ON cl.id=q.client_id "
             "JOIN tenants t ON t.id=q.tenant_id JOIN domains d ON d.id=q.domain_id "
             "LEFT JOIN tenant_domains td ON td.tenant_id=q.tenant_id AND td.domain_id=q.domain_id ")
@@ -1290,7 +1290,7 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
 def logs_detalhe(start: datetime, end: datetime, tid: int = 0, ip: Optional[str] = None,
                  cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
                  dominio: Optional[str] = None, resposta: Optional[str] = None,
-                 cls: list[str] = Query(default=[]), categoria: Optional[str] = None,
+                 cls: list[str] = Query(default=[]), categoria: list[str] = Query(default=[]),
                  sem_locais: bool = False, excluir: list[str] = Query(default=[]),
                  limit: int = Query(1000, le=5000)):
     """Logs DNS linha a linha (query_log: cópia dos logs do Technitium feita pelo coletor a cada minuto, 7 dias), com
@@ -1328,7 +1328,7 @@ def logs_detalhe(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
             cond.append(f"{_CLS_EFETIVA} IS NULL")
         where.append("(" + " OR ".join(cond) + ")")
     if categoria:
-        where.append("d.category = %(cat)s"); p["cat"] = categoria
+        where.append("d.category = ANY(%(cat)s)"); p["cat"] = categoria
     sql = ("SELECT l.ts, host(l.client_ip) AS ip, l.tenant_id, l.qname AS dominio, l.qtype AS tipo, l.rtype AS resposta, "
            " l.rcode, l.answer, " + _CLS_EFETIVA + " AS classificacao, (td.override_classification IS NOT NULL) AS ajustada, "
            " d.category AS categoria "

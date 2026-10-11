@@ -10,6 +10,16 @@
   .cls.DESCONHECIDO{background:var(--c-desc);color:var(--on-c-desc)}.cls.PENDENTE{background:var(--c-pend);color:var(--on-c-pend)}
   .cls-cat{display:block;font-size:.72rem;color:var(--mut);margin-top:.1rem}
   .blk{color:var(--er-tx);font-weight:600}
+  /* lista de marcar/desmarcar (categorias) */
+  .ms{position:relative;min-width:11rem}
+  .ms summary{cursor:pointer;list-style:none;border:1px solid var(--bd);border-radius:8px;padding:.45rem .6rem;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;max-width:16rem;background:var(--bg)}
+  .ms summary::-webkit-details-marker{display:none}
+  .ms .pn{position:absolute;z-index:30;top:calc(100% + 4px);left:0;background:var(--card);border:1px solid var(--bd);border-radius:10px;
+    padding:.5rem .75rem;min-width:15rem;max-height:24rem;overflow:auto;box-shadow:0 8px 28px rgba(0,0,0,.28)}
+  .ms .pn label{display:flex;align-items:center;gap:.45rem;font-size:.88rem;font-weight:400;margin:.18rem 0;white-space:nowrap;cursor:pointer}
+  .ms .pn label input{width:auto;margin:0}
+  .ms .pn .ac{display:flex;gap:.9rem;font-size:.8rem;padding-bottom:.35rem;border-bottom:1px solid var(--bd);margin-bottom:.35rem}
 </style>
 {% macro selo(row) %}
   {% if cls_label is defined %}
@@ -43,11 +53,15 @@
       <select name="cls">
         {% for v, rot in cls_filtros %}<option value="{{ v }}" {{ 'selected' if cls_f == v }}>{{ rot }}</option>{% endfor %}
       </select></div>
-    <div><label>Categoria do site</label>
-      <select name="categoria">
-        <option value="">— Todas —</option>
-        {% for c in site_categorias %}<option value="{{ c.code }}" {{ 'selected' if categoria == c.code }}>{{ c.label }}</option>{% endfor %}
-      </select></div>
+    <div><label title="Marque as categorias que quer ver; todas marcadas = sem filtro (inclui o que a IA ainda não classificou)">Categoria do site</label>
+      <details class="ms" id="msCat">
+        <summary>{% if not categorias_sel %}— Todas —{% elif categorias_sel|length <= 2 %}{% for c in categorias_sel %}{{ cat_label.get(c, c) }}{{ ', ' if not loop.last }}{% endfor %}{% else %}{{ categorias_sel|length }} de {{ site_categorias|length }}{% endif %}</summary>
+        <div class="pn">
+          <div class="ac"><a href="#" data-ms="1">marcar todas</a><a href="#" data-ms="0">desmarcar todas</a></div>
+          {% for c in site_categorias %}<label><input type="checkbox" name="categoria" value="{{ c.code }}" data-n="{{ c.label }}" {{ 'checked' if not categorias_sel or c.code in categorias_sel }}> {{ c.label }}</label>
+          {% endfor %}
+        </div>
+      </details></div>
     <div><label title="{{ T_PER }}">Início (São Paulo)</label><input type="datetime-local" name="inicio" value="{{ inicio }}"></div>
     <div><label title="{{ T_PER }}">Fim (São Paulo)</label><input type="datetime-local" name="fim" value="{{ fim }}"></div>
     <div><label title="Para descobrir qual computador acessou um site malicioso: Classificação IA = Malicioso e vista Por computador">Vista</label>
@@ -58,9 +72,36 @@
       </select></div>
     <div style="flex:0;display:flex;align-items:flex-end;gap:.6rem">
       <label class="chk" style="margin:0 0 .45rem;font-weight:400;white-space:nowrap" title="zonas locais do Technitium (ex.: 2d.local), nomes sem ponto e consultas reversas (PTR)"><input type="checkbox" name="locais" value="1" {{ 'checked' if locais }} onchange="this.form.submit()"> <span>mostrar nomes locais</span></label>
-      <button class="primary"><i class="bi bi-funnel"></i>Filtrar</button></div>
+      <input type="hidden" name="f" value="1">
+      <button class="primary"><i class="bi bi-funnel"></i>Filtrar</button>
+      <a class="btn" style="margin:0 0 0 0;white-space:nowrap" href="{{ url_for('admin.logs_dns', limpar=1) }}" title="volta aos filtros padrão e esquece os que este navegador guardou"><i class="bi bi-x-circle"></i>Limpar</a></div>
   </form>
 </div>
+<script>
+(function () {
+  // filtro de categorias: lista de marcar/desmarcar; todas (ou nenhuma) marcadas = sem filtro, e aí nada vai na URL
+  var d = document.getElementById('msCat'); if (!d) return;
+  var cs = d.querySelectorAll('input[name="categoria"]'), sm = d.querySelector('summary');
+  function resumo() {
+    var m = Array.prototype.filter.call(cs, function (c) { return c.checked; });
+    sm.textContent = (!m.length || m.length === cs.length) ? '— Todas —'
+      : m.length <= 2 ? m.map(function (c) { return c.dataset.n; }).join(', ') : m.length + ' de ' + cs.length;
+  }
+  d.addEventListener('change', resumo);
+  d.querySelectorAll('a[data-ms]').forEach(function (a) {
+    a.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      cs.forEach(function (c) { c.checked = a.dataset.ms === '1'; });
+      resumo();
+    });
+  });
+  document.addEventListener('click', function (ev) { if (d.open && !d.contains(ev.target)) d.open = false; });
+  d.closest('form').addEventListener('submit', function () {
+    var n = Array.prototype.filter.call(cs, function (c) { return c.checked; }).length;
+    if (!n || n === cs.length) cs.forEach(function (c) { c.disabled = true; });
+  });
+})();
+</script>
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem">

@@ -5,7 +5,7 @@ Technitium), IPs liberados (isentos), Logs DNS e Gráficos."""
 import re
 from urllib.parse import quote
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 
 from app import analyzer_client as api
 from app import technitium as dnslib
@@ -357,7 +357,7 @@ def _logs_detalhe_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, res
             linhas.append(l)
     except Exception as e:  # noqa: BLE001
         flash(f"Não foi possível consultar os logs no analisador: {e}", "erro")
-    args = request.args.to_dict()
+    args = request.args.to_dict(flat=False)   # (categoria pode vir várias vezes)
     local = lambda ts, n=16: (dnslib.utc_para_local(ts) or "")[:n].replace(" ", "T") if ts else None   # noqa: E731
     guardado = local(desde)
     antigos = None
@@ -378,10 +378,25 @@ def _logs_detalhe_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, res
         **_ctx_cls(cls_f, categoria))
 
 
-def _ctx_cls(cls_f: str, categoria: str) -> dict:
+def _ctx_cls(cls_f: str, categoria) -> dict:
+    """`categoria`: uma (Estatísticas) ou a lista marcada (Logs; vazia = todas)."""
     cats = _site_categorias()
-    return {"cls_f": cls_f, "categoria": categoria, "cls_filtros": CLS_FILTROS, "cls_label": CLS_LABEL,
-            "site_categorias": cats, "cat_label": {c["code"]: c["label"] for c in cats}}
+    sel = [categoria] if isinstance(categoria, str) and categoria else list(categoria or [])
+    return {"cls_f": cls_f, "categoria": sel[0] if len(sel) == 1 else "", "categorias_sel": sel, "cls_filtros": CLS_FILTROS,
+            "cls_label": CLS_LABEL, "site_categorias": cats, "cat_label": {c["code"]: c["label"] for c in cats}}
+
+
+# filtros da tela de Logs guardados na sessão do navegador (10/10, pedido do usuário): abrir a tela sem parâmetros
+# volta com os últimos usados. O período não entra (sem ele vale o dia de hoje).
+_LOGS_FILTROS = ("empresa", "cidr", "ip", "dominio", "resposta", "cls", "vista", "locais")
+
+
+def _logs_categorias() -> list[str]:
+    """Categorias marcadas no filtro. Todas marcadas (ou nenhuma) = sem filtro: aí entram também os sites que a IA
+    ainda não classificou."""
+    validas = [c["code"] for c in _site_categorias()]
+    sel = [c for c in dict.fromkeys(request.args.getlist("categoria")) if c in validas]
+    return [] if set(sel) >= set(validas) else sel
 
 
 @admin_bp.get("/logs-dns")
@@ -391,6 +406,11 @@ def logs_dns():
         flash("Technitium não configurado (defina TECHNITIUM_URL/TOKEN).", "erro")
         return render_template("admin/nao_configurado.html", oque="Technitium (TECHNITIUM_URL/TECHNITIUM_TOKEN)")
     from app import empresas as emp
+    if request.args.get("limpar"):   # esquece os filtros guardados neste navegador
+        session.pop("logs_dns", None)
+        return redirect(url_for("admin.logs_dns"))
+    if not request.args and session.get("logs_dns"):
+        return redirect(url_for("admin.logs_dns", **session["logs_dns"], f=1))
     empresa = (request.args.get("empresa") or "").strip()   # id do cadastro de empresas
     grupo = ""   # (filtro por grupo saiu: os grupos agora são internos, um por empresa)
     if empresa and not empresa.isdigit():                   # links antigos: empresa=<grupo>
@@ -408,9 +428,17 @@ def logs_dns():
     cls_f = (request.args.get("cls") or "").strip().upper()        # classificação da IA (AMEACAS = Mal.+Susp.)
     if cls_f not in dict(CLS_FILTROS):
         cls_f = ""
-    categoria = (request.args.get("categoria") or "").strip()       # categoria do site (IA)
+    categoria = _logs_categorias()                                  # categorias do site (IA) marcadas; vazia = todas
     locais = bool(request.args.get("locais"))   # mostrar nomes locais (zonas .local, reversos, sem ponto)? padrão: não
-    if not request.args:  # primeira carga (sem filtros): dia atual, início ao fim (São Paulo)
+    if request.args.get("f"):   # veio do formulário: guarda os filtros (sem o período) p/ a próxima visita
+        salvo = {k: request.args.get(k).strip() for k in _LOGS_FILTROS if (request.args.get(k) or "").strip()}
+        if categoria:
+            salvo["categoria"] = categoria
+        if salvo:
+            session["logs_dns"] = salvo
+        else:
+            session.pop("logs_dns", None)
+    if not inicio and not fim:  # sem período (primeira carga ou filtros guardados): dia atual (São Paulo)
         hoje = dnslib.agora_local().date()
         inicio = f"{hoje}T00:00"
         fim = f"{hoje}T23:59"
@@ -470,7 +498,7 @@ def logs_dns():
             quer = _cls_lista(cls_f)
             linhas = [l for l in linhas
                       if (not quer or (l.get("cls") or "PENDENTE") in quer)
-                      and (not categoria or l.get("categoria") == categoria)]
+                      and (not categoria or l.get("categoria") in categoria)]
         union = None
         if any(l.get("resposta") == "Blocked" for l in linhas):
             union, _ = dnslib.blocked_index()
@@ -519,9 +547,9 @@ def logs_dns():
         cidr=cidr, ip=ip, dominio=dominio, resposta=resposta,
         respostas=dnslib.RESPONSE_TYPES,
         inicio=inicio, fim=fim, scanned=scanned, cap=cap, voltar=request.full_path, coberto_desde=coberto_desde,
-        url_antigos=(url_for("admin.logs_dns", **{**request.args.to_dict(), "inicio": inicio, "fim": coberto_desde})
+        url_antigos=(url_for("admin.logs_dns", **{**request.args.to_dict(flat=False), "inicio": inicio, "fim": coberto_desde})
                      if coberto_desde else None),
-        url_analisador=(url_for("admin.logs_dns", **{k: v for k, v in request.args.to_dict().items() if k != "fonte"})
+        url_analisador=(url_for("admin.logs_dns", **{k: v for k, v in request.args.to_dict(flat=False).items() if k != "fonte"})
                         if request.args.get("fonte") == "technitium" else None), **_ctx_cls(cls_f, categoria))
 
 

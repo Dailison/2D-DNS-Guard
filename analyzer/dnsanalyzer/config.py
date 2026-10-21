@@ -78,6 +78,7 @@ class Settings:
     llm_extra_workers: int
     llm_extra_workers_url: dict   # url -> análises simultâneas daquele reforço (senão LLM_EXTRA_WORKERS)
     ollama_etapas_urls: list      # reforços das fases 2/3 e da pergunta de lista (vazio = todos, em rodízio)
+    ollama_cpu_urls: list         # (21/10) reforços sem GPU: no ritmo da VM (prazo, uma chamada por vez, investigação)
     llm_extra_timeout: int
     llm_max_attempts: int
     llm_skip_hosting_subdomains: bool
@@ -201,6 +202,7 @@ def load_settings() -> Settings:
         llm_extra_workers_url={u.rsplit("=", 1)[0].rstrip("/"): max(int(u.rsplit("=", 1)[1]), 0)
                                for u in _list("LLM_EXTRA_WORKERS_URL") if "=" in u and u.rsplit("=", 1)[1].strip().isdigit()},
         ollama_etapas_urls=[u.rstrip("/") for u in _list("OLLAMA_ETAPAS_URLS")],
+        ollama_cpu_urls=[u.rstrip("/") for u in _list("OLLAMA_CPU_URLS")],
         # GPU responde em segundos: pedido que some (queda do PC/VPN) não pode segurar o domínio 10 min
         llm_extra_timeout=_int("LLM_EXTRA_TIMEOUT_SECONDS", 90),
         llm_max_attempts=_int("LLM_MAX_ATTEMPTS", 3),

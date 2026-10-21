@@ -606,17 +606,21 @@ def test_plano_da_rodada_pelo_gemini_na_vm(monkeypatch):
     assert inv._proximo_passo_online("dossiê", 2, 300, []) is None
 
 
-def _simula_maquina(monkeypatch, extra: bool, online_ok: bool):
+def _simula_maquina(monkeypatch, extra: bool, online_ok: bool, gpu: bool | None = None):
     from dnsanalyzer import online
     usados = []
     monkeypatch.setattr(inv, "_proximo_passo_online", lambda *a: usados.append("online") or (
         ({"hipotese": "h", "confianca": 0.95, "pronto": True, "buscas": [], "paginas": [], "subdominios": [], "cnpjs": []},
          {"segundos": 1, "online": True}) if online_ok else None))
     _Cli.extra = extra
+    if gpu is not None:
+        _Cli.gpu = gpu
     try:
         g, _, _ = _simula(monkeypatch, revisor_ok=True)
     finally:
         _Cli.extra = True
+        if gpu is not None:
+            del _Cli.gpu
     return usados, g
 
 
@@ -627,6 +631,28 @@ def test_vm_usa_o_plano_online_e_a_gpu_nao(monkeypatch):
     assert usados and not g["rodadas"][0].get("online"), "sem resposta do Gemini: a IA local faz a rodada"
     usados, g = _simula_maquina(monkeypatch, extra=True, online_ok=True)
     assert usados == [], "na GPU a IA local é rápida: o plano fica nela"
+    usados, g = _simula_maquina(monkeypatch, extra=True, online_ok=True, gpu=False)
+    assert usados == ["online"], "reforço só com CPU (OLLAMA_CPU_URLS): como a VM"
+
+
+def test_reforco_so_com_cpu(monkeypatch):
+    """21/10: 10.9.10.10 (Windows, sem GPU: 41 tok/s de leitura, 4 de escrita, como a VM). Prazo da VM (a pergunta da
+    fase 1 leva ~235 s; o de reforço é 240), uma chamada por vez nele, investigação no ritmo da VM."""
+    from dnsanalyzer import config, llm
+    monkeypatch.setenv("OLLAMA_EXTRA_URLS", "http://gpu:11434,http://cpu:11434/")
+    monkeypatch.setenv("OLLAMA_CPU_URLS", "http://cpu:11434/")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "600")
+    monkeypatch.setenv("LLM_EXTRA_TIMEOUT_SECONDS", "240")
+    monkeypatch.setattr(config, "_settings", None)
+    try:
+        vm, gpu, cpu = llm.OllamaClient(), llm.OllamaClient("http://gpu:11434"), llm.OllamaClient("http://cpu:11434")
+        assert (vm.gpu, gpu.gpu, cpu.gpu) == (False, True, False) and cpu.extra
+        assert (gpu.timeout, cpu.timeout) == (240, 600)
+        assert llm.vaga(vm) is llm._VAGA_VM and llm.vaga(cpu) is llm.vaga(llm.OllamaClient("http://cpu:11434"))
+        assert llm.vaga(cpu) is not llm._VAGA_VM and not hasattr(llm.vaga(gpu), "acquire")
+        assert (inv._gpu(vm), inv._gpu(gpu), inv._gpu(cpu)) == (False, True, False)
+    finally:
+        config._settings = None
 
 
 def test_rodadas_seguintes_usam_a_busca_leve(monkeypatch):

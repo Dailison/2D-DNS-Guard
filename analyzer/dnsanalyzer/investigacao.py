@@ -1395,6 +1395,12 @@ class Dossie:
         return _cabecalho(self.nome, self.atual) + _linhas(self.ev, self._corte)
 
 
+def _gpu(client) -> bool:
+    """Reforço com GPU: rodadas curtas, imagens, raciocínio no veredito. A VM e o reforço só com CPU (OLLAMA_CPU_URLS,
+    21/10) seguem o ritmo da VM: prazo maior, plano da rodada pelo Gemini, sem imagens."""
+    return bool(getattr(client, "gpu", client.extra))
+
+
 def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> tuple[dict, dict]:
     payload = {"model": client.model, "messages": mensagens, "format": schema, "stream": False, "think": pensar,
                "keep_alive": client.keep_alive,
@@ -1411,7 +1417,7 @@ def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> 
     ns = lambda k: round(d[k] / 1e9, 1) if isinstance(d.get(k), (int, float)) else None   # noqa: E731
     return json.loads((d.get("message") or {}).get("content") or "{}"), {
         "segundos": round(time.monotonic() - t0, 1), "tokens": d.get("eval_count"),
-        "tokens_pergunta": d.get("prompt_eval_count"), "modelo": client.model, "gpu": bool(client.extra),
+        "tokens_pergunta": d.get("prompt_eval_count"), "modelo": client.model, "gpu": _gpu(client),
         # leitura da pergunta x escrita da resposta: é aqui que se vê o reaproveitamento entre as rodadas
         "leitura_s": ns("prompt_eval_duration"), "escrita_s": ns("eval_duration")}
 
@@ -1474,8 +1480,8 @@ def _revisar(client, texto: str, v: dict) -> tuple[dict, dict]:
               "aplicaria esse veredito sem hesitar; em \"problema\" diga o que está errado (ou vazio).\n\nVeredito:\n"
               + json.dumps(v, ensure_ascii=False))
     msgs = [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}]
-    r, meta = _chat(client, msgs, schema, bool(client.extra), 1500 if client.extra else 300)
-    if client.extra and "sustentado" not in r:
+    r, meta = _chat(client, msgs, schema, _gpu(client), 1500 if _gpu(client) else 300)
+    if _gpu(client) and "sustentado" not in r:
         # (30/09) o raciocínio gastava os tokens e a resposta vinha vazia = "revisor discordou: sem motivo" (34 de
         # 426): pergunta de novo sem raciocínio
         r, meta2 = _chat(client, msgs, schema, False, 300)
@@ -1497,13 +1503,13 @@ def _veredito(client, texto: str, cats: list[dict], scats: list[dict]) -> tuple[
                      "motivo", "evidencias"]}
     cl = "\n".join(f"- {c['code']}: {c['description']}" for c in cats)
     sc = "\n".join(f"- {c['code']}: {c['label']}" for c in scats)
-    curta = settings().investigacao_regras_curtas and not client.extra   # (na GPU a leitura é rápida: regras inteiras)
+    curta = settings().investigacao_regras_curtas and not _gpu(client)   # (na GPU a leitura é rápida: regras inteiras)
     pedido = (f"Rodada final. Dê o veredito.\n\nClassificações:\n{cl}\n\nCategorias de site:\n{sc}\n\n"
               f"{listas_ia.regras_lista(curta)}\n\nEm \"motivo\" (1-3 frases, português) explique quem é o dono/serviço e "
               "quais evidências decidiram; em \"evidencias\" os ids usados.")
     msgs = [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}]
-    v, meta = _chat(client, msgs, schema, bool(client.extra), 1800 if client.extra else 700)
-    if client.extra and not all(k in v for k in schema["required"]):
+    v, meta = _chat(client, msgs, schema, _gpu(client), 1800 if _gpu(client) else 700)
+    if _gpu(client) and not all(k in v for k in schema["required"]):
         # (29/09) o raciocínio pode gastar todos os tokens e a resposta sair vazia: pergunta de novo sem raciocínio
         v, meta2 = _chat(client, msgs, schema, False, 700)
         meta = meta2 | {"segundos": round(meta["segundos"] + meta2["segundos"], 1), "sem_raciocinio": True}
@@ -1601,16 +1607,16 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     from .rules import build_evidence
     cfg = settings()
     nome, did, t0 = d["name"], d["id"], time.monotonic()
-    prazo = cfg.investigacao_tempo_max if client.extra else cfg.investigacao_tempo_max_vm
+    prazo = cfg.investigacao_tempo_max if _gpu(client) else cfg.investigacao_tempo_max_vm
     # veredito + revisor: com raciocínio na GPU ~1-2 min; na VM (só CPU) a pergunta de ~6 mil tokens é bem mais lenta
-    reserva, custo_rodada = (150, 60) if client.extra else (420, 180)
+    reserva, custo_rodada = (150, 60) if _gpu(client) else (420, 180)
     resta = lambda: prazo - (time.monotonic() - t0)   # noqa: E731
     event("investigacao_start", nome, did, detail=f"fase 6 · investigação profunda · {d['total_queries']} consultas")
     base = [e.as_dict() for e in build_evidence(dossie)]
     dos = Dossie(nome, d, base)
     # o que o veredito põe DEPOIS do dossiê: regras de lista e categorias (~3,3 mil tokens), a resposta (com raciocínio
     # na GPU) e uma margem — o que sobrar do contexto é o quanto o dossiê pode crescer
-    tokens_veredito = 3_500 + (1_800 if client.extra else 700) + 300
+    tokens_veredito = 3_500 + (1_800 if _gpu(client) else 700) + 300
     ti_forte = any(h.get("confidence") in ("high", "medium") for h in (dossie.get("ti_hits") or []))
     abre_site = not dossie.get("ti_hits")   # como as outras fases: sem lista de ameaça (TLD abusado sozinho não impede)
     fqdns = (dossie.get("fqdn_stats") or {}).get("sample") or [nome]
@@ -1639,7 +1645,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
         fontes["buscas"] = fontes.get("buscas") or []
         etapas.append({"etapa": "fontes", "segundos": round(time.monotonic() - t0, 1)})
         # o modelo OLHA o site (pedido do usuário 29/09): captura de tela pública, og:image, logotipo, ícone
-        if client.extra and tem_visao(client) and resta() > reserva + 90:   # (imagens em CPU: lento demais na VM)
+        if _gpu(client) and tem_visao(client) and resta() > reserva + 90:   # (imagens em CPU: lento demais na VM)
             try:
                 imgs = imagens(nome, http, abre_site)
                 if imgs:
@@ -1677,7 +1683,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             dos.juntar(fontes)
             texto_r = dos.texto()
             r = (_proximo_passo_online(texto_r, rodada, int(resta() - reserva), feitas)
-                 if not client.extra and cfg.investigacao_plano_online else None)
+                 if not _gpu(client) and cfg.investigacao_plano_online else None)
             passo, meta = r or _proximo_passo(client, texto_r, rodada, int(resta() - reserva), feitas)
             passo["confianca"] = _conf(passo.get("confianca"))
             rodadas.append(meta | {k: passo.get(k) for k in ("hipotese", "confianca", "pronto")})
@@ -1715,7 +1721,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     motivo_nao = pode_aplicar(v, ti_forte, cfg.investigacao_confianca_min)
     revisao, meta_r = None, None
     if motivo_nao is None:   # só aplica com a concordância do revisor
-        if resta() < (60 if client.extra else 240):
+        if resta() < (60 if _gpu(client) else 240):
             motivo_nao = "sem tempo para a revisão dentro do prazo"
         else:
             revisao, meta_r = _revisar(client, texto, v)

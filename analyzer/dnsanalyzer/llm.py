@@ -174,11 +174,17 @@ def build_messages(dossier_name: str, evidence: list[dict], categories: list[dic
 # a outra fica sempre livre p/ o atendente virtual do 2D-Suporte (/ia/chat, no processo da API) — 29/09: as GPUs
 # não ficam ligadas 24 h e o chat esperava a fila das análises
 _VAGA_VM = threading.Lock()
+_VAGAS_CPU: dict[str, threading.Lock] = {}
 
 
 def vaga(client) -> contextlib.AbstractContextManager:
-    """Uma chamada por vez ao Ollama da VM entre os workers da análise; reforço (GPU) não espera."""
-    return contextlib.nullcontext() if getattr(client, "extra", False) else _VAGA_VM
+    """Uma chamada por vez ao Ollama da VM entre os workers da análise; reforço com GPU não espera. Reforço só com CPU
+    (OLLAMA_CPU_URLS, 21/10): uma por vez nele também — em paralelo as duas ficariam lentas e estourariam o prazo."""
+    if not getattr(client, "extra", False):
+        return _VAGA_VM
+    if getattr(client, "gpu", True):
+        return contextlib.nullcontext()
+    return _VAGAS_CPU.setdefault(client.url, threading.Lock())
 
 
 class OllamaClient:
@@ -187,8 +193,9 @@ class OllamaClient:
         cfg = settings()
         self.url = url or cfg.ollama_url
         self.extra = bool(url)
+        self.gpu = self.extra and self.url.rstrip("/") not in cfg.ollama_cpu_urls   # reforço sem GPU = ritmo da VM
         self.model = (cfg.ollama_extra_modelos.get(self.url) or cfg.ollama_extra_model) if url else cfg.ollama_model
-        self.timeout = cfg.llm_extra_timeout if self.extra else cfg.llm_timeout
+        self.timeout = cfg.llm_extra_timeout if self.gpu else cfg.llm_timeout
         self.num_ctx = cfg.llm_num_ctx
         # threads de CPU só fazem sentido no Ollama da VM; no reforço (GPU) o Ollama de lá decide
         self.num_thread = None if self.extra else (cfg.llm_num_thread or max((os.cpu_count() or 4) - 2, 1))
@@ -234,7 +241,7 @@ class OllamaClient:
         r.raise_for_status()
         data = r.json()
         content = (data.get("message") or {}).get("content", "")
-        meta = {"model": self.model, "seconds": round(time.monotonic() - t0, 1), "extra": self.extra,
+        meta = {"model": self.model, "seconds": round(time.monotonic() - t0, 1), "extra": self.extra, "gpu": self.gpu,
                 "eval_count": data.get("eval_count"), "prompt_eval_count": data.get("prompt_eval_count")}
         try:
             obj = json.loads(content)

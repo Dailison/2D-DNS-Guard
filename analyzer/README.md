@@ -241,6 +241,12 @@ quando ele cai (`OLLAMA_EXTRA_URLS`, checado a cada 60 s). Use o **mesmo modelo*
 |---|---|---|
 | 10.100.50.201 | AMD RX 9070 16 GB | 4 |
 | 10.100.20.6 (THOR) | GTX 1060 6 GB + 32 GB RAM (camadas em CPU) | 1 |
+| 10.9.10.10 (Windows Server) | sem GPU (`OLLAMA_CPU_URLS`) | 1 |
+
+Reforço sem GPU (21/10): o 10.9.10.10 lê ~41 tokens/s e escreve ~4/s, como a VM. Em `OLLAMA_CPU_URLS` ele segue o
+ritmo da VM: prazo `LLM_TIMEOUT_SECONDS` (a pergunta da fase 1 leva ~4 min), uma chamada por vez, e na investigação
+o plano da rodada pelo Gemini e nada de imagens. O Ollama dele roda como Tarefa Agendada "Ollama" (SYSTEM, na
+inicialização, `ollama serve`), com `OLLAMA_HOST`/`OLLAMA_MODELS` nas variáveis do sistema.
 
 No PC (Windows, Ollama instalado):
 

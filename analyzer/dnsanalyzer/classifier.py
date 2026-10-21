@@ -471,7 +471,7 @@ def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2
           detail=" · ".join(x for x in (("fase 2 (WHOIS)" if etapa3 else "fase 3 (busca na web)" if etapa2 else
                                          f"com busca na web ({len(dossier['search'])} resultados)"
                                          if dossier.get("search") else ""),
-                                        "reforço (GPU)" if meta.get("extra") else "", svc, scat,
+                                        ("reforço (GPU)" if meta.get("gpu", True) else "reforço (CPU)") if meta.get("extra") else "", svc, scat,
                                         _achado(dossier, etapa2, etapa3), _razao(fin), extra) if x))
     return "done"
 

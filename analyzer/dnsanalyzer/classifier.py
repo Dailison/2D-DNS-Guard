@@ -584,10 +584,6 @@ class _Reforco:
     def cliente(self) -> OllamaClient:
         if controle.pausado("reforco"):   # botão Pausar: só a VM
             return self.vm
-        if settings().gpu_etapa2:   # (21/10) a GPU fica com a investigação; só ajuda aqui com a etapa 1 acumulada
-            from .investigacao import etapa1_acumulada
-            if not etapa1_acumulada():
-                return self.vm
         for i in range(len(self.extras)):
             x = self.extras[(self.vez + i) % len(self.extras)]
             if self._no_ar(x):
@@ -717,11 +713,6 @@ def _llm_worker(stop, cats: list[dict], wid: int, url: str | None = None) -> Non
                 if not ok:
                     time.sleep(60)
                     continue
-                if settings().gpu_etapa2:   # (21/10) reforço com GPU: a investigação primeiro; etapa 1 só com acúmulo
-                    from .investigacao import etapa1_acumulada
-                    if not etapa1_acumulada():
-                        time.sleep(30)
-                        continue
             if wid % 100 == 1:   # um worker do reforço atende primeiro a pergunta de lista (catálogo/regras): com a fila da
                 st = listas_ia.fase(client)   # fase 1 cheia ela não andava (214 esperando, 27/09)
                 if st == "idle":

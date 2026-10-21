@@ -1902,45 +1902,22 @@ def test_pergunta_livre_ao_gemini(env, monkeypatch):
     assert online.responder_json("sistema", "pergunta") is None
 
 
-def test_gpu_fica_com_a_etapa_2(env, monkeypatch):
-    """21/10: o reforço com GPU investiga mesmo com fila na etapa 1 (a VM só investiga com ela vazia); só volta a ajudar
-    a etapa 1 (fases 1-3 e a pergunta de lista) quando ela passa de GPU_AJUDA_ETAPA1_ACIMA."""
+def test_etapa_2_so_com_a_fila_local_zerada(env, monkeypatch):
+    """21/10 (pedido do usuário): a fila local zera primeiro, com todos os workers (VM e GPUs); só então a investigação,
+    na VM e na GPU."""
     from types import SimpleNamespace
 
-    from dnsanalyzer import classifier, config, db, investigacao
-    cfg = config.settings()
+    from dnsanalyzer import classifier, db, dnsativo, investigacao
     with db.conn() as c:
         c.execute("UPDATE domains SET llm_pending = false")
-        for i in range(3):
-            c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES (%s, 'public', 'DESCONHECIDO', true)", (f"fila1-{i}-gpu.com",))
+        c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES ('fila1-gpu.com', 'public', 'DESCONHECIDO', true)")
         c.execute("INSERT INTO domains (name, kind, classification, total_queries, analyzed_at) VALUES ('investigar-gpu.com', 'public', 'DESCONHECIDO', 99, now())")
     vistos = []
-    monkeypatch.setattr(investigacao, "_investigar", lambda client, cats, scats, d, dossie: vistos.append((client.extra, d["name"])) or "done")
+    monkeypatch.setattr(investigacao, "_investigar", lambda client, cats, scats, d, dossie: vistos.append(client.extra) or "done")
     monkeypatch.setattr(classifier, "build_dossier", lambda c, d, **k: {"name": d["name"]})
-    from dnsanalyzer import dnsativo
     monkeypatch.setattr(dnsativo, "etapa1", lambda d: False)
     vm, gpu = SimpleNamespace(extra=False), SimpleNamespace(extra=True)
-    monkeypatch.setattr(investigacao, "_ACUMULO", [0.0, False])
-    assert investigacao.fase(vm, [], []) == "idle", "VM: a etapa 1 tem prioridade"
-    investigacao.fase(gpu, [], [])
-    assert vistos and vistos[0][0] is True, "GPU: investiga mesmo com fila na etapa 1"
-    # ajuda na etapa 1 só com acúmulo
-    monkeypatch.setattr(cfg, "gpu_ajuda_etapa1_acima", 5)
-    investigacao._ACUMULO[:] = [0.0, False]
-    assert investigacao.etapa1_acumulada() is False
-    monkeypatch.setattr(cfg, "gpu_ajuda_etapa1_acima", 2)
-    investigacao._ACUMULO[:] = [0.0, False]
-    assert investigacao.etapa1_acumulada() is True
-    r = classifier._Reforco.__new__(classifier._Reforco)
-    r.vm, r.ok, r.vez, r.extras, r.reserva = SimpleNamespace(nome="vm"), {}, 0, [SimpleNamespace(url="http://gpu", nome="gpu")], []
-    monkeypatch.setattr(r, "_no_ar", lambda x: True)
-    assert r.cliente().nome == "gpu", "etapa 1 acumulada: a GPU ajuda"
-    investigacao._ACUMULO[:] = [time_mono(), False]
-    assert r.cliente().nome == "vm", "sem acúmulo: as fases 1-3 ficam na VM"
-    monkeypatch.setattr(cfg, "gpu_etapa2", False)
-    assert r.cliente().nome == "gpu", "GPU_ETAPA2 desligado: como antes"
-
-
-def time_mono():
-    import time
-    return time.monotonic()
+    assert investigacao.fase(vm, [], []) == "idle" and investigacao.fase(gpu, [], []) == "idle" and not vistos
+    with db.conn() as c:
+        c.execute("UPDATE domains SET llm_pending = false WHERE name = 'fila1-gpu.com'")
+    assert investigacao.fase(gpu, [], []) == "done" and vistos == [True]

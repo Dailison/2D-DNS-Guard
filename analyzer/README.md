@@ -282,9 +282,9 @@ carga do modelo 63 s (uma vez por hora ociosa), 34 s sem cache, 13-16 s com cach
 depois da carga pode passar dos 90 s de `LLM_EXTRA_TIMEOUT_SECONDS`: volta à fila e o seguinte já pega
 o modelo carregado.
 
-Desde 21/10 o reforço com GPU fica com a **etapa 2** (investigação): investiga mesmo com fila na etapa 1, que
-fica na VM; só volta a ajudar nas fases 1-3 quando a etapa 1 passa de `GPU_AJUDA_ETAPA1_ACIMA` (300). Na VM, o
-plano de cada rodada da investigação vai ao Gemini (`INVESTIGACAO_PLANO_ONLINE`) e a IA local só escreve o veredito.
+A fila local (etapa 1) zera primeiro, com todos os workers da IA (VM e GPUs); só então começa a investigação
+(etapa 2), também com todos (1 na VM, `LLM_EXTRA_WORKERS_URL` em cada GPU). Começada, a investigação vai até o fim.
+Na VM, o plano de cada rodada da investigação vai ao Gemini (`INVESTIGACAO_PLANO_ONLINE`) e a IA local só escreve o veredito.
 
 No console (k3s, namespace `dns-guard`): `ANALYZER_URL` no ConfigMap `dns-guard-config` e
 `ANALYZER_TOKEN` no Secret `dns-guard-secrets` (= `API_TOKEN` do analyzer.env).

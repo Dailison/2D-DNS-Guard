@@ -1515,20 +1515,6 @@ _FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND NOT a
                "AND (NOT dominio_decidido(id) OR reanalise_pedida) LIMIT 1")
 
 
-_ACUMULO = [0.0, False]
-
-
-def etapa1_acumulada() -> bool:
-    """A fila da etapa 1 passou de GPU_AJUDA_ETAPA1_ACIMA? (o reforço com GPU volta a ajudar nela; conta a cada 30 s)"""
-    cfg = settings()
-    if time.monotonic() - _ACUMULO[0] > 30:
-        with db.conn() as c:
-            n = c.execute("SELECT count(*) AS n FROM (" + _FILA_FASE1.replace("LIMIT 1", "LIMIT %s") + ") x",
-                          (cfg.gpu_ajuda_etapa1_acima + 1,)).fetchone()["n"]
-        _ACUMULO[:] = [time.monotonic(), n > cfg.gpu_ajuda_etapa1_acima]
-    return _ACUMULO[1]
-
-
 # quem a fase 6 investiga: DESCONHECIDOS/SUSPEITOS sem decisão — e (30/09, pedido do usuário) TODO DESCONHECIDO já
 # decidido (pela IA ou por pessoa), menos os liberados: na whitelist ou com decisão "liberado" (global ou de empresa).
 # A lista posta por pessoa continua valendo (listas_ia.aplicar: a IA não desfaz a correção humana).
@@ -1571,8 +1557,8 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
     """Investiga UM domínio. 'idle' | 'done' | 'unavailable'."""
     from .classifier import build_dossier, event
     with db.conn() as c:
-        # a fila normal tem prioridade — na VM; o reforço com GPU fica com a investigação (21/10, GPU_ETAPA2)
-        if not (client.extra and settings().gpu_etapa2) and c.execute(_FILA_FASE1).fetchone():
+        # a fila local zera primeiro, com todos os workers da IA (VM e GPUs); só então a investigação (21/10, pedido do usuário)
+        if c.execute(_FILA_FASE1).fetchone():
             return "idle"
         d = _reservar(c)
         if not d:

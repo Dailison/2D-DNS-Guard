@@ -119,13 +119,18 @@ def expirar_ameacas(c, dias: int = 7) -> list[dict]:
     rows = c.execute(
         "SELECT l.domain, l.added_by, d.id, d.ti_cleared_at FROM category_lists l JOIN domains d ON d.name = l.domain "
         "WHERE l.category = 'ameaca' AND (l.added_by LIKE 'bloqueio automático%%' OR l.added_by LIKE 'IA automática%%') "
-        " AND coalesce(d.ti_signature, '') = '' AND d.ti_cleared_at < now() - make_interval(days => %s)", (dias,)).fetchall()
+        " AND coalesce(d.ti_signature, '') = '' AND d.ti_cleared_at < now() - make_interval(days => %s)"
+        # a IA respondeu depois que o domínio saiu dos feeds: a resposta não veio do feed, não expira (21/10:
+        # trendebook.com saía e voltava a cada 5 min — a expiração reaplicava a mesma resposta)
+        " AND (l.added_by NOT LIKE 'IA automática%%' OR d.lista_at IS NULL OR d.lista_at < d.ti_cleared_at)", (dias,)).fetchall()
     for r in rows:
         n = (datetime.now(timezone.utc) - r["ti_cleared_at"]).days
         contexto(c, "expiração de ameaça", f"saiu dos feeds de ameaça há {n} dias")
         c.execute("DELETE FROM category_lists WHERE category = 'ameaca' AND domain = %s", (r["domain"],))
         c.execute("DELETE FROM global_reviews WHERE domain_id = %s AND reviewed_by = %s", (r["id"], r["added_by"]))
-        c.execute("UPDATE domains SET needs_analysis = true, lista_aplicada_at = NULL WHERE id = %s", (r["id"],))
+        # nova análise (não reaplica a resposta antiga, que veio com o feed): a nova resposta decide a lista
+        c.execute("UPDATE domains SET needs_analysis = true, llm_pending = true, reanalise_pedida = true WHERE id = %s",
+                  (r["id"],))
         eventos.lista("lista_rem", r["domain"], "ameaca", f"saiu dos feeds de ameaça há {n} dias", r["id"], "regras")
     if rows:
         log.info("ameaças expiradas (fora dos feeds há > %d dias): %s", dias, ", ".join(r["domain"] for r in rows))
@@ -355,8 +360,10 @@ def detalhes_whitelist(c, cat: str, **filtros) -> dict:
 
 
 def _em_lista(nome: str, conjunto: set[str]) -> bool:
+    """O nome ou um domínio-pai (sem o TLD sozinho) está no conjunto. Nome sem ponto (614, 2d, UUID — nomes da rede
+    local que vazam p/ o DNS) também: antes nunca estava "em lista", e `sem_destino` o reaplicava a cada 5 min (21/10)."""
     p = nome.split(".")
-    return any(".".join(p[i:]) in conjunto for i in range(len(p) - 1))
+    return any(".".join(p[i:]) in conjunto for i in range(max(len(p) - 1, 1)))
 
 
 def _fora_das_filas_sql() -> str:
@@ -399,6 +406,8 @@ def sem_destino(c) -> dict:
                       (r["name"], f"{AUTO_BY} (ameaca)"))
             out["ameaca"].append(r)
         elif not r["humano"] and r["lista_ia"] and r["lista_at"]:
+            if r["lista_ia"] == "ameaca" and r["classification"] == "SUSPEITO":
+                continue   # ameaça sem confirmação: sem lista de propósito, a investigação decide (21/10: reaplicava a cada 5 min)
             out["reaplicar"].append(r["id"])
         elif not r["humano"] and r["classification"] == "DESCONHECIDO":   # não identificado não é liberado
             contexto(c, "IA (não identificado)", "terminou a análise sem identificação: Não identificados")

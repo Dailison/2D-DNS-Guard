@@ -1081,6 +1081,31 @@ def test_nada_fica_solto_sem_destino(env):
     assert not set(ids) & depois, depois
 
 
+def test_sem_destino_nao_reaplica_em_loop(env):
+    """21/10: `sem_destino` reaplicava a cada 5 min (~1.500 eventos/h, fila local parecia parada): nome sem ponto em
+    Não identificados (614, UUID: `_em_lista` nunca o achava) e SUSPEITO por ameaça sem confirmação (sem lista de
+    propósito, espera a investigação)."""
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        ids = {}
+        for n, cls, lista in (("614", "DESCONHECIDO", "nao_identificado"), ("susp-sem-conf.com", "SUSPEITO", "ameaca")):
+            ids[n] = c.execute(
+                "INSERT INTO domains (name, classification, category, analyzed_at, total_queries, whois_at, web_search_at, "
+                " lista_ia, lista_at, lista_aplicada_at, lista_fonte, lista_conf, online_at) VALUES (%s, %s, 'outros', "
+                " now() - interval '1 hour', 3, now(), now(), %s, now() - interval '30 minutes', now() - interval '30 minutes', "
+                " 'online:gemini', 0.9, now()) RETURNING id", (n, cls, lista)).fetchone()["id"]
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('nao_identificado', '614', "
+                  "'IA automática (nao_identificado)')")
+        soltos = {x["domain"] for x in listas.sem_lista(c, limit=5000)["items"]}
+        assert "614" not in soltos and "susp-sem-conf.com" in soltos, soltos
+        out = listas.sem_destino(c)
+        aplic = {r["name"]: r["lista_aplicada_at"] for r in c.execute("SELECT name, lista_aplicada_at FROM domains WHERE id = ANY(%s)",
+                                                                       (list(ids.values()),))}
+        wl = c.execute("SELECT 1 FROM whitelist_domains WHERE domain = 'susp-sem-conf.com'").fetchone()
+    assert not out["reaplicar"] and all(aplic.values()) and not wl, (out, aplic)
+    assert listas._em_lista("614", {"614"}) and listas._em_lista("a.b.com", {"b.com"}) and not listas._em_lista("x.com", {"com"})
+
+
 def test_desconhecido_na_fase4_vai_p_nao_identificados(env, monkeypatch):
     """Não identificado depois das 4 fases não é liberado (27/09: cs8sp.com, espelho de cassino, ia p/ Outros liberados):
     DESCONHECIDO + Outros liberados -> lista Não identificados; DESCONHECIDO reconhecido como CDN segue na whitelist."""
@@ -1918,6 +1943,9 @@ def test_etapa_2_so_com_a_fila_local_zerada(env, monkeypatch):
     monkeypatch.setattr(dnsativo, "etapa1", lambda d: False)
     vm, gpu = SimpleNamespace(extra=False), SimpleNamespace(extra=True)
     assert investigacao.fase(vm, [], []) == "idle" and investigacao.fase(gpu, [], []) == "idle" and not vistos
+    with db.conn() as c:   # pouco acesso (aguarda_recorrencia) também é fila local
+        c.execute("UPDATE domains SET aguarda_recorrencia = true WHERE name = 'fila1-gpu.com'")
+    assert investigacao.fase(gpu, [], []) == "idle"
     with db.conn() as c:
         c.execute("UPDATE domains SET llm_pending = false WHERE name = 'fila1-gpu.com'")
     assert investigacao.fase(gpu, [], []) == "done" and vistos == [True]

@@ -154,6 +154,27 @@ def test_ameaca_expira_fora_dos_feeds(api):
     assert {"ainda-no-feed.com", "recente.com", "pessoa-pos.com"} <= restam
 
 
+def test_ameaca_da_ia_expira_so_se_a_resposta_veio_do_feed(api):
+    """21/10: trendebook.com saía de Ameaças e voltava a cada 5 min — a IA respondeu "ameaça" DEPOIS que o domínio saiu
+    dos feeds (a resposta não veio do feed: não expira); quando expira, o domínio é reanalisado (a resposta antiga não é
+    reaplicada)."""
+    from dnsanalyzer import db, listas
+    with db.conn() as c:
+        ids = {}
+        for n, dias_resposta in (("ia-depois-do-feed.com", 5), ("ia-com-o-feed.com", 20)):
+            ids[n] = c.execute(
+                "INSERT INTO domains (name, classification, ti_signature, ti_cleared_at, lista_ia, lista_at, lista_aplicada_at) "
+                "VALUES (%s, 'SUSPEITO', '', now() - interval '15 days', 'ameaca', now() - make_interval(days => %s), "
+                " now() - make_interval(days => %s)) RETURNING id", (n, dias_resposta, dias_resposta)).fetchone()["id"]
+            c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('ameaca', %s, 'IA automática (ameaca)')", (n,))
+        feitos = listas.expirar_ameacas(c, dias=7)
+        restam = {r["domain"] for r in c.execute("SELECT domain FROM category_lists WHERE category='ameaca'")}
+        d = c.execute("SELECT llm_pending, reanalise_pedida, lista_aplicada_at FROM domains WHERE id = %s",
+                      (ids["ia-com-o-feed.com"],)).fetchone()
+    assert [r["domain"] for r in feitos] == ["ia-com-o-feed.com"] and "ia-depois-do-feed.com" in restam
+    assert d["llm_pending"] and d["reanalise_pedida"] and d["lista_aplicada_at"] is not None
+
+
 def test_auditoria_por_gatilho(api):
     from dnsanalyzer import db, listas
     with db.conn() as c:

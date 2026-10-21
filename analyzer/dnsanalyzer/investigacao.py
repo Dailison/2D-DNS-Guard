@@ -1517,7 +1517,10 @@ def _veredito(client, texto: str, cats: list[dict], scats: list[dict]) -> tuple[
 
 
 # ------------------------------------------------------------------ fila e aplicação
-_FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND NOT aguarda_recorrencia "
+# a etapa 1 inteira, inclusive os de pouco acesso (aguarda_recorrencia: a etapa 1 também os pega, por último) — 21/10,
+# pedido do usuário: a fila local zera antes da etapa 2; sem eles a investigação rodava com ~650 na etapa 1 e tomava a
+# vaga da VM
+_FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "
                "AND (NOT dominio_decidido(id) OR reanalise_pedida) LIMIT 1")
 
 

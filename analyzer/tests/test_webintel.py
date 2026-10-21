@@ -101,3 +101,16 @@ def test_busca_completa_respeita_o_intervalo_por_instancia(monkeypatch):
     assert sorted(usados) == ["http://vm", "http://vps"] and time.monotonic() - t0 < 0.2
     webintel.reservar_completa(cfg)
     assert time.monotonic() - t0 >= 0.29
+
+
+def test_busca_completa_usa_o_google_cse(monkeypatch):
+    """21/10: o motor "google" do SearXNG é recusado pelo Google em todas as instâncias; o "google cse" responde."""
+    from dnsanalyzer import config
+    monkeypatch.delenv("WEB_SEARCH_ENGINES_COMPLETOS", raising=False)
+    monkeypatch.setattr(config, "_settings", None)
+    try:
+        m = config.settings().web_search_motores_completos
+    finally:
+        config._settings = None
+    assert "google cse" in m and "google" not in m
+

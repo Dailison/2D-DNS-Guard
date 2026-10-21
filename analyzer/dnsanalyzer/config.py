@@ -236,8 +236,10 @@ def load_settings() -> Settings:
         # buscadores; o conjunto completo (Yandex — o único que achou pvdpix.com —, Google, Brave) só nos casos graves
         # da investigação, com intervalo próprio, p/ não levarem CAPTCHA/suspensão por excesso
         web_search_motores=_list("WEB_SEARCH_ENGINES") or ["bing", "yahoo", "wikipedia"],
-        web_search_motores_completos=_list("WEB_SEARCH_ENGINES_COMPLETOS") or ["yandex", "google", "brave", "bing", "yahoo",
-                                                                                "wikipedia"],
+        # (21/10) "google cse" no lugar de "google": o google é recusado ("access denied", suspenso 24 h) em todas as
+        # instâncias, mesmo na versão de 19/10; o cse (busca personalizada pública, sem chave) traz 20 resultados
+        web_search_motores_completos=_list("WEB_SEARCH_ENGINES_COMPLETOS") or ["yandex", "google cse", "brave", "bing",
+                                                                                "yahoo", "wikipedia"],
         web_search_intervalo_completo=_int("WEB_SEARCH_INTERVALO_COMPLETO", 30),
         # (28/09) a busca era o teto da fila (1 a cada 8 s = 7,5 domínios/min com a GPU ociosa): o top 100 mil do Tranco
         # a IA conhece sem busca

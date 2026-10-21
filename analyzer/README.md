@@ -39,6 +39,19 @@ Três serviços systemd: `dnsanalyzer-collector`, `dnsanalyzer-classifier`,
 `dnsanalyzer-api` (+ `postgresql` e `ollama`). A busca web usa um SearXNG local
 (`WEB_SEARCH_URL`). A IA online usa o plano grátis do Gemini (`GEMINI_API_KEY`).
 
+Instâncias do SearXNG (`WEB_SEARCH_URL`; cada uma com o próprio IP público, os buscadores limitam por IP):
+
+| URL | Onde | Sai por |
+|---|---|---|
+| `http://127.0.0.1:8888` | VM, `searxng.service` (podman, `/etc/searxng`) | IP da VM |
+| `http://10.100.50.202:8888` | PC da rede | IP dele |
+| `http://127.0.0.1:8889` | VM, `searxng-2.service` (podman, rede do host, `/etc/searxng-2`) | 10.9.10.10 (138.0.54.246), pelo túnel `searxng-tunel.service` |
+
+O túnel (21/10) é `ssh -N -D 127.0.0.1:1080` até o Windows Server 10.9.10.10 (OpenSSH Server do Windows, porta
+22 só p/ 10.100.10.4) com a chave `/root/.ssh/searxng_tunel`, autorizada lá com `restrict,port-forwarding` (só
+encaminha, sem terminal); `outgoing.proxies` da instância aponta p/ `socks5h://127.0.0.1:1080`. Túnel caído = a
+instância 3 falha as buscas (não sai pelo IP da VM).
+
 ### Por que escala
 
 A IA trabalha por **domínio** (com cache), não por consulta: se os logs crescerem

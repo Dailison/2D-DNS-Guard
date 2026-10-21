@@ -859,16 +859,22 @@ def coocorrencia(c, nome: str, fqdns: list[str], suffixes: list[str]) -> dict | 
                                        "servico": (info.get(k) or {}).get("topic")} for k, v in top if v >= max(2, n // 3)]}
 
 
-def buscas(consultas: list[str], nome: str) -> list[dict]:
+def buscas(consultas: list[str], nome: str, completa: bool = True) -> list[dict]:
+    """completa: todos os buscadores, no ritmo da busca completa (30/09: caso grave). As rodadas seguintes da
+    investigação usam a leve (21/10: Bing/Yahoo/Wikipedia no ritmo de 15 s por instância, em vez de 30 s — a espera das
+    buscas era o maior tempo da investigação na GPU); a primeira leva (nome, marca, domínios irmãos) segue completa."""
     cfg = settings()
     if not cfg.web_search_url:
         return []
     label = nome.split(".")[0].lower()
     out = []
     for q in consultas[:4]:
-        try:   # caso grave (investigação): todos os buscadores, no ritmo da busca completa (30/09)
-            url = webintel.reservar_completa(cfg)
-            res, _ = webintel._consulta(cfg, q, lambda t: label in t or nome in t, url, cfg.web_search_motores_completos)
+        try:
+            if completa:
+                url, motores = webintel.reservar_completa(cfg), cfg.web_search_motores_completos
+            else:
+                url, motores = webintel._reservar(cfg, True), cfg.web_search_motores
+            res, _ = webintel._consulta(cfg, q, lambda t: label in t or nome in t, url, motores)
         except Exception as e:  # noqa: BLE001
             log.info("busca extra %r: %s", q, e)
             continue
@@ -1413,21 +1419,48 @@ def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> 
 def _proximo_passo(client, texto: str, rodada: int, restante: int, feitas: list[str]) -> tuple[dict, dict]:
     """Rodada de investigação: hipótese e o que falta (buscas, páginas, subdomínios, CNPJs) — ou pronto."""
     schema = {"type": "object", "properties": {
-        "hipotese": {"type": "string", "maxLength": 200}, "confianca": {"type": "number", "minimum": 0, "maximum": 1},
+        "hipotese": {"type": "string", "maxLength": 120}, "confianca": {"type": "number", "minimum": 0, "maximum": 1},
         "pronto": {"type": "boolean"},
-        "buscas": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 80}},
+        "buscas": {"type": "array", "maxItems": 3, "items": {"type": "string", "maxLength": 80}},
         "paginas": {"type": "array", "maxItems": 3, "items": {"type": "string", "maxLength": 200}},
         "subdominios": {"type": "array", "maxItems": 3, "items": {"type": "string", "maxLength": 100}},
         "cnpjs": {"type": "array", "maxItems": 2, "items": {"type": "string", "maxLength": 20}}},
         "required": ["hipotese", "confianca", "pronto", "buscas", "paginas", "subdominios", "cnpjs"]}
-    pedido = (f"Rodada de investigação {rodada} (restam ~{restante // 60} min). Diga sua hipótese e a confiança. Se as "
-              "evidências já bastam para ter certeza, pronto=true e listas vazias. Senão peça o que mais ajudaria a "
-              "decidir, variando a estratégia: buscas na web (nome da marca, marca + CNPJ, razão social, um serviço ou "
-              "subdomínio citado, o nome entre aspas com outro TLD), páginas para abrir (URLs das evidências), "
-              "subdomínios para visitar (dos certificados/logs) e CNPJs para consultar na Receita."
-              + (f"\nJá feitas (não repita): {'; '.join(feitas[-12:])}" if feitas else ""))
-    return _chat(client, [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}],
-                 schema, False, 500)
+    return _chat(client, [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + _pedido_plano(rodada, restante, feitas)}],
+                 schema, False, 400)
+
+
+def _pedido_plano(rodada: int, restante: int, feitas: list[str]) -> str:
+    return (f"Rodada de investigação {rodada} (restam ~{restante // 60} min). Diga sua hipótese (curta) e a confiança. "
+            "Se as evidências já bastam para ter certeza, pronto=true e listas vazias. Senão peça o que mais ajudaria a "
+            "decidir, variando a estratégia: até 3 buscas na web (nome da marca, marca + CNPJ, razão social, um serviço ou "
+            "subdomínio citado, o nome entre aspas com outro TLD), páginas para abrir (URLs das evidências), "
+            "subdomínios para visitar (dos certificados/logs) e CNPJs para consultar na Receita."
+            + (f"\nJá feitas (não repita): {'; '.join(feitas[-12:])}" if feitas else ""))
+
+
+_PLANO_CAMPOS = {"buscas": (3, 80), "paginas": (3, 200), "subdominios": (3, 100), "cnpjs": (2, 20)}
+
+
+def _proximo_passo_online(texto: str, rodada: int, restante: int, feitas: list[str]) -> tuple[dict, dict] | None:
+    """O plano da rodada pelo Gemini (21/10, pedido do usuário: a etapa 2 mais rápida). Só decide o que buscar/abrir a
+    seguir — o veredito e o revisor continuam na IA local. Na VM a IA local levava ~70 s por rodada (4,3 por
+    investigação, quase metade do tempo). None = sem cota/sem resposta: a rodada segue com a IA local."""
+    from . import online
+    formato = ('\n\nResponda SÓ com um JSON: {"hipotese": texto até 120 caracteres, "confianca": número de 0 a 1, '
+               '"pronto": true/false, "buscas": [até 3 textos], "paginas": [até 3 URLs], "subdominios": [até 3], '
+               '"cnpjs": [até 2]}')
+    r = online.responder_json(SISTEMA, texto + "\n\n" + _pedido_plano(rodada, restante, feitas) + formato, max_tokens=500)
+    if not r or not isinstance(r[0], dict):
+        return None
+    obj, meta = r
+    passo = {"hipotese": str(obj.get("hipotese") or "")[:120], "confianca": obj.get("confianca"),
+             "pronto": obj.get("pronto") is True}
+    for campo, (n, tam) in _PLANO_CAMPOS.items():
+        v = obj.get(campo) if isinstance(obj.get(campo), list) else []
+        passo[campo] = [str(x).strip()[:tam] for x in v if str(x).strip()][:n]
+    return passo, {"segundos": meta.get("seconds"), "tokens": meta.get("tokens"), "tokens_pergunta": meta.get("tokens_pergunta"),
+                   "modelo": meta.get("model"), "online": True, "gpu": False}
 
 
 def _revisar(client, texto: str, v: dict) -> tuple[dict, dict]:
@@ -1464,8 +1497,9 @@ def _veredito(client, texto: str, cats: list[dict], scats: list[dict]) -> tuple[
                      "motivo", "evidencias"]}
     cl = "\n".join(f"- {c['code']}: {c['description']}" for c in cats)
     sc = "\n".join(f"- {c['code']}: {c['label']}" for c in scats)
+    curta = settings().investigacao_regras_curtas and not client.extra   # (na GPU a leitura é rápida: regras inteiras)
     pedido = (f"Rodada final. Dê o veredito.\n\nClassificações:\n{cl}\n\nCategorias de site:\n{sc}\n\n"
-              f"{listas_ia.regras_lista()}\n\nEm \"motivo\" (1-3 frases, português) explique quem é o dono/serviço e "
+              f"{listas_ia.regras_lista(curta)}\n\nEm \"motivo\" (1-3 frases, português) explique quem é o dono/serviço e "
               "quais evidências decidiram; em \"evidencias\" os ids usados.")
     msgs = [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}]
     v, meta = _chat(client, msgs, schema, bool(client.extra), 1800 if client.extra else 700)
@@ -1479,6 +1513,20 @@ def _veredito(client, texto: str, cats: list[dict], scats: list[dict]) -> tuple[
 # ------------------------------------------------------------------ fila e aplicação
 _FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND NOT aguarda_recorrencia "
                "AND (NOT dominio_decidido(id) OR reanalise_pedida) LIMIT 1")
+
+
+_ACUMULO = [0.0, False]
+
+
+def etapa1_acumulada() -> bool:
+    """A fila da etapa 1 passou de GPU_AJUDA_ETAPA1_ACIMA? (o reforço com GPU volta a ajudar nela; conta a cada 30 s)"""
+    cfg = settings()
+    if time.monotonic() - _ACUMULO[0] > 30:
+        with db.conn() as c:
+            n = c.execute("SELECT count(*) AS n FROM (" + _FILA_FASE1.replace("LIMIT 1", "LIMIT %s") + ") x",
+                          (cfg.gpu_ajuda_etapa1_acima + 1,)).fetchone()["n"]
+        _ACUMULO[:] = [time.monotonic(), n > cfg.gpu_ajuda_etapa1_acima]
+    return _ACUMULO[1]
 
 
 # quem a fase 6 investiga: DESCONHECIDOS/SUSPEITOS sem decisão — e (30/09, pedido do usuário) TODO DESCONHECIDO já
@@ -1523,7 +1571,8 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
     """Investiga UM domínio. 'idle' | 'done' | 'unavailable'."""
     from .classifier import build_dossier, event
     with db.conn() as c:
-        if c.execute(_FILA_FASE1).fetchone():   # a fila normal tem prioridade
+        # a fila normal tem prioridade — na VM; o reforço com GPU fica com a investigação (21/10, GPU_ETAPA2)
+        if not (client.extra and settings().gpu_etapa2) and c.execute(_FILA_FASE1).fetchone():
             return "idle"
         d = _reservar(c)
         if not d:
@@ -1640,11 +1689,14 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             if resta() < reserva + custo_rodada:
                 break
             dos.juntar(fontes)
-            passo, meta = _proximo_passo(client, dos.texto(), rodada, int(resta() - reserva), feitas)
+            texto_r = dos.texto()
+            r = (_proximo_passo_online(texto_r, rodada, int(resta() - reserva), feitas)
+                 if not client.extra and cfg.investigacao_plano_online else None)
+            passo, meta = r or _proximo_passo(client, texto_r, rodada, int(resta() - reserva), feitas)
             passo["confianca"] = _conf(passo.get("confianca"))
             rodadas.append(meta | {k: passo.get(k) for k in ("hipotese", "confianca", "pronto")})
-            if meta.get("tokens_pergunta"):   # o veredito repete esta pergunta + as regras de lista + a resposta
-                dos.folga(client.num_ctx - meta["tokens_pergunta"] - tokens_veredito)
+            if meta.get("tokens_pergunta") and not meta.get("online"):   # o veredito repete esta pergunta + as regras de
+                dos.folga(client.num_ctx - meta["tokens_pergunta"] - tokens_veredito)   # lista + a resposta (tokens da IA local)
             if passo.get("pronto") and passo["confianca"] >= cfg.investigacao_confianca_min:
                 break
             novas = list(dict.fromkeys(q.strip() for q in passo.get("buscas") or []
@@ -1655,7 +1707,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             cns = [x for x in passo.get("cnpjs") or [] if re.sub(r"\D", "", x) not in feitas][:2]
             if not (novas or pags or sds or cns):
                 break
-            novas_b = buscas(novas, nome)
+            novas_b = buscas(novas, nome, completa=False)
             fontes["buscas"] += novas_b
             fontes["paginas_resultados"] += paginas_dos_resultados(novas_b, nome, http, abertas, PAGINAS_POR_RODADA)
             for u in pags:

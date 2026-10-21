@@ -127,7 +127,7 @@ def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bo
                  "coleta_em_cache": None, "perfil_acesso": {}}.items():
         monkeypatch.setattr(inv, f, lambda *a, _r=r, **k: _r)
     buscas_feitas = []
-    monkeypatch.setattr(inv, "buscas", lambda qs, nome: buscas_feitas.extend(qs) or [{"consulta": q, "resultados": []} for q in qs])
+    monkeypatch.setattr(inv, "buscas", lambda qs, nome, completa=True: buscas_feitas.extend(qs) or [{"consulta": q, "resultados": []} for q in qs])
     monkeypatch.setattr(inv, "cnpjs", lambda c, ns: [])
     monkeypatch.setattr(inv, "subdominios", lambda ns, http: [])
     monkeypatch.setattr(inv, "paginas_dos_resultados", lambda *a: [])
@@ -584,3 +584,83 @@ def test_confianca_fora_da_faixa_nao_vale(monkeypatch):
     assert "x erp" in buscas_feitas, "a 1ª rodada não encerrou a investigação: seguiu buscando"
     assert [r.get("confianca") for r in g["rodadas"][:2]] == [0.0, 0.9]
     assert not aplicou and g["veredito"]["confidence"] == 0.0 and "abaixo de" in g["sem_aplicar"]
+
+
+def test_plano_da_rodada_pelo_gemini_na_vm(monkeypatch):
+    """21/10 (pedido do usuário: etapa 2 mais rápida): na VM o plano de cada rodada vem do Gemini (só decide o que
+    buscar); veredito e revisor seguem na IA local. Sem cota/sem resposta, a rodada usa a IA local. Na GPU, local."""
+    from dnsanalyzer import online
+    pedidos = []
+
+    def resp(sistema, pergunta, max_tokens=700):
+        pedidos.append(pergunta)
+        return {"hipotese": "x" * 300, "confianca": 0.7, "pronto": "sim", "buscas": ["a", "b", "c", "d", ""],
+                "paginas": "nada", "subdominios": ["s.x.com"], "cnpjs": [1, 2, 3]}, {"model": "gemini-3.5-flash-lite", "seconds": 1.2}
+    monkeypatch.setattr(online, "responder_json", resp)
+    passo, meta = inv._proximo_passo_online("dossiê", 2, 300, ["q1"])
+    assert passo == {"hipotese": "x" * 120, "confianca": 0.7, "pronto": False, "buscas": ["a", "b", "c"], "paginas": [],
+                     "subdominios": ["s.x.com"], "cnpjs": ["1", "2"]}
+    assert meta["online"] and meta["modelo"] == "gemini-3.5-flash-lite" and not meta["gpu"]
+    assert "Rodada de investigação 2" in pedidos[0] and "Já feitas (não repita): q1" in pedidos[0] and "até 3 buscas" in pedidos[0]
+    monkeypatch.setattr(online, "responder_json", lambda *a, **k: None)
+    assert inv._proximo_passo_online("dossiê", 2, 300, []) is None
+
+
+def _simula_maquina(monkeypatch, extra: bool, online_ok: bool):
+    from dnsanalyzer import online
+    usados = []
+    monkeypatch.setattr(inv, "_proximo_passo_online", lambda *a: usados.append("online") or (
+        ({"hipotese": "h", "confianca": 0.95, "pronto": True, "buscas": [], "paginas": [], "subdominios": [], "cnpjs": []},
+         {"segundos": 1, "online": True}) if online_ok else None))
+    _Cli.extra = extra
+    try:
+        g, _, _ = _simula(monkeypatch, revisor_ok=True)
+    finally:
+        _Cli.extra = True
+    return usados, g
+
+
+def test_vm_usa_o_plano_online_e_a_gpu_nao(monkeypatch):
+    usados, g = _simula_maquina(monkeypatch, extra=False, online_ok=True)
+    assert usados == ["online"] and g["rodadas"][0].get("online"), "VM: plano pelo Gemini (e pronto na 1ª rodada)"
+    usados, g = _simula_maquina(monkeypatch, extra=False, online_ok=False)
+    assert usados and not g["rodadas"][0].get("online"), "sem resposta do Gemini: a IA local faz a rodada"
+    usados, g = _simula_maquina(monkeypatch, extra=True, online_ok=True)
+    assert usados == [], "na GPU a IA local é rápida: o plano fica nela"
+
+
+def test_rodadas_seguintes_usam_a_busca_leve(monkeypatch):
+    """21/10: a primeira leva de buscas é completa (todos os buscadores, 30 s por instância); as das rodadas seguintes
+    usam a leve (15 s por instância)."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import webintel
+    cfg = SimpleNamespace(web_search_url="http://s", web_search_motores=["bing"], web_search_motores_completos=["google", "bing"])
+    monkeypatch.setattr(inv, "settings", lambda: cfg)
+    vistos = []
+    monkeypatch.setattr(webintel, "reservar_completa", lambda c: vistos.append("completa") or "http://s")
+    monkeypatch.setattr(webintel, "_reservar", lambda c, wait, evitar=frozenset(): vistos.append("leve") or "http://s")
+    monkeypatch.setattr(webintel, "_consulta", lambda c, q, rel, url, motores: (vistos.append(tuple(motores)) or [], []))
+    inv.buscas(["a"], "x.com")
+    inv.buscas(["b", "c"], "x.com", completa=False)
+    assert vistos == ["completa", ("google", "bing"), "leve", ("bing",), "leve", ("bing",)]
+
+
+def test_regras_curtas_no_veredito_da_vm(monkeypatch):
+    """21/10: com INVESTIGACAO_REGRAS_CURTAS o veredito da VM leva a descrição curta das listas (as com ressalva ficam
+    inteiras); na GPU, sempre as inteiras."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import config, listas_ia
+    curta, inteira = listas_ia.regras_lista(True), listas_ia.regras_lista()
+    assert len(curta) < 0.8 * len(inteira)
+    assert listas_ia.LISTAS_IA["ameaca"] in curta and listas_ia.LISTAS_IA["vpn_proxy"] in curta, "ressalvas inteiras"
+    perguntas = []
+    completo = {k: None for k in ("service", "recognized", "classification", "category", "confidence", "lista", "lista_confianca",
+                                  "motivo", "evidencias")}
+    monkeypatch.setattr(inv, "_chat", lambda cli, msgs, schema, pensar, n: perguntas.append(msgs[-1]["content"]) or (dict(completo), {"segundos": 1}))
+    cfg = config.settings()
+    for regras_curtas, extra in [(True, False), (True, True), (False, False)]:
+        monkeypatch.setattr(inv, "settings", lambda rc=regras_curtas: SimpleNamespace(**{**vars(cfg), "investigacao_regras_curtas": rc}))
+        inv._veredito(SimpleNamespace(extra=extra), "dossiê", [{"code": "TRABALHO", "description": "t"}], [])
+    assert [curta in p for p in perguntas] == [True, False, False]

@@ -1875,3 +1875,72 @@ def test_revisao_das_ameacas_postas_so_pela_ia(env, monkeypatch):
     monkeypatch.setattr(investigacao, "vt_resta", lambda uso: 10)   # abaixo da reserva: não consulta ninguém novo
     vistos.clear()
     assert investigacao.revisar_ameacas(aplicar=True)["adiados"] == 2 and vistos == []
+
+
+def test_pergunta_livre_ao_gemini(env, monkeypatch):
+    """21/10: pergunta livre em JSON no nível de volume (plano das rodadas da investigação): mesma cota/chaves; 503 passa
+    p/ a próxima chave; nenhum respondeu = None (quem chamou segue com a IA local)."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import config, online
+    monkeypatch.setattr(online, "_COTAS", {})
+    monkeypatch.setattr(online._Cota, "esperar", lambda self: True)
+    monkeypatch.setattr(config.settings(), "gemini_api_key", "AIza-k1")
+    monkeypatch.setattr(config.settings(), "gemini_api_keys_extra", ["AIza-k2"])
+    respostas = iter([SimpleNamespace(status_code=503, text=""),
+                      SimpleNamespace(status_code=200, text="", json=lambda: {
+                          "candidates": [{"content": {"parts": [{"text": '{"hipotese": "ERP", "buscas": ["x"]}'}]}}],
+                          "usageMetadata": {"promptTokenCount": 900, "candidatesTokenCount": 40}})])
+    enviados = []
+    monkeypatch.setattr(online.httpx, "post", lambda url, **kw: enviados.append((url, kw["json"])) or next(respostas))
+    obj, meta = online.responder_json("sistema", "pergunta")
+    assert obj == {"hipotese": "ERP", "buscas": ["x"]} and meta["tokens"] == 40 and meta["chave"] == 2
+    assert enviados[0][1]["generationConfig"]["responseMimeType"] == "application/json"
+    assert enviados[0][1]["systemInstruction"]["parts"][0]["text"] == "sistema"
+    monkeypatch.setattr(online.httpx, "post", lambda url, **kw: SimpleNamespace(status_code=503, text=""))
+    monkeypatch.setattr(online, "_COTAS", {})
+    assert online.responder_json("sistema", "pergunta") is None
+
+
+def test_gpu_fica_com_a_etapa_2(env, monkeypatch):
+    """21/10: o reforço com GPU investiga mesmo com fila na etapa 1 (a VM só investiga com ela vazia); só volta a ajudar
+    a etapa 1 (fases 1-3 e a pergunta de lista) quando ela passa de GPU_AJUDA_ETAPA1_ACIMA."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import classifier, config, db, investigacao
+    cfg = config.settings()
+    with db.conn() as c:
+        c.execute("UPDATE domains SET llm_pending = false")
+        for i in range(3):
+            c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES (%s, 'public', 'DESCONHECIDO', true)", (f"fila1-{i}-gpu.com",))
+        c.execute("INSERT INTO domains (name, kind, classification, total_queries, analyzed_at) VALUES ('investigar-gpu.com', 'public', 'DESCONHECIDO', 99, now())")
+    vistos = []
+    monkeypatch.setattr(investigacao, "_investigar", lambda client, cats, scats, d, dossie: vistos.append((client.extra, d["name"])) or "done")
+    monkeypatch.setattr(classifier, "build_dossier", lambda c, d, **k: {"name": d["name"]})
+    from dnsanalyzer import dnsativo
+    monkeypatch.setattr(dnsativo, "etapa1", lambda d: False)
+    vm, gpu = SimpleNamespace(extra=False), SimpleNamespace(extra=True)
+    monkeypatch.setattr(investigacao, "_ACUMULO", [0.0, False])
+    assert investigacao.fase(vm, [], []) == "idle", "VM: a etapa 1 tem prioridade"
+    investigacao.fase(gpu, [], [])
+    assert vistos and vistos[0][0] is True, "GPU: investiga mesmo com fila na etapa 1"
+    # ajuda na etapa 1 só com acúmulo
+    monkeypatch.setattr(cfg, "gpu_ajuda_etapa1_acima", 5)
+    investigacao._ACUMULO[:] = [0.0, False]
+    assert investigacao.etapa1_acumulada() is False
+    monkeypatch.setattr(cfg, "gpu_ajuda_etapa1_acima", 2)
+    investigacao._ACUMULO[:] = [0.0, False]
+    assert investigacao.etapa1_acumulada() is True
+    r = classifier._Reforco.__new__(classifier._Reforco)
+    r.vm, r.ok, r.vez, r.extras, r.reserva = SimpleNamespace(nome="vm"), {}, 0, [SimpleNamespace(url="http://gpu", nome="gpu")], []
+    monkeypatch.setattr(r, "_no_ar", lambda x: True)
+    assert r.cliente().nome == "gpu", "etapa 1 acumulada: a GPU ajuda"
+    investigacao._ACUMULO[:] = [time_mono(), False]
+    assert r.cliente().nome == "vm", "sem acúmulo: as fases 1-3 ficam na VM"
+    monkeypatch.setattr(cfg, "gpu_etapa2", False)
+    assert r.cliente().nome == "gpu", "GPU_ETAPA2 desligado: como antes"
+
+
+def time_mono():
+    import time
+    return time.monotonic()

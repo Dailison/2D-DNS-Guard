@@ -395,6 +395,7 @@ def test_cada_reforco_com_o_seu_modelo_e_rodizio(monkeypatch):
     from dnsanalyzer import classifier, config, llm
     monkeypatch.setenv("OLLAMA_EXTRA_URLS", "http://pc1:11434, http://pc2:11434/=gemma4:26b-iq3s")
     monkeypatch.setenv("OLLAMA_EXTRA_MODEL", "gemma4:26b")
+    monkeypatch.setenv("GPU_ETAPA2", "false")   # rodízio nas fases 1-3 (com GPU_ETAPA2 só com acúmulo)
     monkeypatch.setattr(config, "_settings", None)
     try:
         cfg = config.settings()
@@ -416,6 +417,7 @@ def test_etapas_so_na_gpu_rapida_e_workers_por_reforco(monkeypatch):
     monkeypatch.setenv("OLLAMA_ETAPAS_URLS", "http://pc2:11434")
     monkeypatch.setenv("LLM_EXTRA_WORKERS_URL", "http://pc1:11434=2")
     monkeypatch.setenv("LLM_EXTRA_WORKERS", "4")
+    monkeypatch.setenv("GPU_ETAPA2", "false")   # rodízio nas fases 1-3 (com GPU_ETAPA2 só com acúmulo)
     monkeypatch.setattr(config, "_settings", None)
     try:
         cfg = config.settings()

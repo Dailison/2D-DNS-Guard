@@ -362,11 +362,29 @@ def codigos_lista() -> list[str]:
     return list(LISTAS_IA) + [f"wl:{k}" for k in whitelist.DESCRICOES]
 
 
-def regras_lista() -> str:
-    """Parte fixa da etapa local única: como escolher a lista + as listas e whitelists (mesmas regras da fase 4)."""
+# listas cuja descrição tem uma ressalva que muda a decisão: ficam inteiras até na versão curta
+_DESCRICAO_INTEIRA = {"ameaca", "vpn_proxy", "doh_dns", NAO_IDENT}
+
+
+def _curta(texto: str) -> str:
+    """Primeira frase/oração da descrição (até 110 caracteres): o suficiente p/ escolher entre códigos do esquema."""
+    t = re.split(r"(?<=[a-z0-9)])[.;:](?:\s|$)|\s—\s|\s\(", texto, maxsplit=1)[0].strip()
+    return (t[:107] + "...") if len(t) > 110 else t
+
+
+def regras_lista(curta: bool = False) -> str:
+    """Parte fixa da etapa local única: como escolher a lista + as listas e whitelists (mesmas regras da fase 4).
+    curta=True (21/10, veredito da investigação na VM): a descrição de cada lista encurtada — a pergunta inteira tinha
+    ~3 mil tokens só de regras, lidos a ~40 tokens/s em todo veredito; as listas com ressalva ficam inteiras."""
     from . import online
     s = online.SYSTEM
     regra = s[s.index('- "lista":'):s.index('- "confianca":')].replace("{{", "{").replace("}}", "}")
+    if curta:
+        return ("Escolha a lista do site (lista, lista_confianca) entre as de bloqueio (o que o site é) ou as whitelists "
+                "(sites liberados). Página do próprio site que mostra com clareza o tipo basta p/ a lista de bloqueio "
+                "(até 0.9); whitelist só com conhecimento, CNPJ, certificado ou busca na web.\n" + regra
+                + "\nListas de bloqueio:\n" + "\n".join(f"- {k}: {v if k in _DESCRICAO_INTEIRA else _curta(v)}" for k, v in LISTAS_IA.items())
+                + "\n\nWhitelists (sites liberados):\n" + "\n".join(f"- {k}: {_curta(v)}" for k, v in WL.items()))
     return ("ALÉM da classificação, diga para onde o site vai (campos lista, lista_confianca, lista_motivo). "
             "lista_confianca 1.0 só com certeza; 0.7 provável; 0.4 ou menos se está chutando. A página inicial do PRÓPRIO "
             "domínio que mostra com clareza o tipo de site, coerente com o nome (loja com produtos e preços, cassino/apostas, "

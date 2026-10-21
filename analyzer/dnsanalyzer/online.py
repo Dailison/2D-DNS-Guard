@@ -387,31 +387,9 @@ def _limite_429(r) -> tuple[bool, float, int | None]:
     return False, espera, None   # sem detalhe: trata como limite do minuto (o contador próprio pausa o dia no RPD)
 
 
-def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None = None, chave: int = 0) -> tuple[dict, dict]:
-    cfg = settings()
-    modelo = modelo or cfg.gemini_modelos[0][0]
-    listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
-    wls = "\n".join(f"- {k}: {v}" for k, v in WL.items())
-    sistema = SYSTEM.format(listas=listas, whitelists=wls, categorias=", ".join(categorias))
-    sug = ""
-    if d.get("lista_ia"):   # validação: a IA online confirma ou corrige a sugestão da IA local
-        sug = (f"\nSugestão da IA local (modelo pequeno, pode errar): lista '{d['lista_ia']}'"
-               + (f" (confiança {d['lista_conf']:.2f})" if d.get("lista_conf") is not None else "")
-               + (f" — {d['lista_motivo']}" if d.get("lista_motivo") else "") + ". Confirme ou corrija.")
-    pergunta = contexto_completo(d) + sug + "\n\nClassifique este domínio."
-    corpo: dict = {"generationConfig": {"temperature": 0}}
-    if modelo.startswith("gemma"):   # Gemma pela API: sem instrução de sistema nem modo JSON (JSON extraído do texto)
-        corpo["contents"] = [{"role": "user", "parts": [{"text": sistema + "\n\n" + pergunta}]}]
-        buscar = False
-    else:
-        corpo["systemInstruction"] = {"parts": [{"text": sistema}]}
-        corpo["contents"] = [{"role": "user", "parts": [{"text": pergunta}]}]
-        buscar = buscar and _com_busca(modelo)
-        if buscar:   # desconhecido: pesquisa no Google (resposta em texto; o JSON é extraído)
-            corpo["tools"] = [{"google_search": {}}]
-        else:
-            corpo["generationConfig"]["responseMimeType"] = "application/json"
-    t0 = time.monotonic()
+def _enviar(modelo: str, chave: int, corpo: dict, buscar: bool = False) -> dict:
+    """Um pedido ao Gemini com a cota daquele modelo e chave (a vaga já foi tomada com cota().esperar()). Sem resposta,
+    recusa ou erro: OnlineIndisponivel (com a cota devolvida e a pausa certa); senão o JSON da resposta."""
     ct = cota(modelo, chave)
     qual = f"{modelo} (chave {chave + 1})" if chave else modelo
     k = _chaves()[chave]
@@ -439,7 +417,65 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
         ct.pausar(600)   # chave inválida/modelo inexistente: não martela
         raise OnlineIndisponivel(f"Gemini {qual}: HTTP {r.status_code}: {r.text[:200]}")
     ct.respondeu()
-    j = r.json()
+    return r.json()
+
+
+def responder_json(sistema: str, pergunta: str, max_tokens: int = 700) -> tuple[dict, dict] | None:
+    """Pergunta livre com resposta em JSON, no nível de volume (Flash-lite), com as mesmas cotas, chaves e pausas da fase
+    4 (21/10: o plano das rodadas da investigação na VM — a IA local levava ~70 s por rodada só p/ decidir as próximas
+    buscas). None = sem chave, sem cota ou nenhum modelo respondeu: quem chamou segue com a IA local."""
+    if not habilitado():
+        return None
+    for modelo, _, _ in niveis()[0]:
+        for chave in range(len(_chaves())):
+            if not cota(modelo, chave).esperar():
+                continue
+            t0 = time.monotonic()
+            corpo = {"systemInstruction": {"parts": [{"text": sistema}]},
+                     "contents": [{"role": "user", "parts": [{"text": pergunta}]}],
+                     "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "maxOutputTokens": max_tokens}}
+            try:
+                j = _enviar(modelo, chave, corpo)
+                partes = ((j.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+                obj = _json_da_resposta("".join(p.get("text", "") for p in partes if not p.get("thought")))
+            except OnlineIndisponivel as e:
+                log.info("%s", e)
+                continue
+            except (ValueError, KeyError, json.JSONDecodeError) as e:
+                log.info("pergunta livre ao %s: resposta inválida: %s", modelo, e)
+                break   # resposta inválida é do modelo, não da chave
+            uso = j.get("usageMetadata") or {}
+            return obj, {"model": modelo, "seconds": round(time.monotonic() - t0, 1), "tokens": uso.get("candidatesTokenCount"),
+                         "tokens_pergunta": uso.get("promptTokenCount"), **({"chave": chave + 1} if chave else {})}
+    return None
+
+
+def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None = None, chave: int = 0) -> tuple[dict, dict]:
+    cfg = settings()
+    modelo = modelo or cfg.gemini_modelos[0][0]
+    listas = "\n".join(f"- {k}: {v}" for k, v in LISTAS_IA.items())
+    wls = "\n".join(f"- {k}: {v}" for k, v in WL.items())
+    sistema = SYSTEM.format(listas=listas, whitelists=wls, categorias=", ".join(categorias))
+    sug = ""
+    if d.get("lista_ia"):   # validação: a IA online confirma ou corrige a sugestão da IA local
+        sug = (f"\nSugestão da IA local (modelo pequeno, pode errar): lista '{d['lista_ia']}'"
+               + (f" (confiança {d['lista_conf']:.2f})" if d.get("lista_conf") is not None else "")
+               + (f" — {d['lista_motivo']}" if d.get("lista_motivo") else "") + ". Confirme ou corrija.")
+    pergunta = contexto_completo(d) + sug + "\n\nClassifique este domínio."
+    corpo: dict = {"generationConfig": {"temperature": 0}}
+    if modelo.startswith("gemma"):   # Gemma pela API: sem instrução de sistema nem modo JSON (JSON extraído do texto)
+        corpo["contents"] = [{"role": "user", "parts": [{"text": sistema + "\n\n" + pergunta}]}]
+        buscar = False
+    else:
+        corpo["systemInstruction"] = {"parts": [{"text": sistema}]}
+        corpo["contents"] = [{"role": "user", "parts": [{"text": pergunta}]}]
+        buscar = buscar and _com_busca(modelo)
+        if buscar:   # desconhecido: pesquisa no Google (resposta em texto; o JSON é extraído)
+            corpo["tools"] = [{"google_search": {}}]
+        else:
+            corpo["generationConfig"]["responseMimeType"] = "application/json"
+    t0 = time.monotonic()
+    j = _enviar(modelo, chave, corpo, buscar)
     partes = ((j.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
     texto = "".join(p.get("text", "") for p in partes if not p.get("thought"))
     obj = _json_da_resposta(texto)

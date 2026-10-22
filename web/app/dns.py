@@ -221,6 +221,63 @@ def bloqueios_rem_todos():
     return redirect(url_for("analise.dominio", nome=qg, t=0) if qg else url_for("admin.listas_categoria"))
 
 
+@admin_bp.get("/bloqueios/onde")
+@login_required
+@super_required
+def bloqueios_onde():
+    """Desbloquear… nos logs (22/10, pedido do usuário): em que listas de bloqueio o domínio está (ele ou um domínio-pai)
+    e em que whitelist, para escolher de quais tirar ou mover para uma whitelist."""
+    d = (request.args.get("d") or "").strip().lower().rstrip(".")
+    if not d:
+        return _json(False, "domínio vazio")
+    nomes, wls = dict(dnslib.CATEGORIAS_LISTA), dict(dnslib.CATEGORIAS_WHITELIST)
+    try:
+        em = api.get(f"/listas-dominio/{quote(d, safe='')}")
+        wl = api.get(f"/whitelist-dominio/{quote(d, safe='')}")
+    except AnalyzerError as e:
+        return _json(False, str(e))
+    listas = sorted(({"lista": r["category"], "rotulo": nomes.get(r["category"], r["category"]), "entrada": r["domain"],
+                      "por": r.get("added_by") or ""} for r in em), key=lambda x: (x["rotulo"], x["entrada"]))
+    return _json(True, "", dominio=d, listas=listas,
+                 whitelist=[{"categoria": w["category"], "rotulo": wls.get(w["category"], w["category"]), "entrada": w["domain"]}
+                            for w in wl])
+
+
+@admin_bp.post("/bloqueios/desbloquear")
+@login_required
+@super_required
+def bloqueios_desbloquear():
+    """Desbloquear… nos logs: tira das listas marcadas (entrada|lista) ou move o domínio para uma whitelist (sai de todas
+    as listas de bloqueio e vale no DNS — whitelist vence bloqueio, inclusive o que vem de um domínio-pai)."""
+    dom = (request.form.get("dominio") or "").strip().lower().rstrip(".")
+    voltar = (request.form.get("voltar") or "").strip()
+    quem = admin_atual().email
+    try:
+        if request.form.get("acao") == "whitelist":
+            wl = request.form.get("wl", "")
+            nome = dict(dnslib.CATEGORIAS_WHITELIST).get(wl)
+            if not nome:
+                flash("Escolha a whitelist.", "erro")
+            else:
+                api.post(f"/whitelist/{quote(wl, safe='')}", {"domains": [dom], "by": quem})
+                flash(f"{dom}: na whitelist {nome}, fora das listas de bloqueio (vale no DNS em até 2 min).", "ok")
+        else:
+            itens = [x.split("|", 1) for x in request.form.getlist("itens") if "|" in x]
+            n = 0
+            for lista, entrada in itens:
+                n += api.post("/listas-mover", {"domains": [entrada], "de": lista, "para": [], "by": quem}).get("removidos", 0)
+            for entrada in {e for _, e in itens}:
+                _decisao_global(entrada, "allowed")   # o automático não põe de volta
+            if not n:
+                flash("Nenhuma lista marcada.", "erro")
+            else:
+                nomes = dict(dnslib.CATEGORIAS_LISTA)
+                flash(f"{dom}: fora de {', '.join(nomes.get(lista, lista) for lista, _ in itens)} (vale no DNS em até 2 min).", "ok")
+    except AnalyzerError as e:
+        flash(f"Falha ao desbloquear {dom}: {e}", "erro")
+    return redirect(voltar if next_local(voltar) else url_for("admin.logs_dns"))
+
+
 LOGS_LIMITE = 1000
 # classificação da IA nos logs (filtro "Classificação IA"): AMEACAS = Malicioso + Suspeito
 CLS_FILTROS = [("", "— Todas —"), ("AMEACAS", "Ameaças (Malicioso + Suspeito)"), ("MALICIOSO", "Malicioso"),
@@ -316,7 +373,7 @@ def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, r
     return render_template(
         "admin/logs_dns.html", linhas=[], agrupado=agrupado, agrupar=True, vista=vista,
         grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
-        cidr=cidr, ip=ip, dominio=dominio, resposta=resposta, respostas=dnslib.RESPONSE_TYPES,
+        cidr=cidr, ip=ip, dominio=dominio, resposta=resposta, respostas=dnslib.RESPONSE_TYPES, wl_cats=dnslib.CATEGORIAS_WHITELIST,
         inicio=inicio, fim=fim, scanned=None, cap=cap, voltar=request.full_path,
         fonte_analisador=True, total_acessos=total, locais=locais,
         coletado_ate=dnslib.utc_para_local(coletado) if coletado else None, **_ctx_cls(cls_f, categoria))
@@ -368,7 +425,7 @@ def _logs_detalhe_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, res
     return render_template(
         "admin/logs_dns.html", linhas=linhas, agrupado=[], agrupar=False, vista="detalhado", locais=locais,
         grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
-        cidr=cidr, ip=ip, dominio=dominio, resposta=resposta, respostas=dnslib.RESPONSE_TYPES,
+        cidr=cidr, ip=ip, dominio=dominio, resposta=resposta, respostas=dnslib.RESPONSE_TYPES, wl_cats=dnslib.CATEGORIAS_WHITELIST,
         inicio=inicio, fim=fim, scanned=None, cap=cap, voltar=request.full_path,
         fonte_detalhe=True, coletado_ate=dnslib.utc_para_local(coletado) if coletado else None,
         coberto_desde=antigos, url_antigos=url_for("admin.logs_dns", **{**args, "inicio": inicio, "fim": antigos}) if antigos else None,
@@ -545,7 +602,7 @@ def logs_dns():
         "admin/logs_dns.html", linhas=linhas, agrupado=agrupado, agrupar=agrupar, vista=vista, locais=locais,
         grupos=grupos, grupo=grupo, lista_empresas=lista_empresas, empresa=empresa,
         cidr=cidr, ip=ip, dominio=dominio, resposta=resposta,
-        respostas=dnslib.RESPONSE_TYPES,
+        respostas=dnslib.RESPONSE_TYPES, wl_cats=dnslib.CATEGORIAS_WHITELIST,
         inicio=inicio, fim=fim, scanned=scanned, cap=cap, voltar=request.full_path, coberto_desde=coberto_desde,
         url_antigos=(url_for("admin.logs_dns", **{**request.args.to_dict(flat=False), "inicio": inicio, "fim": coberto_desde})
                      if coberto_desde else None),

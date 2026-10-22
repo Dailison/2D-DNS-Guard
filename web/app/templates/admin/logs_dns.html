@@ -31,7 +31,7 @@
 {# explicações em tooltip, no rótulo do campo e no cabeçalho da coluna a que se referem #}
 {% set T_CLS = "A do analisador para o site; o ajuste manual da empresa (marcado com o lápis) prevalece. Juntando empresas numa linha, vale a pior. Ameaças = Malicioso + Suspeito" %}
 {% set T_RESP = "Como o Technitium respondeu: Blocked = bloqueado pelo filtro; Cached, Recursive… = resolvido" %}
-{% set T_DESB = "Nas linhas Blocked: o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME). O botão tira esse domínio de todas as listas de bloqueio (vale no DNS em até 2 min)" %}
+{% set T_DESB = "Nas linhas Blocked: o(s) domínio(s) da lista que causam o bloqueio (o próprio nome ou um elo da cadeia CNAME). O botão mostra as listas que o bloqueiam: tirar das marcadas ou mover para uma whitelist (vale no DNS em até 2 min)" %}
 {% set T_PER = "Horário no fuso de São Paulo (GMT-3). Reduza o período para buscas mais fundas" %}
 
 <div class="card">
@@ -120,15 +120,11 @@
     {% if row.resposta == 'Blocked' or row.blocked %}
       {% set alvos = row.culpados if row.culpados else [row.dominio] %}
       {% for c in alvos %}
-        <form method="post" action="{{ url_for('admin.bloqueios_rem_todos') }}" style="display:inline-block;margin:0 .2rem .2rem 0"
-              onsubmit="return confirm('Tirar {{ c }} de todas as listas de bloqueio?')">
-          <input type="hidden" name="dominios" value="{{ c }}">
-          <input type="hidden" name="voltar" value="{{ voltar }}">
-          <button class="danger mini" title="Tira {{ c }} de todas as listas de bloqueio"><i class="bi bi-x-lg"></i>{{ c }}</button>
-        </form>
+        <button type="button" class="danger mini" style="margin:0 .2rem .2rem 0" data-desb="{{ c }}" title="Listas que bloqueiam {{ c }}"><i class="bi bi-unlock"></i>{{ c }}</button>
       {% endfor %}
     {% else %}<span class="mut">—</span>{% endif %}
   {% endmacro %}
+  {% macro dom(nome) %}<a href="{{ url_for('analise.dominio', nome=nome, t=0) }}" target="_blank" rel="noopener" title="Abrir {{ nome }} (nova aba)">{{ nome }}</a>{% endmacro %}
   {% if vista == 'cliente' %}
   <table>
     <thead><tr><th>Último acesso</th><th>Computador</th><th>Empresa</th><th>Domínio</th><th title="{{ T_CLS }}">Classificação IA</th><th>Entradas</th><th title="{{ T_RESP }}">Resposta</th><th title="{{ T_DESB }}">Desbloquear</th></tr></thead>
@@ -138,7 +134,7 @@
         <td class="mut" style="white-space:nowrap">{{ (a.ultima or '')[:19]|replace('T',' ') }}</td>
         <td><code>{{ a.ip }}</code>{% if a.computador %}<br><span style="font-size:.85rem">{{ a.computador }}</span>{% endif %}</td>
         <td style="font-size:.85rem">{{ a.empresa or '—' }}</td>
-        <td>{{ a.dominio }}</td>
+        <td>{{ dom(a.dominio) }}</td>
         <td>{{ selo(a) }}</td>
         <td><b>{{ a.n }}</b></td>
         <td class="mut">{% if a.blocked %}<span class="blk">Blocked</span>{% if a.bloqueadas < a.n %} <span style="font-size:.75rem">{{ a.bloqueadas }}/{{ a.n }}</span>{% endif %}{% else %}Resolvido{% endif %}</td>
@@ -156,7 +152,7 @@
     {% for a in agrupado %}
       <tr>
         <td class="mut" style="white-space:nowrap">{{ (a.ultima or '')[:19]|replace('T',' ') }}</td>
-        <td>{{ a.dominio }}
+        <td>{{ dom(a.dominio) }}
           {% if a.blocked and a.answer and 'CNAME' in a.answer %}<br><span class="mut" style="font-size:.75rem"><i class="bi bi-arrow-return-right"></i> {{ a.answer }}</span>{% endif %}
         </td>
         <td>{{ selo(a) }}</td>
@@ -180,7 +176,7 @@
         <td class="mut" style="white-space:nowrap">{{ (l.timestamp or '')[:19]|replace('T',' ') }}</td>
         <td><code>{{ l.ip }}</code>{% if l.empresa and l.empresa != '—' %} <b style="font-size:.85rem">· {{ l.empresa }}</b>{% endif %}
 </td>
-        <td>{{ l.dominio }}
+        <td>{{ dom(l.dominio) }}
           {% if l.resposta == 'Blocked' and l.answer and 'CNAME' in l.answer %}
             <br><span class="mut" style="font-size:.75rem"><i class="bi bi-arrow-return-right"></i> {{ l.answer }}</span>
           {% endif %}
@@ -200,4 +196,70 @@
   </table>
   {% endif %}
 </div>
+
+<dialog id="dlgDesb" class="dlg" style="max-width:560px;width:calc(100vw - 32px)">
+  <h2 style="margin:0 0 .4rem">Desbloquear — <span id="dNome"></span></h2>
+  <form method="post" action="{{ url_for('admin.bloqueios_desbloquear') }}" id="dForm">
+    <input type="hidden" name="dominio" id="dDom">
+    <input type="hidden" name="voltar" value="{{ voltar }}">
+    <label style="margin-top:0">Listas de bloqueio</label>
+    <div id="dListas" style="max-height:40vh;overflow:auto"></div>
+    <div id="dWlAtual" class="t-ok" style="font-size:.85rem;margin-top:.3rem" hidden></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:.5rem">
+      <button type="submit" name="acao" value="listas" class="danger" id="dTirar"><i class="bi bi-x-lg"></i>Tirar das marcadas</button>
+    </div>
+    <label title="Sai de todas as listas de bloqueio e vale no DNS em todas as empresas (whitelist vence bloqueio, inclusive o de um domínio-pai)">Mover para whitelist</label>
+    <div class="row" style="align-items:flex-end;margin:0">
+      <div><select name="wl" id="dWl"><option value="">— escolha —</option>{% for k, v in wl_cats or [] %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+      <div style="flex:0"><button type="submit" name="acao" value="whitelist" class="primary"><i class="bi bi-shield-check"></i>Mover</button></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:.7rem">
+      <button type="button" onclick="document.getElementById('dlgDesb').close()"><i class="bi bi-x-lg"></i>Fechar</button>
+    </div>
+  </form>
+</dialog>
+<script>
+(function () {
+  const dlg = document.getElementById("dlgDesb"), box = document.getElementById("dListas"), wlAtual = document.getElementById("dWlAtual");
+  const URL_ONDE = {{ url_for('admin.bloqueios_onde')|tojson }};
+  function el(tag, txt, cls) { const e = document.createElement(tag); if (txt) e.textContent = txt; if (cls) e.className = cls; return e; }
+  document.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-desb]");
+    if (!b) return;
+    const d = b.dataset.desb;
+    document.getElementById("dNome").textContent = d;
+    document.getElementById("dDom").value = d;
+    document.getElementById("dWl").value = "";
+    box.textContent = "carregando…"; box.className = "mut"; wlAtual.hidden = true;
+    document.getElementById("dTirar").disabled = true;
+    dlg.showModal();
+    try {
+      const r = await fetch(URL_ONDE + "?d=" + encodeURIComponent(d), {credentials: "same-origin", headers: {"X-Requested-With": "fetch"}});
+      const j = await r.json();
+      if (!j.ok) { box.textContent = j.msg || "falha"; return; }
+      box.textContent = ""; box.className = "";
+      if (!j.listas.length) box.appendChild(el("div", "Em nenhuma lista de bloqueio.", "mut"));
+      j.listas.forEach(x => {
+        const l = el("label", null, "chk"); l.style.margin = ".15rem 0"; l.style.fontWeight = "400";
+        const i = document.createElement("input"); i.type = "checkbox"; i.name = "itens"; i.value = x.lista + "|" + x.entrada; i.checked = true;
+        l.appendChild(i); l.appendChild(document.createTextNode(" "));
+        l.appendChild(el("b", x.rotulo));
+        const det = [x.entrada !== d ? "pelo domínio-pai " + x.entrada : "", x.por ? "por " + x.por : ""].filter(Boolean).join(" · ");
+        if (det) l.appendChild(el("span", " · " + det, "mut"));
+        box.appendChild(l);
+      });
+      document.getElementById("dTirar").disabled = !j.listas.length;
+      if (j.whitelist.length) {
+        wlAtual.hidden = false;
+        wlAtual.textContent = "Na whitelist: " + j.whitelist.map(w => w.rotulo + (w.entrada !== d ? " (" + w.entrada + ")" : "")).join(", ");
+      }
+    } catch (e) { box.textContent = "Falha ao consultar (sessão expirou?)"; }
+  });
+  document.getElementById("dForm").addEventListener("submit", (ev) => {
+    const acao = ev.submitter && ev.submitter.value;
+    if (acao === "whitelist" && !document.getElementById("dWl").value) { ev.preventDefault(); alert("Escolha a whitelist."); }
+    else if (acao === "listas" && !box.querySelector("input:checked")) { ev.preventDefault(); alert("Marque ao menos uma lista."); }
+  });
+})();
+</script>
 {% endblock %}

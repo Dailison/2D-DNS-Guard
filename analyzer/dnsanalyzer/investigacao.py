@@ -38,6 +38,7 @@ import httpx
 from psycopg.types.json import Jsonb
 
 from . import db, listas_ia, webintel
+from .llm import maquina as llm_maquina
 from .config import settings
 from .features import analyze_name
 
@@ -1614,7 +1615,8 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     # veredito + revisor: com raciocínio na GPU ~1-2 min; na VM (só CPU) a pergunta de ~6 mil tokens é bem mais lenta
     reserva, custo_rodada = (150, 60) if _gpu(client) else (420, 180)
     resta = lambda: prazo - (time.monotonic() - t0)   # noqa: E731
-    event("investigacao_start", nome, did, detail=f"fase 6 · investigação profunda · {d['total_queries']} consultas")
+    event("investigacao_start", nome, did, detail=f"fase 6 · investigação profunda · {d['total_queries']} consultas",
+          maquina=llm_maquina(client))
     base = [e.as_dict() for e in build_evidence(dossie)]
     dos = Dossie(nome, d, base)
     # o que o veredito põe DEPOIS do dossiê: regras de lista e categorias (~3,3 mil tokens), a resposta (com raciocínio
@@ -1753,7 +1755,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
           detail=" · ".join(x for x in (
               "fase 6", f"aplicou {v.get('lista')} ({(v.get('lista_confianca') or 0) * 100:.0f}%)" if motivo_nao is None
               else f"sem certeza: {motivo_nao}", "vai p/ a IA online (2ª opinião com o dossiê)" if segunda else "",
-              (v.get("service") or "")[:80], (v.get("motivo") or "")[:200]) if x))
+              (v.get("service") or "")[:80], (v.get("motivo") or "")[:200]) if x), maquina=llm_maquina(client))
     log.info("investigação %s: %s em %.0fs (%s)", nome, "aplicou" if motivo_nao is None else "só dossiê", segundos,
              motivo_nao or v.get("lista"))
     return "done"

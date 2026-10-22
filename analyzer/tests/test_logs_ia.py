@@ -732,3 +732,15 @@ def test_reforco_so_com_cpu_nao_substitui_a_vm(monkeypatch):
     finally:
         config._settings = None
 
+
+
+def test_evento_guarda_quem_analisou(api):
+    """22/10: coluna "Analisador" do IA ao vivo: o evento grava 'vm' ou o IP do reforço, e /ai/events devolve."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import classifier, llm
+    assert llm.maquina(SimpleNamespace(extra=False)) == "vm"
+    assert llm.maquina(SimpleNamespace(extra=True, url="http://10.9.10.10:11434")) == "10.9.10.10"
+    classifier.event("llm_done", "quem-analisou.com", None, "TRABALHO", seconds=12.0, detail="reforço (CPU)", maquina="10.9.10.10")
+    ev = next(e for e in api.get("/ai/events", headers=H).json()["events"] if e["name"] == "quem-analisou.com")
+    assert ev["maquina"] == "10.9.10.10"

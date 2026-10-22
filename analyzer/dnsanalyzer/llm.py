@@ -177,6 +177,14 @@ _VAGA_VM = threading.Lock()
 _VAGAS_CPU: dict[str, threading.Lock] = {}
 
 
+def maquina(client) -> str:
+    """Quem fez a análise (coluna "Analisador" do IA ao vivo, 22/10): 'vm' ou o IP/host do reforço."""
+    if not getattr(client, "extra", False):
+        return "vm"
+    from urllib.parse import urlsplit
+    return urlsplit(getattr(client, "url", "") or "").hostname or getattr(client, "url", "") or "reforço"
+
+
 def vaga(client) -> contextlib.AbstractContextManager:
     """Uma chamada por vez ao Ollama da VM entre os workers da análise; reforço com GPU não espera. Reforço só com CPU
     (OLLAMA_CPU_URLS, 21/10): uma por vez nele também — em paralelo as duas ficariam lentas e estourariam o prazo."""

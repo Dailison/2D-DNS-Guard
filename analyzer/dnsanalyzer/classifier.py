@@ -20,6 +20,7 @@ from . import catalog, controle, db, dnsativo, enrich, listas, listas_ia, online
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
+from .llm import maquina as llm_maquina
 from .policy import Final, combine, rules_only
 from .rules import RuleResult, age_days, evaluate
 
@@ -32,13 +33,13 @@ CLASS_LABEL = {"TRABALHO": "Trabalho", "NAO_TRABALHO": "Não trabalho", "SUSPEIT
 
 def event(kind: str, name: str | None = None, domain_id: int | None = None, classification: str | None = None,
           risk: int | None = None, work: int | None = None, seconds: float | None = None,
-          detail: str | None = None) -> None:
-    """Registra um evento no feed "IA ao vivo" (conexão própria: visível na hora)."""
+          detail: str | None = None, maquina: str | None = None) -> None:
+    """Registra um evento no feed "IA ao vivo" (conexão própria: visível na hora). maquina: quem analisou (llm.maquina)."""
     try:
         with db.conn() as c:
-            c.execute("INSERT INTO ai_events (kind, domain_id, name, classification, risk, work, seconds, detail) "
-                      "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                      (kind, domain_id, name, classification, risk, work, seconds, (detail or "")[:500] or None))
+            c.execute("INSERT INTO ai_events (kind, domain_id, name, classification, risk, work, seconds, detail, maquina) "
+                      "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                      (kind, domain_id, name, classification, risk, work, seconds, (detail or "")[:500] or None, maquina))
     except Exception as e:  # noqa: BLE001 — o feed nunca pode derrubar a classificação
         log.debug("falha ao gravar evento: %s", e)
 
@@ -413,7 +414,8 @@ def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2
         rule = evaluate(dossier)
     if not etapa2 and not etapa3:   # (fases 2 e 3 já anunciaram o início)
         event("llm_start", name, did, detail=f"{drow['total_queries']} consultas · pelas regras: "
-                                             f"{CLASS_LABEL.get(drow['classification'], '—')} · {entrada(drow)}")
+                                             f"{CLASS_LABEL.get(drow['classification'], '—')} · {entrada(drow)}",
+              maquina=llm_maquina(client))
     if rule.final:  # (ex.: RDAP/TI mudou o quadro) regras bastam
         with db.conn() as c:
             save(c, drow, dossier, rule, rules_only(rule, False), False, None)
@@ -455,7 +457,7 @@ def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2
     elif unica and listas_ia.lista_valida(res.lista):   # a lista veio na mesma resposta (etapa única)
         try:
             listas_ia.gravar_local({**drow, "classification": fin.classification}, res.lista, res.lista_confianca,
-                                   res.lista_motivo, res.service, 1, meta["model"], meta.get("seconds"))
+                                   res.lista_motivo, res.service, 1, meta["model"], meta.get("seconds"), llm_maquina(client))
         except Exception:  # noqa: BLE001 — a fila de listas pega depois
             log.exception("lista (etapa única) para %s", name)
     elif fin.classification != "DESCONHECIDO" or unica:   # a lista faz parte da fase (antes era uma fila separada, "Listas")
@@ -472,7 +474,7 @@ def _refine_reservado(client: OllamaClient, cats: list[dict], drow: dict, etapa2
                                          f"com busca na web ({len(dossier['search'])} resultados)"
                                          if dossier.get("search") else ""),
                                         ("reforço (GPU)" if meta.get("gpu", True) else "reforço (CPU)") if meta.get("extra") else "", svc, scat,
-                                        _achado(dossier, etapa2, etapa3), _razao(fin), extra) if x))
+                                        _achado(dossier, etapa2, etapa3), _razao(fin), extra) if x), maquina=llm_maquina(client))
     return "done"
 
 

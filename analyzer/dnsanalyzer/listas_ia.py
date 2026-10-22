@@ -332,12 +332,14 @@ def _sugerir(client: OllamaClient, d: dict, fase_n: int = 1) -> str:
             c.execute("UPDATE domains SET lista_ia = NULL, lista_conf = NULL, lista_motivo = %s, lista_fonte = 'falhou', "
                       "lista_at = now(), lista_claimed_at = NULL WHERE id = %s", (str(e)[:200], d["id"]))
         return "done"
-    gravar_local(d, res.lista, res.confianca, res.motivo, res.servico, fase_n, getattr(client, "model", None), meta.get("seconds"))
+    from .llm import maquina
+    gravar_local(d, res.lista, res.confianca, res.motivo, res.servico, fase_n, getattr(client, "model", None), meta.get("seconds"),
+                 maquina(client))
     return "done"
 
 
 def gravar_local(d: dict, lista: str, conf: float, motivo: str, servico: str, fase_n: int, modelo: str | None,
-                 segundos: float | None) -> None:
+                 segundos: float | None, maquina: str | None = None) -> None:
     """Resposta de lista da IA local (pergunta própria ou etapa única): grava, aplica na hora e registra o evento."""
     with db.conn() as c:
         salvar(c, d["id"], lista, conf, motivo, servico, FONTE_LOCAL, fase_n, modelo)
@@ -350,7 +352,7 @@ def gravar_local(d: dict, lista: str, conf: float, motivo: str, servico: str, fa
                       detail=f"{fase_n}|lista {lista} {float(conf or 0) * 100:.0f}%"
                       + (f" · {servico}" if servico else "") + (f" — {motivo}" if motivo else "")
                       + _proximo(fim, alta)
-                      + (" · desconhecido: vai p/ a fase 4 (IA online)" if vai_online else ""))
+                      + (" · desconhecido: vai p/ a fase 4 (IA online)" if vai_online else ""), maquina=maquina)
 
 
 def lista_valida(lista: str | None) -> bool:

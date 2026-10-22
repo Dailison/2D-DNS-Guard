@@ -783,7 +783,9 @@ def empresa_excluir(tid):
 # ------------------------------------------------------------------ IA ao vivo
 @analise_bp.get("/ia")
 def ia_ao_vivo():
-    return render_template("admin/analise/ia.html", aba="ia", **_ctx())
+    from urllib.parse import urlsplit
+    vm_ip = urlsplit(current_app.config.get("ANALYZER_URL") or "").hostname or ""   # a VM do analisador (coluna Analisador)
+    return render_template("admin/analise/ia.html", aba="ia", vm_ip=vm_ip, **_ctx())
 
 
 @analise_bp.get("/ia/eventos")

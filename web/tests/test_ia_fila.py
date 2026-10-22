@@ -73,3 +73,10 @@ def test_pausar_tem_as_tres_filas_e_so_super_altera(cli, monkeypatch):
     monkeypatch.setattr("app.analise.admin_atual", lambda: SimpleNamespace(email="chefe@2d", is_super=True, ativo=True))
     r = cli.c.post("/analise/ia/controle/online", json={"pausado": True})
     assert r.status_code == 200 and enviados == [("/ai/controle/online", {"pausado": True, "by": "chefe@2d"})]
+
+
+def test_coluna_analisador_com_o_ip_da_vm(cli):
+    """22/10: a lista do IA ao vivo mostra qual analisador fez a análise local (VM com o IP do analisador, ou o reforço)."""
+    html = cli.c.get("/analise/ia?t=0").get_data(as_text=True)
+    assert ">Analisador</th>" in html and 'x-text="maq(r)"' in html
+    assert 'var VM_IP = "10.100.10.4";' in html

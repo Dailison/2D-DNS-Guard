@@ -112,6 +112,7 @@
   .tb .ds i{font-style:normal;font-size:.8rem;color:var(--mu);margin-left:6px}
   .tb.e2 .rk{display:none}
   .iav .tb td.tp{color:var(--tx2);font-variant-numeric:tabular-nums;font-size:.86rem;text-align:right}.iav .tb th.tp{text-align:right}
+  .iav .tb td.mq{color:var(--tx2);font-variant-numeric:tabular-nums;font-size:.8rem;white-space:nowrap}
   .tb .vz td{text-align:center;color:var(--mu);padding:18px;cursor:default}
 
   /* etiquetas */
@@ -153,7 +154,7 @@
   @media (max-width:640px){
     .kp{border-left:0;padding-left:0}
     .eh{flex-wrap:wrap}.lane{flex-basis:100%;order:1}
-    .tb .rk,.tb .tp{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
+    .tb .rk,.tb .tp,.tb .mq{display:none}.tb .dm{max-width:12rem}.tb .dm .n i{display:none}
   }
   @media (prefers-reduced-motion:reduce){.pulse.ok::after,.lane-h .lv,.lc .spin,.fila .spin{animation:none}}
 
@@ -315,7 +316,7 @@
     </div>
 
     <div class="wrap"><table class="tb {{ et }}">
-      <thead><tr><th class="h">Hora</th><th>Domínio</th><th>Classificação</th><th class="rk">Risco</th><th>Confiança</th><th class="tp">Tempo</th><th class="ds">Destino</th></tr></thead>
+      <thead><tr><th class="h">Hora</th><th>Domínio</th><th>Classificação</th><th class="rk">Risco</th><th>Confiança</th><th class="tp">Tempo</th><th class="mq" title="Máquina que fez a análise local: a VM do analisador ou um reforço (GPU/CPU)">Analisador</th><th class="ds">Destino</th></tr></thead>
       <tbody>
         <template x-for="r in visiveis('{{ et }}')" :key="r.name">
           <tr :data-n="r.name" :class="{espera: r._espera, chegando: r._chegando}" @click="sel = r">
@@ -325,10 +326,11 @@
             <td class="rk"><span class="num" :class="fr(r.risco)" x-text="r.risco != null ? r.risco : '—'"></span></td>
             <td><span class="num" :class="fc(r.conf)" x-text="r.conf != null ? r.conf + '%' : '—'"></span></td>
             <td class="tp" x-text="r.seg != null ? dur(r.seg) : '—'" title="tempo que a IA levou nesta análise"></td>
+            <td class="mq" x-text="maq(r)"></td>
             <td class="ds"><span class="dst" :class="dst(r)[1]" :title="r.proximo || ''"><i class="bi" :class="DIC[dst(r)[1]]" x-show="DIC[dst(r)[1]]"></i><span x-text="dst(r)[0]"></span><i class="bi bi-check-lg ap" x-show="r.aplicado" title="aplicado"></i></span><i x-text="r.veredito || dst(r)[2]" :title="r.veredito || dst(r)[2]"></i></td>
           </tr>
         </template>
-        <tr class="vz" x-show="!visiveis('{{ et }}').length"><td colspan="7" x-text="carregado ? 'Sem atividade ainda.' : 'Carregando…'"></td></tr>
+        <tr class="vz" x-show="!visiveis('{{ et }}').length"><td colspan="8" x-text="carregado ? 'Sem atividade ainda.' : 'Carregando…'"></td></tr>
       </tbody>
     </table></div>
   </section>
@@ -347,6 +349,7 @@
             <div><small>Confiança</small><span x-text="sel.conf != null ? sel.conf + '%' : '—'"></span></div>
             <div><small>Destino</small><span x-text="dst(sel)[0] + (dst(sel)[2] ? ' (' + dst(sel)[2] + ')' : '')"></span></div>
             <div><small>Tempo</small><span x-text="sel.seg != null ? dur(sel.seg) : '—'"></span></div>
+            <div><small>Analisador</small><span x-text="maq(sel)"></span></div>
           </div>
           <template x-for="b in blocos(sel)" :key="b[0]">
             <div><div class="lb" x-text="b[0]"></div><div class="tx" x-text="b[1]"></div></div>
@@ -377,6 +380,7 @@ document.addEventListener('alpine:init', function () {
   var MAX = 150, SEGURA = 3200;   // linhas por etapa; ms que o resultado fica no cartão antes de ir p/ a tabela
   var calmo = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  var VM_IP = {{ (vm_ip or '')|tojson }};
   function nomeLista(c) {
     if (!c) return '';
     if (c.indexOf('wl:') === 0) return WROT[c.slice(3)] || c.slice(3);
@@ -389,11 +393,13 @@ document.addEventListener('alpine:init', function () {
     r.ev.push(ev); r.at = ev.created_at;
     var d = ev.detail || '', m;
     if (ev.classification) r.cls = ev.classification;
+    if (ev.maquina) r.maq = ev.maquina;
+    if ((m = /reforço \((GPU|CPU)\)/.exec(d))) r.maqTipo = m[1];
     if (ev.risk != null) r.risco = ev.risk;
     if (ev.work != null) r.trab = ev.work;
     if (INICIO[ev.kind]) {
       if ((ev.kind === 'llm_start' || ev.kind === 'investigacao_start') && !r.run)   // nova análise: o resultado anterior não vale mais
-        ['lista', 'conf', 'risco', 'trab', 'estado', 'veredito', 'proximo', 'motivo', 'seg', 'modelo'].forEach(function (k) { r[k] = null; }), r._segLista = false;
+        ['lista', 'conf', 'risco', 'trab', 'estado', 'veredito', 'proximo', 'motivo', 'seg', 'modelo', 'maq', 'maqTipo'].forEach(function (k) { r[k] = null; }), r._segLista = false;
       if (ev.kind === 'investigacao_start') { r.aplicado = false; r.entrada = 'investigacao'; }
       if (ev.kind === 'llm_start') {
         r.aplicado = false;
@@ -471,6 +477,10 @@ document.addEventListener('alpine:init', function () {
       clsK(c) { return c || 'PENDENTE'; },
       hora(iso) { return iso ? new Date(iso).toLocaleTimeString('pt-BR', {timeZone: 'America/Sao_Paulo'}) : ''; },
       dur(s) { s = Math.max(0, Math.round(s)); var m = Math.floor(s / 60); return m ? m + 'min ' + (s % 60) + 's' : s + 's'; },
+      maq(r) {   // quem fez a análise local: a VM (IP do analisador) ou o IP do reforço (GPU/CPU)
+        if (!r || !r.maq) return '—';
+        return r.maq === 'vm' ? (VM_IP ? VM_IP + ' · VM' : 'VM') : r.maq + (r.maqTipo ? ' · ' + r.maqTipo : '');
+      },
       fr(v) { return v == null ? '' : v >= 70 ? 'r-hi' : v >= 40 ? 'r-md' : 'r-lo'; },
       fc(v) { return v == null ? '' : v >= 90 ? 'c-hi' : v >= 60 ? 'c-md' : ''; },
       dst(r) {   // [texto, classe, complemento]

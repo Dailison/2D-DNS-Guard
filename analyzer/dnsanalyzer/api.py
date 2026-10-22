@@ -872,13 +872,13 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
         so_ia = "origem IS DISTINCT FROM 'regras'"
         if after_id:
             events = c.execute(
-                "SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
+                "SELECT id, kind, name, classification, risk, work, seconds, detail, origem, maquina, created_at FROM ai_events "
                 "WHERE id > %s AND " + so_ia + " ORDER BY id DESC LIMIT %s", (after_id, max(limit, 300))).fetchall()
         else:   # carga inicial: as últimas de CADA coluna (classificação e decisão)
             events = c.execute(
-                "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
+                "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, maquina, created_at FROM ai_events "
                 " WHERE kind <> ALL(%(d)s) AND " + so_ia + " ORDER BY id DESC LIMIT %(n)s) UNION ALL "
-                "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, created_at FROM ai_events "
+                "(SELECT id, kind, name, classification, risk, work, seconds, detail, origem, maquina, created_at FROM ai_events "
                 " WHERE kind = ANY(%(d)s) AND " + so_ia + " ORDER BY id DESC LIMIT %(n)s) ORDER BY id DESC",
                 {"d": list(eventos.DECISAO), "n": limit}).fetchall()
         # o que está em análise agora e em que fase (1-3 = claimed_at; lista = fase 1; 4 = IA online). São vários ao

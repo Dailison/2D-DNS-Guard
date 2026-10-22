@@ -59,3 +59,22 @@ def test_sem_investigacao_nao_mostra_o_cartao(pagina):
     pagina.estado["inv"] = None
     html = pagina.c.get("/analise/dominio/sistema.eco.br?t=0").get_data(as_text=True)
     assert "Investigação profunda" not in html
+
+
+def test_empresa_que_nao_acessou_mostra_quem_acessou(pagina, monkeypatch):
+    """22/10: na empresa que nunca acessou o domínio a lista de computadores ficava só vazia; agora diz em quais
+    empresas ele foi acessado, com link."""
+    from app import analyzer_client as api
+    get0 = api.get
+
+    def get(path, **params):
+        r = get0(path, **params)
+        if "/domains/" in path and path.startswith("/tenants/"):
+            r["by_tenant"] = [{"id": 7, "name": "G&D", "total_queries": 4, "clients_count": 1, "first_seen": None,
+                               "last_seen": None, "override_classification": None}]
+        return r
+    monkeypatch.setattr(api, "get", get)
+    html = pagina.c.get("/analise/dominio/sistema.eco.br?t=5").get_data(as_text=True)
+    assert "Nenhum computador de Empresa X acessou." in html and "Acessado em:" in html
+    assert "G&amp;D</a> (1 PC)" in html and "t=7" in html
+

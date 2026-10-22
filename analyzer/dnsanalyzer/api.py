@@ -505,11 +505,11 @@ def domain_detail(tid: int, name: str):
                          p).fetchone()
         out = {"domain": d, "tenant_view": td, "override": ov, "clients": clients, "fqdns": fqdns,
                "timeline": timeline, "history": history, "global_review": glob}
-        if tid == ALL:
-            out["by_tenant"] = c.execute(
-                "SELECT t.id, t.name, td.total_queries, td.clients_count, td.first_seen, td.last_seen, "
-                "td.override_classification FROM tenant_domains td JOIN tenants t ON t.id=td.tenant_id "
-                "WHERE td.domain_id=%(d)s ORDER BY td.total_queries DESC", p).fetchall()
+        # sempre (22/10): numa empresa que não acessou, a página diz quais acessaram (antes a lista ficava só vazia)
+        out["by_tenant"] = c.execute(
+            "SELECT t.id, t.name, td.total_queries, td.clients_count, td.first_seen, td.last_seen, "
+            "td.override_classification FROM tenant_domains td JOIN tenants t ON t.id=td.tenant_id "
+            "WHERE td.domain_id=%(d)s ORDER BY td.total_queries DESC", p).fetchall()
         return out
 
 

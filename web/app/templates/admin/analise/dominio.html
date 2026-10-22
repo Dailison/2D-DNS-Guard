@@ -108,6 +108,12 @@
       {% for c in d.clients %}
         <tr><td>{{ m.pc(c.ip, c.tenant_id) }}</td>{% if todos %}<td>{{ m.emp(c.tenant_name, c.tenant_id) }}</td>{% endif %}<td class="num">{{ c.queries }}</td><td class="num">{{ c.blocked }}</td>
             <td class="mut" style="white-space:nowrap">{{ c.first_seen|dt_sp }}</td><td class="mut" style="white-space:nowrap">{{ c.last_seen|dt_sp }}</td></tr>
+      {% else %}
+        <tr><td colspan="{{ 6 if todos else 5 }}" class="mut">Nenhum computador {{ 'de ' ~ tenant.name if tenant and not todos else '' }} acessou.
+          {%- set outras = (d.by_tenant or [])|rejectattr('id', 'equalto', tid)|list %}
+          {%- if outras and not todos %} Acessado em:
+            {% for e in outras %}<a href="{{ url_for('analise.dominio', nome=dm.name, t=e.id) }}">{{ e.name }}</a> ({{ e.clients_count }} PC{{ 's' if e.clients_count != 1 }}){{ ', ' if not loop.last }}{% endfor %}
+            · <a href="{{ url_for('analise.dominio', nome=dm.name, t=0) }}">Todas</a>{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>

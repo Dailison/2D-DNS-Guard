@@ -31,17 +31,17 @@ def get(path: str, **params):
     return _req("GET", path, params={k: v for k, v in params.items() if v not in (None, "")})
 
 
-def post(path: str, json: dict | None = None):
-    return _req("POST", path, json=json or {})
+def post(path: str, json: dict | None = None, timeout: int = 30):
+    return _req("POST", path, timeout=timeout, json=json or {})
 
 
 def put(path: str, json: dict | None = None):
     return _req("PUT", path, json=json or {})
 
 
-def patch(path: str, json: dict | None = None):
-    return _req("PATCH", path, json=json or {})
+def patch(path: str, json: dict | None = None, timeout: int = 30):
+    return _req("PATCH", path, timeout=timeout, json=json or {})
 
 
-def delete(path: str, **params):
-    return _req("DELETE", path, params=params or None)
+def delete(path: str, timeout: int = 30, **params):
+    return _req("DELETE", path, timeout=timeout, params=params or None)

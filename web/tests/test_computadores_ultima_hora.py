@@ -62,3 +62,12 @@ def test_outras_abas_nao_oferecem_e_voltam_para_24h(cli):
     html = cli.c.get("/analise?t=0").get_data(as_text=True)
     assert "Última hora" not in html
     assert '<option value="1" selected' in html
+
+
+def test_busca_de_computador_por_ip(cli):
+    """22/10: busca por IP inteiro ou trecho (o analisador filtra; a tela mantém o texto e oferece Limpar)."""
+    r = cli.c.get("/analise/computadores?t=0&dias=7&ip=+60.193+")
+    html = r.get_data(as_text=True)
+    assert _periodo(cli.chamadas, "/clients") == {"limit": 500, "days": 7, "busca": "60.193"}
+    assert 'name="ip" value="60.193"' in html and "Limpar" in html
+

@@ -215,7 +215,11 @@ def tenant_merge(tid: int, body: MergeIn):
 
 @app.delete("/tenants/{tid}", dependencies=[Depends(auth)])
 def tenant_delete(tid: int):
+    from . import registry
     with db.conn() as c:
+        # (22/10) o mesmo lock da realocação: sem ele a conferência abaixo via "sem redes" antes de uma mudança de rede
+        # em andamento terminar e o DELETE em cascata levava a rede e os computadores que tinham acabado de chegar
+        registry.lock(c)
         _tenant(c, tid)
         busy = c.execute("SELECT (SELECT count(*) FROM tenant_networks WHERE tenant_id=%s) AS n, "
                          "(SELECT count(*) FROM clients WHERE tenant_id=%s) AS c", (tid, tid)).fetchone()
@@ -398,7 +402,7 @@ def _periodo(days: int, hours: int | None) -> tuple[datetime, datetime | None]:
 
 
 def _clients(c, tid: int, since: datetime, limit: int, ip: str | None = None,
-             ativo: datetime | None = None) -> list[dict]:
+             ativo: datetime | None = None, busca: str | None = None) -> list[dict]:
     rows = c.execute(
         f"""
         WITH q AS (
@@ -421,7 +425,8 @@ def _clients(c, tid: int, since: datetime, limit: int, ip: str | None = None,
         FROM q JOIN clients cl ON cl.id=q.client_id JOIN tenants t ON t.id=cl.tenant_id
         LEFT JOIN nd ON nd.client_id=q.client_id LEFT JOIN al ON al.client_id=q.client_id
         WHERE (%(ip)s::inet IS NULL OR cl.ip = %(ip)s::inet)
-        """, {"t": tid, "s": since, "ip": ip, "a": ativo}).fetchall()
+          AND (%(b)s::text IS NULL OR host(cl.ip) LIKE '%%' || %(b)s || '%%' OR cl.label ILIKE '%%' || %(b)s || '%%')
+        """, {"t": tid, "s": since, "ip": ip, "a": ativo, "b": (busca or "").strip() or None}).fetchall()
     out = []
     for r in rows:
         share = float(r["nonwork_q"] or 0) / float(r["queries"] or 1)
@@ -656,11 +661,13 @@ def reanalyze(name: str, by: str = ""):
 
 # ------------------------------------------------------------------ computadores e alertas
 @app.get("/tenants/{tid}/clients", dependencies=[Depends(auth)])
-def clients(tid: int, days: int = 7, hours: Optional[int] = None, limit: int = Query(200, le=1000)):
+def clients(tid: int, days: int = 7, hours: Optional[int] = None, limit: int = Query(200, le=1000),
+            busca: Optional[str] = None):
+    """busca (22/10): trecho do IP ("60.193", "10.55.60.") ou do nome do computador."""
     since, ativo = _periodo(days, hours)
     with db.conn() as c:
         _scope(c, tid)
-        return _clients(c, tid, since, limit, ativo=ativo)
+        return _clients(c, tid, since, limit, ativo=ativo, busca=busca)
 
 
 @app.get("/tenants/{tid}/clients/{ip}", dependencies=[Depends(auth)])

@@ -653,3 +653,39 @@ def test_logs_filtram_por_varias_categorias(api):
     assert det(categoria="streaming") == ["www.video-cat.com"] and len(det()) == 3
     ag = api.get("/logs/grouped", params={**q, "categoria": ["jogos", "streaming"]}, headers=H).json()
     assert sorted(r["dominio"] for r in ag["rows"]) == ["www.jogo-cat.com", "www.video-cat.com"]
+
+
+def test_rede_muda_de_empresa_leva_os_logs_e_exclusao_espera_a_realocacao(api, monkeypatch):
+    """22/10 (Centro Cardio): a rede mudou de empresa, a realocação levou minutos (filtro só por client_id), o console
+    desistiu e a exclusão da outra empresa, sem o lock da realocação, apagou em cascata a rede recém-chegada; o log de
+    consultas tinha ficado na empresa antiga. Agora: logs acompanham os computadores; a exclusão pega o mesmo lock."""
+    from dnsanalyzer import collector, db, registry
+    with db.conn() as c:
+        collector.ensure_log_partitions(c, AGORA, AGORA + timedelta(hours=1))
+        x = c.execute("INSERT INTO tenants (slug, name) VALUES ('orig-x', 'Origem X') RETURNING id").fetchone()["id"]
+        y = c.execute("INSERT INTO tenants (slug, name) VALUES ('dest-y', 'Destino Y') RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO tenant_networks (tenant_id, cidr) VALUES (%s, '10.77.0.0/16')", (x,))
+        c.execute("INSERT INTO clients (tenant_id, ip, first_seen, last_seen) VALUES (%s, '10.77.0.5', now(), now())", (x,))
+        dom = c.execute("INSERT INTO domains (name, tld) VALUES ('realoca-log.com', 'com') RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO query_log (ts, tenant_id, client_ip, domain_id, qname, qtype, rtype, rcode) VALUES "
+                  "(%s, %s, '10.77.0.5', %s, 'realoca-log.com', 'A', 'Recursive', 'NoError'), "
+                  "(%s, %s, '10.78.0.1', %s, 'realoca-log.com', 'A', 'Recursive', 'NoError')", (AGORA, x, dom, AGORA, x, dom))
+    pedidos, travas = [], []
+    monkeypatch.setattr(registry, "mover_logs_depois", lambda logs: pedidos.append(logs))
+    nid = next(n["id"] for t in api.get("/tenants", headers=H).json() for n in t["networks"] if n["cidr"] == "10.77.0.0/16")
+    r = api.patch(f"/networks/{nid}", headers=H, json={"tenant_id": y})
+    assert r.status_code == 200 and r.json()["realocacao"]["moved_clients"] >= 1
+    assert len(pedidos) == 1 and pedidos[0][(x, y)] == ["10.77.0.5"]
+    with db.conn() as c:
+        assert registry.mover_logs(c, {(x, y): pedidos[0][(x, y)]}) == 1
+        logs = {r["client_ip"]: r["tenant_id"] for r in c.execute("SELECT host(client_ip) AS client_ip, tenant_id FROM query_log "
+                                                                   "WHERE client_ip << '10.76.0.0/14'")}
+    assert logs == {"10.77.0.5": y, "10.78.0.1": x}, "só o computador que mudou de empresa"
+    trava_real = registry.lock
+    monkeypatch.setattr(registry, "lock", lambda c: travas.append(True) or trava_real(c))
+    assert api.delete(f"/tenants/{y}", headers=H).status_code == 409, "tem a rede"
+    assert api.delete(f"/tenants/{x}", headers=H).status_code == 200 and len(travas) == 2
+    with db.conn() as c:
+        assert c.execute("SELECT count(*) AS n FROM tenant_networks WHERE cidr = '10.77.0.0/16'").fetchone()["n"] == 1
+        c.execute("DELETE FROM query_log WHERE client_ip << '10.76.0.0/14'")
+        c.execute("DELETE FROM tenants WHERE id = %s", (y,))

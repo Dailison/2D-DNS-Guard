@@ -85,6 +85,9 @@ def _tid(tenants: list[dict]) -> int | None:
     return TODOS
 
 
+# (22/10) mudar rede de empresa realoca os dados de cada computador: com 30 s o console desistia no meio e o usuário
+# repetia/apagava achando que tinha falhado
+CADASTRO_TIMEOUT = 300
 ULTIMA_HORA = 0   # dias=0 = "Última hora" (29/09: só nas telas de computadores; o analisador recebe hours=1)
 
 
@@ -549,13 +552,14 @@ def dominio_reanalisar(nome):
 @analise_bp.get("/computadores")
 def computadores():
     ctx = _ctx(com_hora=True)
-    lista = []
+    lista, busca = [], request.args.get("ip", "").strip()
     if ctx["tid"] is not None:
         try:
-            lista = api.get(f"/tenants/{ctx['tid']}/clients", limit=500, **_periodo_api(ctx["dias"]))
+            lista = api.get(f"/tenants/{ctx['tid']}/clients", limit=500, **({"busca": busca} if busca else {}),
+                            **_periodo_api(ctx["dias"]))
         except AnalyzerError as e:
             flash(f"Falha ao listar computadores: {e}", "erro")
-    return render_template("admin/analise/computadores.html", lista=lista, aba="computadores", **ctx)
+    return render_template("admin/analise/computadores.html", lista=lista, busca=busca, aba="computadores", **ctx)
 
 
 @analise_bp.get("/computador/<ip>")
@@ -671,7 +675,7 @@ def empresa_criar():
         elif linha.strip():
             erros.append(f"linha ignorada (sem CIDR): {linha.strip()}")
     try:
-        res = api.post("/tenants", {"name": nome, "networks": redes})
+        res = api.post("/tenants", {"name": nome, "networks": redes}, timeout=CADASTRO_TIMEOUT)
         flash(f"Empresa {nome} criada.{_realocou(res)}", "ok")
     except AnalyzerError as e:
         flash(f"Falha ao criar: {e}", "erro")
@@ -691,7 +695,8 @@ def empresas_importar():
         flash("Nada para importar.", "erro")
         return redirect(url_for("analise.empresas"))
     try:
-        res = api.post("/tenants/import", {"rows": rows, "replace": request.form.get("substituir") == "1"})
+        res = api.post("/tenants/import", {"rows": rows, "replace": request.form.get("substituir") == "1"},
+                       timeout=CADASTRO_TIMEOUT)
         rem = res.get("tenants_removed") or []
         flash(f"Importação concluída: {res.get('networks_created', 0)} rede(s) nova(s), "
               f"{res.get('networks_updated', 0)} atualizada(s)"
@@ -736,7 +741,7 @@ def unidade_editar(nid):
     if request.form.get("mover_para"):
         body["tenant_id"] = request.form.get("mover_para", type=int)
     try:
-        r = api.patch(f"/networks/{nid}", body)
+        r = api.patch(f"/networks/{nid}", body, timeout=CADASTRO_TIMEOUT)
         flash(("Rede atribuída à empresa escolhida." if body.get("tenant_id") else "Unidade atualizada.")
               + _realocou(r), "ok")
     except AnalyzerError as e:
@@ -747,7 +752,7 @@ def unidade_editar(nid):
 @analise_bp.post("/empresas/<int:tid>/unidades/<int:nid>/remover")
 def unidade_rem(tid, nid):
     try:
-        r = api.delete(f"/tenants/{tid}/networks/{nid}")
+        r = api.delete(f"/tenants/{tid}/networks/{nid}", timeout=CADASTRO_TIMEOUT)
         flash("Rede removida do cadastro (os IPs dela passam a aparecer como 'sem cadastro')." + _realocou(r), "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")
@@ -758,7 +763,7 @@ def unidade_rem(tid, nid):
 def empresa_mesclar(tid):
     destino = request.form.get("destino", type=int)
     try:
-        r = api.post(f"/tenants/{tid}/merge", {"into": destino})
+        r = api.post(f"/tenants/{tid}/merge", {"into": destino}, timeout=CADASTRO_TIMEOUT)
         flash(f"Empresa mesclada.{_realocou(r)}", "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")
@@ -768,7 +773,7 @@ def empresa_mesclar(tid):
 @analise_bp.post("/empresas/<int:tid>/excluir")
 def empresa_excluir(tid):
     try:
-        api.delete(f"/tenants/{tid}")
+        api.delete(f"/tenants/{tid}", timeout=CADASTRO_TIMEOUT)
         flash("Empresa excluída.", "ok")
     except AnalyzerError as e:
         flash(f"Falha: {e}", "erro")

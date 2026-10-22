@@ -147,6 +147,7 @@ II 10.52.0.0/16"></textarea>
   <h2 style="margin:0 0 .2rem" title="As listas valem em até 2 min; as exceções, na hora. A IA põe os sites nas listas quando tem certeza (Sistema é manual). Redes sem cadastro usam: {% for c in pol_default.lists or [] %}{{ dict(cats).get(c, c) }}{{ ', ' if not loop.last }}{% else %}nenhuma{% endfor %}">Listas de bloqueio — <span id="pNome"></span></h2>
   <div class="row" style="align-items:flex-end;margin:.3rem 0 .4rem">
     <div><label>Aplicar a</label><select id="pEscopo"></select></div>
+    <div><label title="Marca as listas e exceções da empresa escolhida; só vale depois de Salvar e aplicar">Copiar de</label><select id="pCopiar"></select></div>
     <label class="chk" id="pHerdarBox" style="margin:0 0 .45rem;display:none"><input type="checkbox" id="pHerdar"> <span>usar as listas da empresa</span></label>
   </div>
   <div id="pCampos" style="max-height:58vh;overflow:auto;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:.3rem 0">
@@ -169,6 +170,7 @@ II 10.52.0.0/16"></textarea>
   const dlg = document.getElementById("dlgPol"), esc = document.getElementById("pEscopo");
   const herdar = document.getElementById("pHerdar"), herdarBox = document.getElementById("pHerdarBox");
   const URL = {{ url_for('admin.empresa_politica', tid=0)|tojson }};
+  const copiar = document.getElementById("pCopiar"), POL_PADRAO = {{ (pol_default.lists or [])|tojson }};
   let atual = null;
   function marca(p) {
     dlg.querySelectorAll(".pLista").forEach(i => i.checked = (p.lists || []).includes(i.value));
@@ -188,8 +190,21 @@ II 10.52.0.0/16"></textarea>
     const o = document.createElement("option"); o.value = ""; o.textContent = "a empresa inteira"; esc.appendChild(o);
     (atual.unidades || []).forEach(u => { const x = document.createElement("option"); x.value = u; x.textContent = "só a unidade " + u + ((atual.pol.unidades || {})[u] ? " (exceção)" : ""); esc.appendChild(x); });
     document.getElementById("pPrev").hidden = true;
+    copiar.textContent = "";
+    const v = document.createElement("option"); v.value = ""; v.textContent = "—"; copiar.appendChild(v);
+    [...document.querySelectorAll("[data-pol]")].map(b => JSON.parse(b.dataset.pol)).filter(p => p.tid !== atual.tid)
+      .sort((a, b) => a.nome.localeCompare(b.nome)).forEach(p => {
+        const x = document.createElement("option"); x.value = p.tid; x.textContent = p.nome + " (" + p.tid + ")" + (p.pol.definida ? "" : " · padrão");
+        x.dataset.pol = JSON.stringify(p.pol.definida ? p.pol : {...p.pol, lists: POL_PADRAO}); copiar.appendChild(x);
+      });
     mostra(); dlg.showModal();
   };
+  copiar.addEventListener("change", () => {
+    const o = copiar.selectedOptions[0];
+    if (!o || !o.value) return;
+    herdar.checked = false; document.getElementById("pCampos").style.opacity = 1;
+    marca(JSON.parse(o.dataset.pol));
+  });
   esc.addEventListener("change", mostra);
   dlg.querySelectorAll(".pLista").forEach(i => i.addEventListener("change", () => {
     const u = esc.value, pol = u && (atual.pol.unidades || {})[u] ? atual.pol.unidades[u] : atual.pol;

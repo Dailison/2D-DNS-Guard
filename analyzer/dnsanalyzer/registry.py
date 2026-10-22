@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import threading
 
 from .config import settings
 from .tenants import TenantResolver, slugify
@@ -63,36 +64,40 @@ def recompute_tenant_domains(c, tenant_ids: set[int]) -> None:
 
 
 def _move_client(c, cl: dict, target: int) -> None:
+    # (22/10) sempre com a empresa de origem no filtro: os índices de query_agg (26 mi de linhas) e client_domains começam
+    # por ela — só com client_id cada computador varria a tabela inteira (~1 s) e a rede de 159 computadores do Centro
+    # Cardio levou minutos, o console desistiu e uma exclusão concorrente apagou a empresa com a rede dentro
+    de = cl["tenant_id"]
     other = c.execute("SELECT id FROM clients WHERE tenant_id=%s AND ip=%s::inet",
                       (target, cl["ip"])).fetchone()
     if other is None:
         # caso comum: o computador ainda não existe na empresa de destino
         c.execute("UPDATE clients SET tenant_id=%s WHERE id=%s", (target, cl["id"]))
-        c.execute("UPDATE query_agg SET tenant_id=%s WHERE client_id=%s", (target, cl["id"]))
-        c.execute("UPDATE client_domains SET tenant_id=%s WHERE client_id=%s", (target, cl["id"]))
-        c.execute("UPDATE alerts SET tenant_id=%s WHERE client_id=%s", (target, cl["id"]))
+        c.execute("UPDATE query_agg SET tenant_id=%s WHERE tenant_id=%s AND client_id=%s", (target, de, cl["id"]))
+        c.execute("UPDATE client_domains SET tenant_id=%s WHERE tenant_id=%s AND client_id=%s", (target, de, cl["id"]))
+        c.execute("UPDATE alerts SET tenant_id=%s WHERE tenant_id=%s AND client_id=%s", (target, de, cl["id"]))
         return
     # já existe no destino: funde os agregados e remove o registro antigo
     oid = other["id"]
     c.execute(
         "INSERT INTO query_agg (tenant_id, client_id, domain_id, fqdn_id, bucket, queries, blocked, nxdomain, "
         " first_seen, last_seen) SELECT %s, %s, domain_id, fqdn_id, bucket, queries, blocked, nxdomain, first_seen, "
-        " last_seen FROM query_agg WHERE client_id=%s "
+        " last_seen FROM query_agg WHERE tenant_id=%s AND client_id=%s "
         "ON CONFLICT (tenant_id, client_id, fqdn_id, bucket) DO UPDATE SET "
         " queries=query_agg.queries+EXCLUDED.queries, blocked=query_agg.blocked+EXCLUDED.blocked, "
         " nxdomain=query_agg.nxdomain+EXCLUDED.nxdomain, first_seen=LEAST(query_agg.first_seen, EXCLUDED.first_seen), "
-        " last_seen=GREATEST(query_agg.last_seen, EXCLUDED.last_seen)", (target, oid, cl["id"]))
-    c.execute("DELETE FROM query_agg WHERE client_id=%s", (cl["id"],))
+        " last_seen=GREATEST(query_agg.last_seen, EXCLUDED.last_seen)", (target, oid, de, cl["id"]))
+    c.execute("DELETE FROM query_agg WHERE tenant_id=%s AND client_id=%s", (de, cl["id"]))
     c.execute(
         "INSERT INTO client_domains (tenant_id, client_id, domain_id, first_seen, last_seen, queries, blocked, nxdomain) "
         "SELECT %s, %s, domain_id, first_seen, last_seen, queries, blocked, nxdomain FROM client_domains "
-        "WHERE client_id=%s ON CONFLICT (tenant_id, client_id, domain_id) DO UPDATE SET "
+        "WHERE tenant_id=%s AND client_id=%s ON CONFLICT (tenant_id, client_id, domain_id) DO UPDATE SET "
         " first_seen=LEAST(client_domains.first_seen, EXCLUDED.first_seen), "
         " last_seen=GREATEST(client_domains.last_seen, EXCLUDED.last_seen), "
         " queries=client_domains.queries+EXCLUDED.queries, blocked=client_domains.blocked+EXCLUDED.blocked, "
-        " nxdomain=client_domains.nxdomain+EXCLUDED.nxdomain", (target, oid, cl["id"]))
-    c.execute("DELETE FROM client_domains WHERE client_id=%s", (cl["id"],))
-    c.execute("DELETE FROM alerts WHERE client_id=%s", (cl["id"],))   # serão regerados se ainda valerem
+        " nxdomain=client_domains.nxdomain+EXCLUDED.nxdomain", (target, oid, de, cl["id"]))
+    c.execute("DELETE FROM client_domains WHERE tenant_id=%s AND client_id=%s", (de, cl["id"]))
+    c.execute("DELETE FROM alerts WHERE tenant_id=%s AND client_id=%s", (de, cl["id"]))   # serão regerados se ainda valerem
     c.execute("UPDATE clients SET first_seen=LEAST(first_seen, %s), last_seen=GREATEST(last_seen, %s) WHERE id=%s",
               (cl["first_seen"], cl["last_seen"], oid))
     c.execute("DELETE FROM clients WHERE id=%s", (cl["id"],))
@@ -104,6 +109,7 @@ def reassign_clients(c) -> dict:
     resolver = _resolver(c)
     affected: set[int] = set()
     moved = 0
+    logs: dict[tuple[int, int], list[str]] = {}
     for cl in c.execute("SELECT id, tenant_id, host(ip) AS ip, first_seen, last_seen FROM clients").fetchall():
         target = resolver.resolve(cl["ip"])
         if target is None:
@@ -113,9 +119,38 @@ def reassign_clients(c) -> dict:
             continue
         _move_client(c, cl, target)
         affected.update({cl["tenant_id"], target})
+        logs.setdefault((cl["tenant_id"], target), []).append(cl["ip"])
         moved += 1
     recompute_tenant_domains(c, affected)
+    mover_logs_depois(logs)
     return {"moved_clients": moved, "tenants_affected": len(affected)}
+
+
+def mover_logs(c, logs: dict[tuple[int, int], list[str]]) -> int:
+    """O log de consultas (query_log, 7 dias) acompanha os computadores movidos — antes ficava na empresa antiga e, com
+    ela apagada, sumia das telas (22/10: 717 mil linhas do Centro Cardio). Só move o IP que está mesmo no destino (se a
+    realocação foi desfeita, nada muda)."""
+    n = 0
+    for (de, para), ips in logs.items():
+        n += c.execute("UPDATE query_log SET tenant_id=%s WHERE tenant_id=%s AND client_ip = ANY(%s::inet[]) "
+                       "AND client_ip IN (SELECT ip FROM clients WHERE tenant_id=%s)", (para, de, ips, para)).rowcount
+    return n
+
+
+def mover_logs_depois(logs: dict[tuple[int, int], list[str]]) -> None:
+    """Fora da requisição (centenas de milhares de linhas): a thread espera o lock da realocação, solto no commit dela."""
+    if not logs:
+        return
+
+    def rodar():
+        from . import db
+        try:
+            with db.conn() as c:
+                lock(c)
+                log.info("realocação: %d linha(s) do log de consultas movidas", mover_logs(c, logs))
+        except Exception:  # noqa: BLE001
+            log.exception("realocação: falha ao mover o log de consultas")
+    threading.Thread(target=rodar, daemon=True, name="mover-logs").start()
 
 
 def cleanup_empty_tenants(c, only_auto: bool = True) -> list[str]:

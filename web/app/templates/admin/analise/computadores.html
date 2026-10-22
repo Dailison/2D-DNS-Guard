@@ -2,6 +2,14 @@
 {% import "admin/analise/_macros.html" as m with context %}
 {% block an %}
 <div class="card">
+  <form method="get" class="row" style="align-items:flex-end">
+    <input type="hidden" name="t" value="{{ tid }}">
+    <div><label title="IP inteiro ou um trecho (10.55.60.193, 60.193, 10.55.60.), ou o nome do computador">Buscar computador</label><input type="search" name="ip" value="{{ busca }}" placeholder="IP ou trecho"></div>
+    <div style="flex:0"><button class="primary"><i class="bi bi-search"></i>Buscar</button></div>
+    {% if busca %}<div style="flex:0"><a class="btn" href="{{ url_for('analise.computadores', t=tid) }}"><i class="bi bi-x-lg"></i>Limpar</a></div>{% endif %}
+  </form>
+</div>
+<div class="card">
   <h2 title="Ordenados por comportamento anormal">{{ lista|length }} computador(es)</h2>
   <table>
     <thead><tr><th title="Computadores atrás de NAT aparecem como o IP do roteador do site: para ver cada máquina, o DNS precisa chegar ao Technitium sem NAT">Computador</th><th title="Score 0–100: combina % de consultas não relacionadas ao trabalho, domínios suspeitos/maliciosos, domínios inéditos e alertas abertos">Score</th><th class="num">Consultas</th><th class="num">Domínios</th><th class="num">% não trab.</th><th class="num">Suspeitos</th><th class="num">Maliciosos</th><th class="num">Novos 24h</th><th class="num">Alertas</th><th>Último</th></tr></thead>
@@ -15,7 +23,7 @@
         <td class="num">{{ p.new_domains_24h }}</td><td class="num">{{ p.open_alerts }}</td>
         <td class="mut" style="white-space:nowrap">{{ p.last_seen|dt_sp }}</td>
       </tr>
-    {% else %}<tr><td colspan="10" class="mut">Nenhum computador com consultas no período.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="10" class="mut">{{ 'Nenhum computador com "' ~ busca ~ '" no período.' if busca else 'Nenhum computador com consultas no período.' }}</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>

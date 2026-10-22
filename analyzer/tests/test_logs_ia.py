@@ -710,3 +710,25 @@ def test_grouped_bloqueado_traz_a_cadeia_cname(api):
     finally:
         with db.conn() as c:
             c.execute("DELETE FROM query_log WHERE qname = 'x.ruim.com'")
+
+
+def test_reforco_so_com_cpu_nao_substitui_a_vm(monkeypatch):
+    """22/10: com as GPUs desligadas o laço principal mandava a análise da VM p/ o servidor só com CPU (10.9.10.10): a VM
+    ficava parada e as duas filas dividiam a máquina de CPU (63 análises/h). Reforço só com CPU não entra no rodízio."""
+    from dnsanalyzer import classifier, config, llm
+    monkeypatch.setenv("OLLAMA_EXTRA_URLS", "http://gpu:11434,http://cpu:11434")
+    monkeypatch.setenv("OLLAMA_CPU_URLS", "http://cpu:11434")
+    monkeypatch.delenv("OLLAMA_ETAPAS_URLS", raising=False)
+    monkeypatch.setattr(config, "_settings", None)
+    try:
+        no_ar = {"http://gpu:11434": False, "http://cpu:11434": True}
+        monkeypatch.setattr(llm.OllamaClient, "available", lambda self: (no_ar.get(self.url, True), "ok"))
+        vm = llm.OllamaClient()
+        r = classifier._Reforco(vm)
+        assert r.cliente() is vm, "GPU fora: a VM, não o reforço de CPU"
+        no_ar["http://gpu:11434"] = True
+        r = classifier._Reforco(vm)
+        assert r.cliente().url == "http://gpu:11434"
+    finally:
+        config._settings = None
+

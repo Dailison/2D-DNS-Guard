@@ -569,7 +569,9 @@ class _Reforco:
     def __init__(self, vm: OllamaClient):
         cfg = settings()
         self.vm, self.ok, self.vez = vm, {}, 0
-        todos = [OllamaClient(u) for u in cfg.ollama_extra_urls]
+        # só GPU (22/10): o reforço só com CPU (OLLAMA_CPU_URLS) tem os workers dele; aqui ele "substituía" a VM, que
+        # ficava parada com as GPUs desligadas, e as duas filas dividiam uma máquina tão lenta quanto ela (63/h, não 120)
+        todos = [OllamaClient(u) for u in cfg.ollama_extra_urls if OllamaClient(u).gpu]
         pref = set(cfg.ollama_etapas_urls)
         self.extras = [x for x in todos if not pref or x.url in pref] or todos
         self.reserva = [x for x in todos if x not in self.extras]

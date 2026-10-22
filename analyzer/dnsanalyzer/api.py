@@ -1289,8 +1289,19 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
                + base + f"WHERE {' AND '.join(where)} GROUP BY f.name ORDER BY max(q.last_seen) DESC LIMIT %(lim)s")
     with db.conn() as c:
         rows = c.execute(sql, p).fetchall()
+        cap, rows = len(rows) > limit, rows[:limit]
         cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
-    return {"rows": rows[:limit], "cap": len(rows) > limit, "coletado_ate": cursor}
+        # (22/10) o agregado não guarda a resposta: nos bloqueados, a última com cadeia CNAME (do log de consultas), p/ o
+        # console achar o culpado — api.sec.intl.miui.com é bloqueado por xiaomi.com (CNAME) e aparecia "em nenhuma lista"
+        bloq = sorted({r["dominio"] for r in rows if r["bloqueadas"]})
+        cad = {x["qname"]: x["answer"] for x in c.execute(
+            "SELECT DISTINCT ON (l.qname) l.qname, l.answer FROM query_log l "
+            "WHERE l.domain_id IN (SELECT domain_id FROM fqdns WHERE name = ANY(%(n)s)) AND l.qname = ANY(%(n)s) "
+            " AND l.ts BETWEEN %(s)s AND %(e)s AND l.rtype LIKE '%%Blocked%%' AND l.answer LIKE 'CNAME%%' "
+            "ORDER BY l.qname, l.ts DESC", {"n": bloq, "s": start, "e": end})} if bloq else {}
+    for r in rows:
+        r["answer"] = cad.get(r["dominio"])
+    return {"rows": rows, "cap": cap, "coletado_ate": cursor}
 
 
 @app.get("/logs/detalhe", dependencies=[Depends(auth)])

@@ -362,11 +362,11 @@ def _logs_agrupados_analisador(inicio, fim, empresa, grupo, cidr, ip, dominio, r
             total += r["n"]
             a = {"dominio": r["dominio"], "n": r["n"], "nclientes": r.get("nclientes"),
                  "ultima": dnslib.utc_para_local(r["ultima"]), "empresas": r.get("empresas"),
-                 "blocked": r["bloqueadas"] > 0, "bloqueadas": r["bloqueadas"], "tipo": "Resolvido", "answer": None,
+                 "blocked": r["bloqueadas"] > 0, "bloqueadas": r["bloqueadas"], "tipo": "Resolvido", "answer": r.get("answer"),
                  "cls": r.get("classificacao"), "ajustada": r.get("ajustada"), "categoria": r.get("categoria"),
                  "ip": r.get("ip"), "computador": r.get("computador"), "empresa": r.get("empresa")}
             if a["blocked"] and union is not None:
-                a["culpados"] = dnslib.culpados(a["dominio"], None, union)
+                a["culpados"] = dnslib.culpados(a["dominio"], a["answer"], union)   # (22/10) com a cadeia CNAME
             agrupado.append(a)
     except Exception as e:  # noqa: BLE001
         flash(f"Não foi possível consultar os logs no analisador: {e}", "erro")

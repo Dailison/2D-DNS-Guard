@@ -689,3 +689,24 @@ def test_rede_muda_de_empresa_leva_os_logs_e_exclusao_espera_a_realocacao(api, m
         assert c.execute("SELECT count(*) AS n FROM tenant_networks WHERE cidr = '10.77.0.0/16'").fetchone()["n"] == 1
         c.execute("DELETE FROM query_log WHERE client_ip << '10.76.0.0/14'")
         c.execute("DELETE FROM tenants WHERE id = %s", (y,))
+
+
+def test_grouped_bloqueado_traz_a_cadeia_cname(api):
+    """22/10: api.sec.intl.miui.com era bloqueado pelo CNAME para xiaomi.com (lista Compras) e o "Desbloquear…" dizia
+    "em nenhuma lista": o agregado não guarda a resposta. Os bloqueados vêm com a última resposta com CNAME do log."""
+    from dnsanalyzer import collector, db
+    with db.conn() as c:
+        collector.ensure_log_partitions(c, AGORA, AGORA + timedelta(hours=1))
+        did = c.execute("SELECT id FROM domains WHERE name = 'ruim.com'").fetchone()["id"]
+        a = c.execute("SELECT id FROM tenants WHERE slug = 'a'").fetchone()["id"]
+        c.execute("INSERT INTO query_log (ts, tenant_id, client_ip, domain_id, qname, qtype, rtype, rcode, answer) VALUES "
+                  "(%s, %s, '10.1.0.5', %s, 'x.ruim.com', 'A', 'Blocked', 'NoError', 'CNAME y.ruim-cdn.net., A 0.0.0.0'), "
+                  "(%s, %s, '10.1.0.5', %s, 'x.ruim.com', 'A', 'Blocked', 'NoError', 'A 0.0.0.0')",
+                  (AGORA, a, did, AGORA - timedelta(minutes=1), a, did))
+    try:
+        rows = {r["dominio"]: r for r in _grouped(api)}
+        assert rows["x.ruim.com"]["answer"] == "CNAME y.ruim-cdn.net., A 0.0.0.0"
+        assert rows["www.loja.com"]["answer"] is None, "não bloqueado: sem consulta ao log"
+    finally:
+        with db.conn() as c:
+            c.execute("DELETE FROM query_log WHERE qname = 'x.ruim.com'")

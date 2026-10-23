@@ -700,3 +700,20 @@ def test_no_maximo_duas_rodadas(monkeypatch):
     g, _, buscas = _simula(monkeypatch, revisor_ok=True, tempo_max=6000, passos=nunca)
     planos = [r for r in g["rodadas"] if "hipotese" in r]   # (rodadas guarda também o veredito e a revisão)
     assert [r["hipotese"] for r in planos] == ["h0", "h1"]
+
+
+def test_ab_do_veredito_guarda_b_e_a2_sem_decidir(monkeypatch):
+    """22/10: teste A/B do veredito na GPU — B sem raciocínio (700 tokens) sempre; A2 com raciocínio em 1 de 3."""
+    chamadas = []
+
+    def chat(client, msgs, schema, pensar, n):
+        chamadas.append((pensar, n))
+        return ({**V_OK, "service": "X", "recognized": True, "classification": "TRABALHO", "category": "outros",
+                 "confidence": 0.9, "lista": "wl:erp_gestao", "lista_confianca": 0.9, "motivo": "m", "evidencias": []},
+                {"segundos": 3 if not pensar else 90, "tokens": 120 if not pensar else 1400})
+    monkeypatch.setattr(inv, "_chat", chat)
+    ab = inv._ab_veredito(_Cli(), "dossiê", [{"code": "TRABALHO", "description": "t"}], [], did=3)
+    assert chamadas == [(False, 700), (True, 1800)] and set(ab) == {"B", "A2"}
+    assert ab["B"]["lista"] == "wl:erp_gestao" and ab["B"]["segundos"] == 3 and ab["A2"]["tokens"] == 1400
+    chamadas.clear()
+    assert set(inv._ab_veredito(_Cli(), "dossiê", [{"code": "TRABALHO", "description": "t"}], [], did=4)) == {"B"}

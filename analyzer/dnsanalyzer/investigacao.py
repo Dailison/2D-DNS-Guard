@@ -1490,7 +1490,8 @@ def _revisar(client, texto: str, v: dict) -> tuple[dict, dict]:
     return r, meta
 
 
-def _veredito(client, texto: str, cats: list[dict], scats: list[dict]) -> tuple[dict, dict]:
+def _veredito(client, texto: str, cats: list[dict], scats: list[dict], pensar: bool | None = None,
+              n: int | None = None) -> tuple[dict, dict]:
     codigos = listas_ia.codigos_lista()
     schema = {"type": "object", "properties": {
         "service": {"type": "string", "maxLength": 100}, "recognized": {"type": "boolean"},
@@ -1509,12 +1510,30 @@ def _veredito(client, texto: str, cats: list[dict], scats: list[dict]) -> tuple[
               f"{listas_ia.regras_lista(curta)}\n\nEm \"motivo\" (1-3 frases, português) explique quem é o dono/serviço e "
               "quais evidências decidiram; em \"evidencias\" os ids usados.")
     msgs = [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}]
-    v, meta = _chat(client, msgs, schema, _gpu(client), 1800 if _gpu(client) else 700)
-    if _gpu(client) and not all(k in v for k in schema["required"]):
+    pensar = _gpu(client) if pensar is None else pensar
+    v, meta = _chat(client, msgs, schema, pensar, n or (1800 if pensar else 700))
+    if pensar and not all(k in v for k in schema["required"]):
         # (29/09) o raciocínio pode gastar todos os tokens e a resposta sair vazia: pergunta de novo sem raciocínio
         v, meta2 = _chat(client, msgs, schema, False, 700)
         meta = meta2 | {"segundos": round(meta["segundos"] + meta2["segundos"], 1), "sem_raciocinio": True}
     return v, meta
+
+
+_AB_CAMPOS = ("recognized", "service", "classification", "category", "confidence", "lista", "lista_confianca")
+
+
+def _ab_veredito(client, texto: str, cats: list[dict], scats: list[dict], did: int) -> dict | None:
+    """Teste A/B (22/10, pedido do usuário; INVESTIGACAO_AB_VEREDITO): o mesmo veredito sem o raciocínio longo (B, 700
+    tokens) e, em 1 de cada 3, com raciocínio de novo (A2: quanto o próprio modelo varia). Só guarda p/ comparar com o
+    veredito normal (A), que é o que decide."""
+    out = {}
+    try:
+        for nome, pensar, n in (("B", False, 700),) + ((("A2", True, 1800),) if did % 3 == 0 else ()):
+            v, m = _veredito(client, texto, cats, scats, pensar=pensar, n=n)
+            out[nome] = {**{k: v.get(k) for k in _AB_CAMPOS}, "segundos": m.get("segundos"), "tokens": m.get("tokens")}
+    except Exception as e:  # noqa: BLE001 — o teste nunca derruba a investigação
+        log.info("A/B do veredito: %s", e)
+    return out or None
 
 
 # ------------------------------------------------------------------ fila e aplicação
@@ -1735,6 +1754,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             if not revisao.get("sustentado"):
                 motivo_nao = "revisor discordou: " + (revisao.get("problema") or "sem motivo")[:200]
     segundos = round(time.monotonic() - t0, 1)
+    ab = _ab_veredito(client, texto, cats, scats, d["id"]) if cfg.investigacao_ab_veredito and _gpu(client) else None
     from . import online
     # não aplicou (sem certeza OU serviço não identificado): a IA online dá a 2ª opinião lendo este dossiê (pedidos do
     # usuário 30/09 — ssiloc.com, Akamai, terminava "não identificado" na investigação e não ia p/ a IA online)
@@ -1744,7 +1764,8 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
               "sem_aplicar": motivo_nao, "veredito": v, "revisao": revisao, "plano": passo, "etapas": etapas,
               "rodadas": rodadas + [meta_v] + ([meta_r] if meta_r else []),
               "evidencias": ev[len(base):], "antes": {k: d.get(k) for k in ("classification", "category", "lista_ia",
-                                                                          "lista_wl", "lista_fonte")}}
+                                                                          "lista_wl", "lista_fonte")},
+              **({"ab_veredito": ab} if ab else {})}
     with db.conn() as c:
         c.execute("UPDATE domains SET investigado_at = now(), investigacao_claimed_at = NULL, investigacao = %s, "
                   "online_pedido_at = CASE WHEN %s THEN now() ELSE online_pedido_at END WHERE id = %s",

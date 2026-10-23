@@ -60,3 +60,16 @@ def test_entropy_and_dga():
     assert dga_score("microsoft") < 0.3
     assert dga_score("xjq7k2vbz9wpl3mqr8t") > 0.6
     assert dga_score("atualizacaosistema") < 0.45
+
+
+def test_nome_sem_dominio_de_topo_conhecido_e_interno():
+    """22/10: "2084-ms-7.2-7e48.447d59ce-…", "cloud.didi" e "192.168.11.11_1" viravam domínio público (o último rótulo)
+    e iam p/ a IA, as listas e a investigação."""
+    from dnsanalyzer.features import analyze_name
+    for n, reg in (("2084-ms-7.2-7e48.447d59ce-c346-11f1-9d87-58020527b510", "447d59ce-c346-11f1-9d87-58020527b510"),
+                   ("cloud.didi", "didi"), ("region.target_domain", "target_domain"), ("447d59ce-c346-11f1-9d87-58020527b510", None)):
+        i = analyze_name(n)
+        assert i.kind == "internal", (n, i)
+        if reg:
+            assert i.registrable == reg
+    assert analyze_name("www.exemplo.com.br").kind == "public" and analyze_name("api.capcutapi.com").registrable == "capcutapi.com"

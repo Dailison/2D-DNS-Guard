@@ -84,6 +84,11 @@ def analyze_name(name: str, internal_suffixes: list[str] | None = None) -> NameI
         return NameInfo(fqdn, "invalid", fqdn, fqdn, "", labels[-1])
 
     ext = _EXTRACT(fqdn)
+    if not ext.suffix:
+        # (22/10) não termina num domínio de topo conhecido ("2084-ms-7.2-7e48.447d59ce-c346-…", "cloud.didi",
+        # "192.168.11.11_1"): nome da rede local que vazou p/ o DNS, não domínio da internet. Antes o último rótulo
+        # virava o "domínio" público e ia p/ a IA, as listas e a investigação.
+        return NameInfo(fqdn, "internal", labels[-1], labels[-1], "", labels[-1], [fqdn])
     if not ext.domain:  # o próprio nome é um sufixo público
         # curinga da PSL (*.compute-1.amazonaws.com): o nome inteiro é "sufixo", mas é endereço DENTRO do provedor —
         # privado como os das outras regiões (28/09: ec2-*.compute-1 viravam "domínio próprio" e iam p/ Não identificados)

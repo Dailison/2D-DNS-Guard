@@ -1416,7 +1416,12 @@ def _chat(client, mensagens: list[dict], schema: dict, pensar: bool, n: int) -> 
     r.raise_for_status()
     d = r.json()
     ns = lambda k: round(d[k] / 1e9, 1) if isinstance(d.get(k), (int, float)) else None   # noqa: E731
-    return json.loads((d.get("message") or {}).get("content") or "{}"), {
+    try:
+        resp, cortado = json.loads((d.get("message") or {}).get("content") or "{}"), False
+    except json.JSONDecodeError:   # (22/10) parou no limite de tokens no meio do JSON: 19 investigações caíram em 3 dias;
+        resp, cortado = {}, True   # vazio = quem chamou refaz sem raciocínio (veredito/revisor) ou encerra as rodadas
+    return resp, {
+        **({"json_cortado": True} if cortado else {}),
         "segundos": round(time.monotonic() - t0, 1), "tokens": d.get("eval_count"),
         "tokens_pergunta": d.get("prompt_eval_count"), "modelo": client.model, "gpu": _gpu(client),
         # leitura da pergunta x escrita da resposta: é aqui que se vê o reaproveitamento entre as rodadas

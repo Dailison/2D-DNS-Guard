@@ -717,3 +717,17 @@ def test_ab_do_veredito_guarda_b_e_a2_sem_decidir(monkeypatch):
     assert ab["B"]["lista"] == "wl:erp_gestao" and ab["B"]["segundos"] == 3 and ab["A2"]["tokens"] == 1400
     chamadas.clear()
     assert set(inv._ab_veredito(_Cli(), "dossiê", [{"code": "TRABALHO", "description": "t"}], [], did=4)) == {"B"}
+
+
+def test_json_cortado_nao_derruba_a_investigacao(monkeypatch):
+    """22/10: a IA parou no limite de tokens no meio do JSON ("Unterminated string") e a investigação inteira caía (19 em
+    3 dias). Agora a resposta conta como vazia: o veredito refaz sem raciocínio."""
+    from types import SimpleNamespace
+    respostas = iter(['{"service": "X", "motivo": "corta', '{"service": "X", "recognized": true}'])
+    monkeypatch.setattr(inv.httpx, "post", lambda *a, **k: SimpleNamespace(
+        raise_for_status=lambda: None, json=lambda: {"message": {"content": next(respostas)}, "eval_count": 9}))
+    cli = SimpleNamespace(model="gemma4:26b", keep_alive="60m", num_ctx=8192, num_thread=None, extra=True, url="http://gpu")
+    r, meta = inv._chat(cli, [], {}, True, 10)
+    assert r == {} and meta["json_cortado"]
+    r, meta = inv._chat(cli, [], {}, True, 10)
+    assert r == {"service": "X", "recognized": True} and "json_cortado" not in meta

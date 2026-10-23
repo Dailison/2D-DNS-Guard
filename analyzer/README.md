@@ -163,6 +163,15 @@ fonte aplicou (IA online, IA local, bloqueio automático, whitelist) foi corrigi
   (HTTP 503, alerta `lista_recusada`). O Technitium segue com a versão anterior até alguém
   aceitar em *Domínios bloqueados*.
 
+### China e Rússia (bloqueio por país)
+
+Desde 22/10 (pedido do usuário), domínio de país chinês ou russo (`.cn`, `.中国`, `.ru`, `.su`, `.рф`) não passa por
+nenhuma etapa da IA: na fase A (regras) vai direto para a lista **China e Rússia** (`china_russia`, `paises.py`),
+aplicada a todos os clientes. Sai das outras listas e das whitelists automáticas (liberação de pessoa fica e vence no
+DNS); fica com decisão global "bloquear", classificação da regra e fora das filas da IA local, online e da investigação.
+`paises.migrar(c)` migrou os já vistos (2.133 entradas em 22/10). Domínios `.com` de empresas chinesas/russas (ex.:
+`xiaomi.com`, `yandex.com`) não entram: a regra é só pelo domínio de país.
+
 ### Threat Intelligence
 
 Fontes na tabela `ti_sources` (ligar/desligar/peso pelo admin, em *Fontes de ameaça*;

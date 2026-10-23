@@ -312,7 +312,7 @@ o modelo carregado.
 
 A fila local (etapa 1) zera primeiro, com todos os workers da IA (VM e GPUs); só então começa a investigação
 (etapa 2), também com todos (1 na VM, `LLM_EXTRA_WORKERS_URL` em cada GPU). Começada, a investigação vai até o fim.
-Na VM, o plano de cada rodada da investigação vai ao Gemini (`INVESTIGACAO_PLANO_ONLINE`) e a IA local só escreve o veredito.
+O plano de cada rodada da investigação é da IA local; o plano pelo Gemini na VM (`INVESTIGACAO_PLANO_ONLINE`) foi desligado em 22/10 (falhava com HTTP 503/500 em 43% das rodadas).
 
 No console (k3s, namespace `dns-guard`): `ANALYZER_URL` no ConfigMap `dns-guard-config` e
 `ANALYZER_TOKEN` no Secret `dns-guard-secrets` (= `API_TOKEN` do analyzer.env).

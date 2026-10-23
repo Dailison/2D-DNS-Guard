@@ -273,7 +273,8 @@ def load_settings() -> Settings:
         investigacao_confianca_min=float(os.environ.get("INVESTIGACAO_CONFIANCA_MIN") or 0.85),
         investigacao_tempo_max=_int("INVESTIGACAO_TEMPO_MAX", 600),   # 10 min por domínio (pedido do usuário 29/09)
         investigacao_tempo_max_vm=_int("INVESTIGACAO_TEMPO_MAX_VM", 1200),   # (30/09) na VM, sem GPU
-        investigacao_plano_online=_bool(os.environ.get("INVESTIGACAO_PLANO_ONLINE"), True),
+        # (22/10, pedido do usuário) desligado: o Gemini falhava (HTTP 503/500) em 43% das rodadas e a rodada caía p/ a IA local
+        investigacao_plano_online=_bool(os.environ.get("INVESTIGACAO_PLANO_ONLINE"), False),
         # (22/10, pedido do usuário: a etapa 2 levava ~7 min) das 68 investigações que aplicaram em 3 dias, 62 já tinham
         # confiança >= 80% até a 2ª rodada e só 1 depois; as outras faziam ~5 rodadas e terminavam sem aplicar
         investigacao_rodadas_max=_int("INVESTIGACAO_RODADAS_MAX", 2),

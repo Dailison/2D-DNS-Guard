@@ -625,6 +625,10 @@ def _simula_maquina(monkeypatch, extra: bool, online_ok: bool, gpu: bool | None 
 
 
 def test_vm_usa_o_plano_online_e_a_gpu_nao(monkeypatch):
+    from dnsanalyzer import config
+    usados, g = _simula_maquina(monkeypatch, extra=False, online_ok=True)
+    assert usados == [] and not g["rodadas"][0].get("online"), "(22/10) desligado por padrão: o Gemini falhava em 43%"
+    monkeypatch.setattr(config.settings(), "investigacao_plano_online", True)   # INVESTIGACAO_PLANO_ONLINE=true
     usados, g = _simula_maquina(monkeypatch, extra=False, online_ok=True)
     assert usados == ["online"] and g["rodadas"][0].get("online"), "VM: plano pelo Gemini (e pronto na 1ª rodada)"
     usados, g = _simula_maquina(monkeypatch, extra=False, online_ok=False)

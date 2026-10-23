@@ -760,13 +760,50 @@ def liberar_reservas_orfas() -> tuple[int, int]:
     return n, m
 
 
+def _manutencao_worker(stop) -> None:
+    """(23/10) Rotinas periódicas em thread própria: antes rodavam no laço principal, entre uma análise e outra da VM —
+    a cada 5 min (bloqueio automático, expirar ameaças, aplicar listas/whitelist, sem destino, recorrentes) e a cada hora
+    (DNS Inativo pelos logs, que testa até 150 domínios, e reanálise dos antigos) a IA da VM ficava parada esperando."""
+    cfg = settings()
+    last_auto = last_stale = 0.0
+    while not stop():
+        try:
+            if time.monotonic() - last_auto > 300:   # bloqueio automático -> listas por categoria
+                last_auto = time.monotonic()
+                with db.conn() as c:   # (um evento por domínio na coluna "Decisão" do IA ao vivo)
+                    listas.bloquear_auto(c)
+                with db.conn() as c:
+                    listas.expirar_ameacas(c)
+                with db.conn() as c:
+                    listas_ia.aplicar(c)
+                with db.conn() as c:
+                    whitelist.aplicar(c)
+                with db.conn() as c:   # nada fica solto: quem terminou sem lista vai p/ a whitelist ou a Decisão Humana
+                    listas.sem_destino(c)
+                with db.conn() as c:   # pouco acesso que recorreu: volta à fila normal da IA
+                    m = reenfileirar_recorrentes(c)
+                if m:
+                    log.info("%d domínio(s) de pouco acesso recorreram: de volta à fila da IA", m)
+            if time.monotonic() - last_stale > 3600:
+                with db.conn() as c:   # domínios que não existem (NXDOMAIN) saem da IA e de Decisões
+                    listas.marcar_inexistentes(c)
+                m = reanalyze_stale(cfg.reanalyze_days)
+                if m:
+                    log.info("%d domínio(s) antigos marcados para reanálise", m)
+                last_stale = time.monotonic()
+        except Exception:  # noqa: BLE001
+            log.exception("erro na manutenção do classificador")
+        time.sleep(15)
+
+
 def run_forever(stop=lambda: False) -> None:
     import threading
     cfg = settings()
-    db.set_max_size(7 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
+    db.set_max_size(8 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
                     + cfg.whois_workers
                     + ((1 + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)) if cfg.investigacao_enabled else 0))
     liberar_reservas_orfas()
+    threading.Thread(target=_manutencao_worker, args=(stop,), daemon=True, name="manutencao").start()
     client = OllamaClient()
     if cfg.llm_enabled and cfg.llm_workers > 1:
         with db.conn() as c:
@@ -782,8 +819,6 @@ def run_forever(stop=lambda: False) -> None:
                 threading.Thread(target=_llm_worker, args=(stop, cats0, s * 100 + j, url), daemon=True,
                                  name=f"ia-extra{s}-{j}").start()
         log.info("reforço da IA: %s", ", ".join(f"{u} ({_workers_reforco(cfg, u)} análises simultâneas)" for u in cfg.ollama_extra_urls))
-    last_stale = 0.0
-    last_auto = 0.0
     backoff = 0
     reforco = _Reforco(client)
     cliente_etapa2 = reforco.cliente   # etapa 2 (busca na web + IA) no reforço com GPU se no ar
@@ -818,29 +853,7 @@ def run_forever(stop=lambda: False) -> None:
             n = phase_a()
             if n:
                 log.info("fase A (regras): %d domínio(s)", n)
-            if time.monotonic() - last_auto > 300:   # bloqueio automático -> listas por categoria
-                last_auto = time.monotonic()
-                with db.conn() as c:   # (um evento por domínio na coluna "Decisão" do IA ao vivo)
-                    listas.bloquear_auto(c)
-                with db.conn() as c:
-                    listas.expirar_ameacas(c)
-                with db.conn() as c:
-                    listas_ia.aplicar(c)
-                with db.conn() as c:
-                    whitelist.aplicar(c)
-                with db.conn() as c:   # nada fica solto: quem terminou sem lista vai p/ a whitelist ou a Decisão Humana
-                    listas.sem_destino(c)
-                with db.conn() as c:   # pouco acesso que recorreu: volta à fila normal da IA
-                    m = reenfileirar_recorrentes(c)
-                if m:
-                    log.info("%d domínio(s) de pouco acesso recorreram: de volta à fila da IA", m)
-            if time.monotonic() - last_stale > 3600:
-                with db.conn() as c:   # domínios que não existem (NXDOMAIN) saem da IA e de Decisões
-                    listas.marcar_inexistentes(c)
-                m = reanalyze_stale(cfg.reanalyze_days)
-                if m:
-                    log.info("%d domínio(s) antigos marcados para reanálise", m)
-                last_stale = time.monotonic()
+            # (23/10) manutenção de 5 min / 1 h em thread própria (_manutencao_worker): a IA da VM não espera por ela
             if not cfg.llm_enabled:
                 time.sleep(30)
                 continue

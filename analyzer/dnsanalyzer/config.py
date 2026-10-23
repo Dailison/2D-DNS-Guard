@@ -125,6 +125,8 @@ class Settings:
     investigacao_tempo_max_vm: int     # idem na VM (só CPU: cada pergunta leva minutos)
     investigacao_plano_online: bool    # (21/10) na VM, o plano de cada rodada pelo Gemini (a IA local decide o veredito)
     investigacao_rodadas_max: int      # (22/10) rodadas de busca no máximo (antes: até 8, enquanto sobrasse prazo)
+    investigacao_rodadas_max_cpu: int  # (23/10) idem nas máquinas só com CPU (VM, OLLAMA_CPU_URLS): cada plano relê o dossiê
+    investigacao_fontes_max: int       # (23/10) s de espera pelas fontes de rede da investigação (a que atrasa fica de fora)
     investigacao_ab_veredito: bool     # (22/10) teste A/B: veredito sem raciocínio longo guardado p/ comparar (só GPU)
     investigacao_veredito_raciocinio: bool   # (22/10) veredito com raciocínio longo na GPU (padrão: não; o revisor tem)
     investigacao_regras_curtas: bool   # (21/10) veredito com a descrição curta das listas (menos leitura; medir antes)
@@ -278,6 +280,12 @@ def load_settings() -> Settings:
         # (22/10, pedido do usuário: a etapa 2 levava ~7 min) das 68 investigações que aplicaram em 3 dias, 62 já tinham
         # confiança >= 80% até a 2ª rodada e só 1 depois; as outras faziam ~5 rodadas e terminavam sem aplicar
         investigacao_rodadas_max=_int("INVESTIGACAO_RODADAS_MAX", 2),
+        # (23/10) na CPU cada plano de rodada relê ~5 mil tokens a 40-50 tokens/s (~100 s) e a pré-rodada já busca marca,
+        # irmãos, subdomínios e abre as páginas: sem rodadas, vai da coleta direto ao veredito (medido 22/10: VM 274 s/investigação)
+        investigacao_rodadas_max_cpu=_int("INVESTIGACAO_RODADAS_MAX_CPU", 0),
+        # (23/10) a coleta esperava a fonte mais lenta até sobrar só a reserva do veredito (até ~7 min na GPU, com o Wayback
+        # em 5 chamadas seriais e o OTX instável); o veredito na GPU leva ~20 s. As buscas têm 60 s a mais (intervalo entre buscas)
+        investigacao_fontes_max=_int("INVESTIGACAO_FONTES_MAX", 75),
         investigacao_ab_veredito=_bool(os.environ.get("INVESTIGACAO_AB_VEREDITO"), False),
         investigacao_veredito_raciocinio=_bool(os.environ.get("INVESTIGACAO_VEREDITO_RACIOCINIO"), False),
         investigacao_regras_curtas=_bool(os.environ.get("INVESTIGACAO_REGRAS_CURTAS"), False),

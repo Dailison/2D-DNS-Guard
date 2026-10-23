@@ -314,6 +314,17 @@ A fila local (etapa 1) zera primeiro, com todos os workers da IA (VM e GPUs); s�
 (etapa 2), também com todos (1 na VM, `LLM_EXTRA_WORKERS_URL` em cada GPU). Começada, a investigação vai até o fim.
 O plano de cada rodada da investigação é da IA local; o plano pelo Gemini na VM (`INVESTIGACAO_PLANO_ONLINE`) foi desligado em 22/10 (falhava com HTTP 503/500 em 43% das rodadas).
 
+**Investigação mais rápida (23/10).** Medido em 22/10: ~62 investigações/hora no total (RX 9070 146 s, servidor só-CPU
+214 s, VM 274 s por domínio) e 85% terminavam "sem certeza" e iam ao Gemini; a maior parte do tempo era espera de rede,
+não IA. Mudanças: a coleta das fontes tem teto (`INVESTIGACAO_FONTES_MAX`, 75 s; as buscas ganham 60 s a mais) em vez de
+esperar a fonte mais lenta até sobrar só a reserva do veredito; páginas de resultado, subdomínios, páginas do site e as
+pedidas pelo plano abrem em paralelo com 10 s de espera cada (eram até 16 aberturas seriais de 25 s); na primeira leva só
+o domínio exato usa a busca completa (marca, marca+CNPJ e os 2 domínios-irmãos vão pela leve); nas máquinas só com CPU
+não há rodadas de plano (`INVESTIGACAO_RODADAS_MAX_CPU`, 0 — cada plano relia ~5 mil tokens a 40-50 tokens/s); a
+coocorrência lê a cópia local dos logs (`query_log`, índices por domínio e por IP) em vez de ~20 chamadas seriais à API do
+Technitium; e a manutenção de 5 min / 1 h do classificador (listas, whitelist, DNS Inativo, reanálise) roda em thread
+própria, sem parar a IA da VM.
+
 No console (k3s, namespace `dns-guard`): `ANALYZER_URL` no ConfigMap `dns-guard-config` e
 `ANALYZER_TOKEN` no Secret `dns-guard-secrets` (= `API_TOKEN` do analyzer.env).
 

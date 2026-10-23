@@ -10,11 +10,12 @@ Fontes (só o NOME do domínio sai da rede, como nas outras fases):
 - Wayback Machine: desde quando o site existe e como era;
 - páginas do site além da inicial (sobre, contato, termos, privacidade): razão social, CNPJ, e-mails;
 - buscas pela marca (SearXNG, com a fila de buscas das outras fases);
-- coocorrência nos logs brutos do Technitium: o que o MESMO computador consultou ±2 s — um domínio técnico que sempre
-  vem junto de app.omie.com.br é parte do Omie.
+- coocorrência na cópia local dos logs (query_log): o que o MESMO computador consultou ±2 s — um domínio técnico que
+  sempre vem junto de app.omie.com.br é parte do Omie.
 
 Rodada 1: a IA lê o dossiê e pede até 3 buscas e 3 páginas. Rodada 2 (com raciocínio na GPU): veredito com as
-evidências citadas. Só com alta certeza (serviço reconhecido, confiança >= INVESTIGACAO_CONFIANCA_MIN) muda a
+evidências citadas. (23/10) Nas máquinas só com CPU não há rodadas de plano por padrão (INVESTIGACAO_RODADAS_MAX_CPU=0):
+a pré-rodada já busca marca e irmãos, visita subdomínios e abre as páginas; vai da coleta ao veredito. Só com alta certeza (serviço reconhecido, confiança >= INVESTIGACAO_CONFIANCA_MIN) muda a
 classificação e a lista (resposta final, como a da IA online); sem certeza só guarda o dossiê em domains.investigacao.
 """
 
@@ -54,6 +55,7 @@ _LINK = re.compile(r"""href\s*=\s*["']([^"'#]+)["']""", re.I)
 _PAGINAS = re.compile(r"sobre|about|quem-somos|empresa|contato|contact|fale-conosco|termos|terms|privacidade|privacy|"
                       r"politica|legal|imprint|impressum", re.I)
 _TITULO = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+PAGINA_TIMEOUT_S = 10   # (23/10) página que não responde em 10 s fica de fora (era 25 s, uma a uma: até 16 aberturas seriais)
 
 
 # ------------------------------------------------------------------ utilitários
@@ -115,23 +117,37 @@ def _chave(q: str) -> str:
     return re.sub(r"[\"'\s]+", " ", q.lower()).strip()
 
 
+def _abrir_varias(urls: list[str], cliente: httpx.Client, n: int = 1500) -> list[dict | None]:
+    """As páginas ao mesmo tempo (23/10): antes eram abertas uma a uma, cada uma com até 25 s de espera — a investigação
+    passava mais tempo esperando sites lentos do que na IA. Mantém a ordem; None onde a página não abriu."""
+    from concurrent.futures import ThreadPoolExecutor
+    if not urls:
+        return []
+    with ThreadPoolExecutor(min(len(urls), 8)) as pool:
+        return list(pool.map(lambda u: _abrir(u, cliente, n), urls))
+
+
 def paginas_dos_resultados(buscas_: list[dict], nome: str, cliente: httpx.Client, ja: set[str], maximo: int) -> list[dict]:
     """Abre as páginas de terceiros que as buscas acharam e guarda o texto em volta da citação do domínio."""
     alvos = [nome, nome.split(".")[0]] if len(nome.split(".")[0]) >= 5 else [nome]
-    out = []
+    urls: list[str] = []
     for b in buscas_:
         for r in b.get("resultados") or []:
             u = r.get("url") or ""
-            if len(out) >= maximo:
-                return out
+            if len(urls) >= maximo + 2:   # algumas não abrem: abre umas a mais, em paralelo, e fica com as primeiras
+                break
             if not u or u in ja or (urllib.parse.urlsplit(u).hostname or "").endswith(nome):
                 continue
             ja.add(u)
-            p = _abrir(u, cliente, 150_000)   # a resposta do fórum costuma vir depois do menu
-            if p:
-                t = _trecho(p["texto"], alvos, 900)
-                if t:
-                    out.append({"url": p["url"], "titulo": p["titulo"], "texto": t})
+            urls.append(u)
+    out = []
+    for p in _abrir_varias(urls, cliente, 150_000):   # a resposta do fórum costuma vir depois do menu
+        if p:
+            t = _trecho(p["texto"], alvos, 900)
+            if t:
+                out.append({"url": p["url"], "titulo": p["titulo"], "texto": t})
+        if len(out) >= maximo:
+            break
     return out
 
 
@@ -139,7 +155,7 @@ def _abrir(url: str, cliente: httpx.Client, n: int = 1500) -> dict | None:
     if not _endereco_publico(url):
         return None
     try:
-        r = cliente.get(url)
+        r = cliente.get(url, timeout=PAGINA_TIMEOUT_S)
     except httpx.HTTPError:
         return None
     if r.status_code >= 400 or "html" not in (r.headers.get("content-type") or "html"):
@@ -325,7 +341,7 @@ def certificados(nome: str, cliente: httpx.Client, reserva: bool = False) -> dic
 
 def wayback(nome: str, cliente: httpx.Client) -> dict | None:
     def captura(limite: str) -> str | None:   # "1" = a primeira, "-1" = a última (só respostas 200)
-        r = cliente.get("https://web.archive.org/cdx/search/cdx", timeout=20, params={
+        r = cliente.get("https://web.archive.org/cdx/search/cdx", timeout=10, params={
             "url": nome, "output": "json", "fl": "timestamp", "filter": "statuscode:200", "limit": limite})
         linhas = r.json() if r.status_code == 200 and r.text.strip() else []
         return linhas[1][0] if len(linhas) > 1 else None
@@ -338,7 +354,7 @@ def wayback(nome: str, cliente: httpx.Client) -> dict | None:
     except (httpx.HTTPError, ValueError):
         return None
     try:   # o que foi arquivado: /wp-content = WordPress, /api/v2, /login, /checkout...
-        r = cliente.get("https://web.archive.org/cdx/search/cdx", timeout=25, params={
+        r = cliente.get("https://web.archive.org/cdx/search/cdx", timeout=12, params={
             "url": nome, "matchType": "domain", "output": "json", "fl": "original", "collapse": "urlkey",
             "filter": "statuscode:200", "limit": "400"})
         urls = [x[0] for x in (r.json()[1:] if r.status_code == 200 and r.text.strip() else [])]
@@ -354,7 +370,7 @@ def wayback(nome: str, cliente: httpx.Client) -> dict | None:
         pass
     for k in ("primeira", "ultima"):   # título do site em cada época
         try:
-            h = cliente.get(f"https://web.archive.org/web/{out[k]}id_/http://{nome}/", timeout=20).text[:200_000]
+            h = cliente.get(f"https://web.archive.org/web/{out[k]}id_/http://{nome}/", timeout=10).text[:200_000]
             t = _TITULO.search(h)
             out[f"titulo_{k}"] = _texto(t.group(1), 120) if t else ""
         except httpx.HTTPError:
@@ -423,8 +439,7 @@ def paginas_do_site(nome: str, cliente: httpx.Client) -> dict | None:
             links.append(u)
     paginas = [_publico(ini) | {"texto": ini["texto"][:800]}]
     htmls = [ini["_html"]]
-    for u in links[:6]:
-        p = _abrir(u, cliente)
+    for p in _abrir_varias(links[:6], cliente):   # (23/10) sobre/contato/termos ao mesmo tempo
         if p:
             htmls.append(p["_html"])
             paginas.append(_publico(p) | {"texto": p["texto"][:800]})
@@ -792,13 +807,9 @@ def bem_conhecidos(nome: str, cliente: httpx.Client) -> dict:
 
 
 def subdominios(nomes: list[str], cliente: httpx.Client) -> list[dict]:
-    """Página inicial de subdomínios (dos certificados e dos logs): portal.x.com, cielo.x.com..."""
-    out = []
-    for n in nomes[:8]:
-        p = _abrir(f"https://{n}/", cliente, 500)
-        if p:
-            out.append(_publico(p) | {"subdominio": n})
-    return out
+    """Página inicial de subdomínios (dos certificados e dos logs): portal.x.com, cielo.x.com... (em paralelo, 23/10)"""
+    nomes = nomes[:8]
+    return [_publico(p) | {"subdominio": n} for n, p in zip(nomes, _abrir_varias([f"https://{n}/" for n in nomes], cliente, 500)) if p]
 
 
 def cnpjs(c, numeros: list[str]) -> list[dict]:
@@ -814,48 +825,38 @@ def cnpjs(c, numeros: list[str]) -> list[dict]:
     return out
 
 
-def coocorrencia(c, nome: str, fqdns: list[str], suffixes: list[str]) -> dict | None:
-    """O que o MESMO computador consultou ±2 s de cada acesso ao domínio (logs brutos do Technitium, 7 dias)."""
-    from .technitium import TechnitiumClient, fmt_ts, parse_ts
+def coocorrencia(c, nome: str, did: int, suffixes: list[str], dias: int = 7) -> dict | None:
+    """O que o MESMO computador consultou ±2 s de cada acesso ao domínio — pela cópia local dos logs (`query_log`,
+    LOG_RETENCAO_DIAS, índices por domínio e por IP). Até 23/10 eram ~20 chamadas seriais à API de logs do Technitium
+    (0,1-0,6 s cada em nome raro, 23 s em nome comum, e disputando o SQLite com a coleta de 1 em 1 min)."""
     try:
-        tc = TechnitiumClient(timeout=30)
-    except Exception:  # noqa: BLE001
-        return None
-    fim = datetime.now(timezone.utc)
-    amostras, vistos = [], set()
-    try:
-        for fq in fqdns[:4]:
-            r = tc._get("logs/query", {"name": tc.app, "classPath": tc.cls, "start": fmt_ts(fim - timedelta(days=7)),
-                                       "end": fmt_ts(fim), "pageNumber": 1, "entriesPerPage": 10,
-                                       "descendingOrder": "true", "qname": fq})
-            for e in r.get("entries") or []:
-                chave = (e.get("clientIpAddress"), (e.get("timestamp") or "")[:16])   # 1 por PC por minuto
-                if chave not in vistos and e.get("clientIpAddress"):
-                    vistos.add(chave)
-                    amostras.append((e["clientIpAddress"], parse_ts(e["timestamp"])))
-        conta: dict[str, int] = {}
-        for ip, ts in amostras[:16]:
-            r = tc._get("logs/query", {"name": tc.app, "classPath": tc.cls, "start": fmt_ts(ts - timedelta(seconds=2)),
-                                       "end": fmt_ts(ts + timedelta(seconds=2)), "pageNumber": 1,
-                                       "entriesPerPage": 200, "descendingOrder": "false", "clientIpAddress": ip})
-            juntos = set()
-            for e in r.get("entries") or []:
-                info = analyze_name((e.get("qname") or "").rstrip("."), suffixes)
-                if info.kind == "public" and info.registrable and info.registrable != nome:
-                    juntos.add(info.registrable)
-            for x in juntos:
-                conta[x] = conta.get(x, 0) + 1
-    except Exception as e:  # noqa: BLE001 — Technitium fora: segue sem esta fonte
+        amostras = list(c.execute(
+            "SELECT client_ip, ts FROM (SELECT DISTINCT ON (client_ip, date_trunc('minute', ts)) client_ip, ts FROM query_log "
+            " WHERE domain_id = %s AND ts > now() - make_interval(days => %s) "
+            " ORDER BY client_ip, date_trunc('minute', ts), ts DESC) x ORDER BY ts DESC LIMIT 16", (did, dias)))
+        if not amostras:
+            return {"amostras": 0, "juntos": []}
+        juntos = list(c.execute(
+            "SELECT a.ip, a.ts, q.qname FROM unnest(%s::inet[], %s::timestamptz[]) AS a(ip, ts) "
+            "JOIN query_log q ON q.client_ip = a.ip AND q.ts BETWEEN a.ts - interval '2 seconds' AND a.ts + interval '2 seconds' "
+            "WHERE q.domain_id <> %s GROUP BY 1, 2, 3",
+            ([r["client_ip"] for r in amostras], [r["ts"] for r in amostras], did)))
+    except Exception as e:  # noqa: BLE001 — sem a cópia dos logs: segue sem esta fonte
         log.info("coocorrência de %s indisponível: %s", nome, e)
         return None
-    finally:
-        tc.close()
-    n = len(amostras[:16])
-    if not n:
-        return {"amostras": 0, "juntos": []}
+    por_amostra: dict[tuple, set] = {}
+    for r in juntos:
+        info = analyze_name((r["qname"] or "").rstrip("."), suffixes)
+        if info.kind == "public" and info.registrable and info.registrable != nome:
+            por_amostra.setdefault((r["ip"], r["ts"]), set()).add(info.registrable)
+    conta: dict[str, int] = {}
+    for vistos in por_amostra.values():
+        for x in vistos:
+            conta[x] = conta.get(x, 0) + 1
+    n = len(amostras)
     top = sorted(conta.items(), key=lambda kv: -kv[1])[:10]
     info = {r["name"]: r for r in c.execute(
-        "SELECT name, classification, category, topic FROM domains WHERE name = ANY(%s)", ([k for k, _ in top],))}
+        "SELECT name, classification, category, topic FROM domains WHERE name = ANY(%s)", ([k for k, _ in top],))} if top else {}
     return {"amostras": n, "juntos": [{"dominio": k, "vezes": v, "classificacao": (info.get(k) or {}).get("classification"),
                                        "servico": (info.get(k) or {}).get("topic")} for k, v in top if v >= max(2, n // 3)]}
 
@@ -1055,8 +1056,9 @@ def _tarefas_rede(nome: str, http: httpx.Client, abre_site: bool, completa: bool
     return t
 
 
-def _rodar(tarefas: dict, limite_s: float, nome: str) -> dict:
-    """As fontes em paralelo, até `limite_s`: a que atrasa fica de fora (sem esperar por ela)."""
+def _rodar(tarefas: dict, limite_s: float, nome: str, extra: dict | None = None) -> dict:
+    """As fontes em paralelo, até `limite_s`: a que atrasa fica de fora (sem esperar por ela). `extra` = segundos a mais
+    para certas fontes (23/10: as buscas esperam a vez no SearXNG — intervalo entre buscas — e valem a espera)."""
     from concurrent.futures import ThreadPoolExecutor
     t0, out = time.monotonic(), {}
     pool = ThreadPoolExecutor(max(len(tarefas), 1))
@@ -1064,7 +1066,7 @@ def _rodar(tarefas: dict, limite_s: float, nome: str) -> dict:
         fut = {k: pool.submit(f) for k, f in tarefas.items()}
         for k, f in fut.items():
             try:
-                out[k] = f.result(timeout=max(1.0, limite_s - (time.monotonic() - t0)))
+                out[k] = f.result(timeout=max(1.0, limite_s + (extra or {}).get(k, 0) - (time.monotonic() - t0)))
             except Exception as e:  # noqa: BLE001 — fonte que falha/atrasa fica de fora
                 log.info("coleta %s: fonte %s falhou: %s", nome, k, e.__class__.__name__)
                 out[k] = None
@@ -1660,20 +1662,22 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
     with httpx.Client(timeout=25, follow_redirects=True, headers={"User-Agent": webintel.UA}) as http:
         def cooc():
             with db.conn() as c:
-                return coocorrencia(c, nome, fqdns, cfg.internal_suffixes)
+                return coocorrencia(c, nome, did, cfg.internal_suffixes)
         # o que a coleta antes da IA online já trouxe (cache) não é buscado de novo
         feita = {k: v for k, v in (coleta_em_cache(nome) or {}).items() if v is not None}
-        consultas = ([f'"{marca}"'] if len(marca) >= 4 else []) + [f'"{nome}"'] + (
-            [f'"{marca}" cnpj'] if nome.endswith(".br") and len(marca) >= 4 else [])
+        # (23/10) só a consulta pelo domínio exato usa a busca completa (todos os buscadores, 30 s de intervalo por
+        # instância); marca e marca+CNPJ vão pela leve — a primeira leva fazia até 3 completas e esperava ~1 min de intervalos
+        leves = ([f'"{marca}"'] if len(marca) >= 4 else []) + ([f'"{marca}" cnpj'] if nome.endswith(".br") and len(marca) >= 4 else [])
         feita.pop("dns", None)   # DNS é barato e a coleta antiga não seguia a cadeia dos nomes dos logs: sempre de novo
         tarefas = {k: f for k, f in _tarefas_rede(nome, http, abre_site, True, fqdns).items() if k not in feita}
-        tarefas |= {"coocorrencia": cooc, "buscas": lambda: buscas(consultas, nome)}
+        tarefas |= {"coocorrencia": cooc, "buscas": lambda: buscas([f'"{nome}"'], nome) + (buscas(leves, nome, completa=False) if leves else [])}
         if cfg.urlscan_api_key:   # com chave: qual script chama o domínio e o que ele diz
             tarefas["urlscan_detalhe"] = lambda: urlscan_detalhe(nome, http, cfg.urlscan_api_key)
         if cfg.virustotal_api_key:
             tarefas["virustotal"] = lambda: virustotal(nome, http, cfg.virustotal_api_key)
         fontes |= {k: v for k, v in feita.items() if k not in ("perfil", "cnpjs")}
-        fontes |= _rodar(tarefas, max(30, resta() - reserva), nome)
+        # (23/10) teto da coleta: a fonte que atrasa fica de fora (antes esperava até sobrar só a reserva do veredito)
+        fontes |= _rodar(tarefas, min(cfg.investigacao_fontes_max, max(30, resta() - reserva)), nome, extra={"buscas": 60})
         with db.conn() as c:
             fontes["perfil"] = perfil_acesso(c, did)
         fontes["buscas"] = fontes.get("buscas") or []
@@ -1701,8 +1705,8 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
         fontes["subdominios"] = subdominios(subs, http) if abre_site else []
         # domínios-irmãos no mesmo certificado costumam revelar a empresa dona (ex.: dnofd.com + gasfps.com)
         irmaos = list(dict.fromkeys(((fontes.get("certificados") or {}).get("outros_dominios") or [])
-                                    + ((fontes.get("tls") or {}).get("outros_dominios") or [])))[:3]
-        fontes["buscas"] += buscas([f'"{x}"' for x in irmaos], nome) if irmaos else []
+                                    + ((fontes.get("tls") or {}).get("outros_dominios") or [])))[:2]
+        fontes["buscas"] += buscas([f'"{x}"' for x in irmaos], nome, completa=False) if irmaos else []   # (23/10) leve, 2
         # a resposta costuma estar DENTRO das páginas que a busca achou (fórum, documentação), não no resumo
         abertas: set[str] = set()
         fontes["paginas_resultados"] = paginas_dos_resultados(fontes["buscas"], nome, http, abertas, PAGINAS_POR_RODADA)
@@ -1711,7 +1715,9 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
                   + [x["cnpj"] for x in fontes["cnpjs"]])
         etapas.append({"etapa": "irmãos e páginas dos resultados", "segundos": round(time.monotonic() - t0, 1)})
         passo, rodadas = {}, []
-        for rodada in range(1, min(MAX_RODADAS, cfg.investigacao_rodadas_max) + 1):   # enquanto houver tempo e até o limite
+        # (23/10) na CPU (VM, OLLAMA_CPU_URLS) cada plano relê o dossiê (~100 s): INVESTIGACAO_RODADAS_MAX_CPU, padrão 0
+        n_rodadas = cfg.investigacao_rodadas_max if _gpu(client) else cfg.investigacao_rodadas_max_cpu
+        for rodada in range(1, min(MAX_RODADAS, n_rodadas) + 1):   # enquanto houver tempo e até o limite
             if resta() < reserva + custo_rodada:
                 break
             dos.juntar(fontes)
@@ -1736,10 +1742,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             novas_b = buscas(novas, nome, completa=False)
             fontes["buscas"] += novas_b
             fontes["paginas_resultados"] += paginas_dos_resultados(novas_b, nome, http, abertas, PAGINAS_POR_RODADA)
-            for u in pags:
-                p = _abrir(u if u.startswith("http") else f"https://{u}", http)
-                if p:
-                    fontes["paginas_extras"].append(_publico(p))
+            fontes["paginas_extras"] += [_publico(p) for p in _abrir_varias([u if u.startswith("http") else f"https://{u}" for u in pags], http) if p]
             fontes["subdominios"] += subdominios(sds, http) if abre_site else []
             with db.conn() as c:
                 fontes["cnpjs"] += cnpjs(c, cns)

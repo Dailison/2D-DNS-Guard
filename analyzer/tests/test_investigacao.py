@@ -56,36 +56,66 @@ def test_dossie_longo_e_cortado_sem_perder_evidencias():
     assert len(t) < inv.MAX_DOSSIE + 1000 and all(f"E{i}:" in t for i in range(10))
 
 
-def test_coocorrencia_conta_o_que_vem_junto(monkeypatch):
-    agora = "2026-09-29T03:00:00.000Z"
-
-    class TC:
-        app, cls = "a", "c"
-
-        def __init__(self, timeout=30):
-            pass
-
-        def _get(self, path, p):
-            if "qname" in p:   # acessos ao domínio investigado: 3 PCs
-                return {"entries": [{"clientIpAddress": ip, "timestamp": agora, "qname": p["qname"]}
-                                    for ip in ("10.0.0.1", "10.0.0.2", "10.0.0.3")]}
-            return {"entries": [{"qname": "cdn.x.com"}, {"qname": "app.omie.com.br"},
-                                {"qname": "api.omie.com.br"}, {"qname": "pc1.local"}]
-                    + ([{"qname": "raro.net"}] if p["clientIpAddress"] == "10.0.0.1" else [])}
-
-        def close(self):
-            pass
-
-    import dnsanalyzer.technitium as tech
-    monkeypatch.setattr(tech, "TechnitiumClient", TC)
+def test_coocorrencia_conta_o_que_vem_junto():
+    """(23/10) pela cópia local dos logs (query_log): amostras por computador/minuto e o que o mesmo IP consultou ±2 s."""
+    t = datetime(2026, 9, 29, 3, 0, tzinfo=timezone.utc)
+    ips = ("10.0.0.1", "10.0.0.2", "10.0.0.3")
 
     class C:
-        def execute(self, sql, p):
+        def execute(self, sql, p=None):
+            if "DISTINCT ON" in sql:   # acessos ao domínio investigado: 3 PCs
+                assert p == (7, 7) or p[0] == 7
+                return [{"client_ip": ip, "ts": t} for ip in ips]
+            if "unnest" in sql:
+                assert list(p[0]) == list(ips) and p[2] == 7
+                out = [{"ip": ip, "ts": t, "qname": q} for ip in ips
+                       for q in ("cdn.x.com", "app.omie.com.br", "api.omie.com.br", "pc1.local")]
+                return out + [{"ip": "10.0.0.1", "ts": t, "qname": "raro.net"}]
             return [{"name": "omie.com.br", "classification": "TRABALHO", "category": "produtividade", "topic": "Omie"}]
-    out = inv.coocorrencia(C(), "x.com", ["cdn.x.com"], ["local"])
+    out = inv.coocorrencia(C(), "x.com", 7, ["local"])
     assert out["amostras"] == 3
     assert [j["dominio"] for j in out["juntos"]] == ["omie.com.br"]   # raro.net (1 de 3) e o próprio x.com ficam de fora
     assert out["juntos"][0]["vezes"] == 3 and out["juntos"][0]["servico"] == "Omie"
+
+
+def test_coocorrencia_sem_logs_ou_sem_banco():
+    class Vazio:
+        def execute(self, sql, p=None):
+            return []
+
+    class Quebrado:
+        def execute(self, sql, p=None):
+            raise RuntimeError("sem tabela")
+    assert inv.coocorrencia(Vazio(), "x.com", 7, []) == {"amostras": 0, "juntos": []}
+    assert inv.coocorrencia(Quebrado(), "x.com", 7, []) is None
+
+
+def test_rodar_espera_mais_pelas_fontes_com_prazo_extra():
+    """(23/10) a coleta tem um teto; só as buscas (intervalo no SearXNG) ganham segundos a mais."""
+    import time as _t
+    tarefas = {"lenta": lambda: _t.sleep(1.5) or "veio", "rapida": lambda: "ok"}   # (a espera mínima por fonte é 1 s)
+    assert inv._rodar(dict(tarefas), 0.2, "x.com") == {"lenta": None, "rapida": "ok"}
+    assert inv._rodar(dict(tarefas), 0.2, "x.com", extra={"lenta": 3}) == {"lenta": "veio", "rapida": "ok"}
+
+
+def test_paginas_abrem_em_paralelo_e_na_ordem(monkeypatch):
+    import threading as _th
+    vivas, pico, lock = [0], [0], _th.Lock()
+
+    def abrir(u, cli, n=1500):
+        import time as _t
+        with lock:
+            vivas[0] += 1
+            pico[0] = max(pico[0], vivas[0])
+        _t.sleep(0.2)
+        with lock:
+            vivas[0] -= 1
+        return None if u.endswith("/3") else {"url": u, "titulo": "t", "texto": "x"}
+    monkeypatch.setattr(inv, "_abrir", abrir)
+    out = inv._abrir_varias([f"https://a.com/{i}" for i in range(5)], None)
+    assert [p and p["url"] for p in out] == ["https://a.com/0", "https://a.com/1", "https://a.com/2", None, "https://a.com/4"]
+    assert pico[0] >= 4   # não foi uma de cada vez
+    assert [s["subdominio"] for s in inv.subdominios(["p.x.com", "q.x.com"], None)] == ["p.x.com", "q.x.com"]
 
 
 def test_listas_trata_investigacao_como_resposta_final():
@@ -114,8 +144,9 @@ class _Cli:
     extra, model, keep_alive, num_ctx, url = True, "gemma4:26b", "60m", 8192, "http://gpu"
 
 
-def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bool = False, passos=None):
-    """Fontes e IA simuladas; devolve (gravado no domínio, aplicou?, passos pedidos)."""
+def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bool = False, passos=None,
+            cliente=None, nome: str = "x.com", modos: list | None = None):
+    """Fontes e IA simuladas; devolve (gravado no domínio, aplicou?, passos pedidos). `modos` recebe (consulta, completa?)."""
     from types import SimpleNamespace
     from dnsanalyzer import classifier, config, db
     cfg = config.settings()
@@ -127,7 +158,12 @@ def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bo
                  "coleta_em_cache": None, "perfil_acesso": {}}.items():
         monkeypatch.setattr(inv, f, lambda *a, _r=r, **k: _r)
     buscas_feitas = []
-    monkeypatch.setattr(inv, "buscas", lambda qs, nome, completa=True: buscas_feitas.extend(qs) or [{"consulta": q, "resultados": []} for q in qs])
+    def _buscas(qs, nome, completa=True):
+        buscas_feitas.extend(qs)
+        if modos is not None:
+            modos.extend((q, completa) for q in qs)
+        return [{"consulta": q, "resultados": []} for q in qs]
+    monkeypatch.setattr(inv, "buscas", _buscas)
     monkeypatch.setattr(inv, "cnpjs", lambda c, ns: [])
     monkeypatch.setattr(inv, "subdominios", lambda ns, http: [])
     monkeypatch.setattr(inv, "paginas_dos_resultados", lambda *a: [])
@@ -160,9 +196,28 @@ def _simula(monkeypatch, revisor_ok: bool, tempo_max: int = 600, veredito_ja: bo
             return self
 
     monkeypatch.setattr(db, "conn", lambda: Conn())
-    d = {"name": "x.com", "id": 1, "total_queries": 50, "classification": "DESCONHECIDO", "risk_score": 10, "work_score": 50}
-    inv._investigar(_Cli(), [{"code": "TRABALHO", "description": ""}], [], d, {"name": "x.com", "kind": "public", "tld": "com", "fqdn_stats": {"sample": ["x.com"]}})
+    d = {"name": nome, "id": 1, "total_queries": 50, "classification": "DESCONHECIDO", "risk_score": 10, "work_score": 50}
+    inv._investigar(cliente or _Cli(), [{"code": "TRABALHO", "description": ""}], [], d,
+                    {"name": nome, "kind": "public", "tld": nome.rsplit(".", 1)[-1], "fqdn_stats": {"sample": [nome]}})
     return gravado, bool(aplicou), buscas_feitas
+
+
+def test_primeira_leva_so_o_dominio_exato_vai_pela_busca_completa(monkeypatch):
+    """(23/10) marca e marca+CNPJ vão pela busca leve; só o domínio exato usa todos os buscadores."""
+    modos: list = []
+    _simula(monkeypatch, revisor_ok=True, nome="acmecorp.com.br", modos=modos)
+    assert modos[:3] == [('"acmecorp.com.br"', True), ('"acmecorp"', False), ('"acmecorp" cnpj', False)]
+    assert not [q for q, completa in modos[3:] if completa]
+
+
+def test_na_cpu_nao_ha_rodadas_de_plano(monkeypatch):
+    """(23/10) VM/OLLAMA_CPU_URLS: cada plano relê o dossiê (~100 s); vai da coleta ao veredito (INVESTIGACAO_RODADAS_MAX_CPU=0)."""
+    class Cpu(_Cli):
+        gpu = False
+    g, aplicou, buscas_feitas = _simula(monkeypatch, revisor_ok=True, cliente=Cpu())
+    assert aplicou and "x erp" not in buscas_feitas and '"x.com"' in buscas_feitas
+    assert not [e for e in g["etapas"] if e["etapa"].startswith("rodada")] and g["plano"] == {}
+    assert [e["etapa"] for e in g["etapas"]][-2:] == ["veredito", "revisão"]
 
 
 def test_revisor_discorda_so_guarda_o_dossie(monkeypatch):
@@ -626,6 +681,7 @@ def _simula_maquina(monkeypatch, extra: bool, online_ok: bool, gpu: bool | None 
 
 def test_vm_usa_o_plano_online_e_a_gpu_nao(monkeypatch):
     from dnsanalyzer import config
+    monkeypatch.setattr(config.settings(), "investigacao_rodadas_max_cpu", 2)   # (23/10) na CPU o padrão é sem rodadas
     usados, g = _simula_maquina(monkeypatch, extra=False, online_ok=True)
     assert usados == [] and not g["rodadas"][0].get("online"), "(22/10) desligado por padrão: o Gemini falhava em 43%"
     monkeypatch.setattr(config.settings(), "investigacao_plano_online", True)   # INVESTIGACAO_PLANO_ONLINE=true

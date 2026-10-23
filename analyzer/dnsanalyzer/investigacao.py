@@ -1515,7 +1515,11 @@ def _veredito(client, texto: str, cats: list[dict], scats: list[dict], pensar: b
               f"{listas_ia.regras_lista(curta)}\n\nEm \"motivo\" (1-3 frases, português) explique quem é o dono/serviço e "
               "quais evidências decidiram; em \"evidencias\" os ids usados.")
     msgs = [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}]
-    pensar = _gpu(client) if pensar is None else pensar
+    # (22/10, teste A/B de 30 investigações na GPU) sem o raciocínio longo: mesma lista em 27 de 30 — B concordou com a
+    # repetição do próprio A nas 9 repetidas (A mudou em 2) — em 19 s em vez de 129 s. O revisor, que só roda quando vai
+    # aplicar, segue com raciocínio. INVESTIGACAO_VEREDITO_RACIOCINIO=true volta ao antigo.
+    if pensar is None:
+        pensar = _gpu(client) and settings().investigacao_veredito_raciocinio
     v, meta = _chat(client, msgs, schema, pensar, n or (1800 if pensar else 700))
     if pensar and not all(k in v for k in schema["required"]):
         # (29/09) o raciocínio pode gastar todos os tokens e a resposta sair vazia: pergunta de novo sem raciocínio

@@ -731,3 +731,24 @@ def test_json_cortado_nao_derruba_a_investigacao(monkeypatch):
     assert r == {} and meta["json_cortado"]
     r, meta = inv._chat(cli, [], {}, True, 10)
     assert r == {"service": "X", "recognized": True} and "json_cortado" not in meta
+
+
+def test_veredito_sem_raciocinio_e_revisor_com(monkeypatch):
+    """22/10 (teste A/B, pedido do usuário): na GPU o veredito vai sem o raciocínio longo (700 tokens); o revisor, que só
+    roda quando vai aplicar, segue com raciocínio. INVESTIGACAO_VEREDITO_RACIOCINIO=true volta ao antigo."""
+    from types import SimpleNamespace
+
+    from dnsanalyzer import config
+    chamadas = []
+    ok = {**V_OK, "service": "X", "recognized": True, "classification": "TRABALHO", "category": "outros", "confidence": 0.9,
+          "lista": "wl:erp_gestao", "lista_confianca": 0.9, "motivo": "m", "evidencias": [], "sustentado": True, "problema": ""}
+    monkeypatch.setattr(inv, "_chat", lambda c, m, s, pensar, n: chamadas.append((pensar, n)) or (ok, {"segundos": 1}))
+    cats = [{"code": "TRABALHO", "description": "t"}]
+    inv._veredito(_Cli(), "dossiê", cats, [])
+    inv._revisar(_Cli(), "dossiê", ok)
+    assert chamadas == [(False, 700), (True, 1500)]
+    cfg = config.settings()
+    monkeypatch.setattr(inv, "settings", lambda: SimpleNamespace(**{**vars(cfg), "investigacao_veredito_raciocinio": True}))
+    chamadas.clear()
+    inv._veredito(_Cli(), "dossiê", cats, [])
+    assert chamadas == [(True, 1800)]

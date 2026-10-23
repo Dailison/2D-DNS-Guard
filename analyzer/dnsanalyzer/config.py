@@ -126,6 +126,7 @@ class Settings:
     investigacao_plano_online: bool    # (21/10) na VM, o plano de cada rodada pelo Gemini (a IA local decide o veredito)
     investigacao_rodadas_max: int      # (22/10) rodadas de busca no máximo (antes: até 8, enquanto sobrasse prazo)
     investigacao_ab_veredito: bool     # (22/10) teste A/B: veredito sem raciocínio longo guardado p/ comparar (só GPU)
+    investigacao_veredito_raciocinio: bool   # (22/10) veredito com raciocínio longo na GPU (padrão: não; o revisor tem)
     investigacao_regras_curtas: bool   # (21/10) veredito com a descrição curta das listas (menos leitura; medir antes)
     urlscan_api_key: str               # fase 6: detalhe das varreduras (script que chama o domínio); vazio = só a busca pública
     virustotal_api_key: str            # fase 6: categorias de ~10 fornecedores de segurança; vazio = desligado
@@ -277,6 +278,7 @@ def load_settings() -> Settings:
         # confiança >= 80% até a 2ª rodada e só 1 depois; as outras faziam ~5 rodadas e terminavam sem aplicar
         investigacao_rodadas_max=_int("INVESTIGACAO_RODADAS_MAX", 2),
         investigacao_ab_veredito=_bool(os.environ.get("INVESTIGACAO_AB_VEREDITO"), False),
+        investigacao_veredito_raciocinio=_bool(os.environ.get("INVESTIGACAO_VEREDITO_RACIOCINIO"), False),
         investigacao_regras_curtas=_bool(os.environ.get("INVESTIGACAO_REGRAS_CURTAS"), False),
         urlscan_api_key=os.environ.get("URLSCAN_API_KEY", "").strip(),
         virustotal_api_key=os.environ.get("VIRUSTOTAL_API_KEY", "").strip(),

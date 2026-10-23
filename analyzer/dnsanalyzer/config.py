@@ -124,6 +124,7 @@ class Settings:
     investigacao_tempo_max: int        # s por domínio (rodadas extras só enquanto sobra tempo p/ veredito + revisor)
     investigacao_tempo_max_vm: int     # idem na VM (só CPU: cada pergunta leva minutos)
     investigacao_plano_online: bool    # (21/10) na VM, o plano de cada rodada pelo Gemini (a IA local decide o veredito)
+    investigacao_rodadas_max: int      # (22/10) rodadas de busca no máximo (antes: até 8, enquanto sobrasse prazo)
     investigacao_regras_curtas: bool   # (21/10) veredito com a descrição curta das listas (menos leitura; medir antes)
     urlscan_api_key: str               # fase 6: detalhe das varreduras (script que chama o domínio); vazio = só a busca pública
     virustotal_api_key: str            # fase 6: categorias de ~10 fornecedores de segurança; vazio = desligado
@@ -271,6 +272,9 @@ def load_settings() -> Settings:
         investigacao_tempo_max=_int("INVESTIGACAO_TEMPO_MAX", 600),   # 10 min por domínio (pedido do usuário 29/09)
         investigacao_tempo_max_vm=_int("INVESTIGACAO_TEMPO_MAX_VM", 1200),   # (30/09) na VM, sem GPU
         investigacao_plano_online=_bool(os.environ.get("INVESTIGACAO_PLANO_ONLINE"), True),
+        # (22/10, pedido do usuário: a etapa 2 levava ~7 min) das 68 investigações que aplicaram em 3 dias, 62 já tinham
+        # confiança >= 80% até a 2ª rodada e só 1 depois; as outras faziam ~5 rodadas e terminavam sem aplicar
+        investigacao_rodadas_max=_int("INVESTIGACAO_RODADAS_MAX", 2),
         investigacao_regras_curtas=_bool(os.environ.get("INVESTIGACAO_REGRAS_CURTAS"), False),
         urlscan_api_key=os.environ.get("URLSCAN_API_KEY", "").strip(),
         virustotal_api_key=os.environ.get("VIRUSTOTAL_API_KEY", "").strip(),

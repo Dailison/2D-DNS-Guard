@@ -1683,7 +1683,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
                   + [x["cnpj"] for x in fontes["cnpjs"]])
         etapas.append({"etapa": "irmãos e páginas dos resultados", "segundos": round(time.monotonic() - t0, 1)})
         passo, rodadas = {}, []
-        for rodada in range(1, MAX_RODADAS + 1):   # rodadas de investigação enquanto houver tempo
+        for rodada in range(1, min(MAX_RODADAS, cfg.investigacao_rodadas_max) + 1):   # enquanto houver tempo e até o limite
             if resta() < reserva + custo_rodada:
                 break
             dos.juntar(fontes)

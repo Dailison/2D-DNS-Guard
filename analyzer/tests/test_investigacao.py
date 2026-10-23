@@ -690,3 +690,13 @@ def test_regras_curtas_no_veredito_da_vm(monkeypatch):
         monkeypatch.setattr(inv, "settings", lambda rc=regras_curtas: SimpleNamespace(**{**vars(cfg), "investigacao_regras_curtas": rc}))
         inv._veredito(SimpleNamespace(extra=extra), "dossiê", [{"code": "TRABALHO", "description": "t"}], [])
     assert [curta in p for p in perguntas] == [True, False, False]
+
+
+def test_no_maximo_duas_rodadas(monkeypatch):
+    """22/10 (pedido do usuário: ~7 min por domínio): das que aplicaram em 3 dias, 62 de 68 tinham certeza até a 2ª
+    rodada; as rodadas continuavam enquanto sobrasse prazo (até 8). Agora INVESTIGACAO_RODADAS_MAX (padrão 2)."""
+    nunca = iter([{"hipotese": f"h{i}", "confianca": 0.3, "pronto": False, "buscas": [f"q{i}"], "paginas": [],
+                   "subdominios": [], "cnpjs": []} for i in range(8)])
+    g, _, buscas = _simula(monkeypatch, revisor_ok=True, tempo_max=6000, passos=nunca)
+    planos = [r for r in g["rodadas"] if "hipotese" in r]   # (rodadas guarda também o veredito e a revisão)
+    assert [r["hipotese"] for r in planos] == ["h0", "h1"]

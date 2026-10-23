@@ -812,3 +812,16 @@ def test_veredito_sem_raciocinio_e_revisor_com(monkeypatch):
     chamadas.clear()
     inv._veredito(_Cli(), "dossiê", cats, [])
     assert chamadas == [(True, 1800)]
+
+
+def test_ab_das_regras_compactas_na_cpu(monkeypatch):
+    """23/10: teste A/B na CPU — veredito com as regras de lista compactas (B) antes do normal (A, que decide)."""
+    from dnsanalyzer import listas_ia
+    textos = []
+    ok = {**V_OK, "service": "X", "recognized": True, "classification": "TRABALHO", "category": "outros", "confidence": 0.9,
+          "lista": "wl:erp_gestao", "lista_confianca": 0.9, "motivo": "m", "evidencias": []}
+    monkeypatch.setattr(inv, "_chat", lambda c, m, s, pensar, n: textos.append(m[-1]["content"]) or
+                        (ok, {"segundos": 2, "tokens": 50, "tokens_pergunta": 1200, "leitura_s": 1, "escrita_s": 1}))
+    ab = inv._ab_regras(_Cli(), "dossiê", [{"code": "TRABALHO", "description": "t"}], [])
+    assert ab["B"]["lista"] == "wl:erp_gestao" and ab["B"]["tokens_pergunta"] == 1200
+    assert listas_ia.regras_lista_compacta() in textos[0] and len(listas_ia.regras_lista_compacta()) < 4000

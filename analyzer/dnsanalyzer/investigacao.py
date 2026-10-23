@@ -1498,7 +1498,7 @@ def _revisar(client, texto: str, v: dict) -> tuple[dict, dict]:
 
 
 def _veredito(client, texto: str, cats: list[dict], scats: list[dict], pensar: bool | None = None,
-              n: int | None = None) -> tuple[dict, dict]:
+              n: int | None = None, regras: str | None = None) -> tuple[dict, dict]:
     codigos = listas_ia.codigos_lista()
     schema = {"type": "object", "properties": {
         "service": {"type": "string", "maxLength": 100}, "recognized": {"type": "boolean"},
@@ -1514,7 +1514,7 @@ def _veredito(client, texto: str, cats: list[dict], scats: list[dict], pensar: b
     sc = "\n".join(f"- {c['code']}: {c['label']}" for c in scats)
     curta = settings().investigacao_regras_curtas and not _gpu(client)   # (na GPU a leitura é rápida: regras inteiras)
     pedido = (f"Rodada final. Dê o veredito.\n\nClassificações:\n{cl}\n\nCategorias de site:\n{sc}\n\n"
-              f"{listas_ia.regras_lista(curta)}\n\nEm \"motivo\" (1-3 frases, português) explique quem é o dono/serviço e "
+              f"{regras or listas_ia.regras_lista(curta)}\n\nEm \"motivo\" (1-3 frases, português) explique quem é o dono/serviço e "
               "quais evidências decidiram; em \"evidencias\" os ids usados.")
     msgs = [{"role": "system", "content": SISTEMA}, {"role": "user", "content": texto + "\n\n" + pedido}]
     # (22/10, teste A/B de 30 investigações na GPU) sem o raciocínio longo: mesma lista em 27 de 30 — B concordou com a
@@ -1545,6 +1545,19 @@ def _ab_veredito(client, texto: str, cats: list[dict], scats: list[dict], did: i
     except Exception as e:  # noqa: BLE001 — o teste nunca derruba a investigação
         log.info("A/B do veredito: %s", e)
     return out or None
+
+
+def _ab_regras(client, texto: str, cats: list[dict], scats: list[dict]) -> dict | None:
+    """Teste A/B (23/10, pedido do usuário; INVESTIGACAO_AB_REGRAS, só CPU): o veredito com as regras de lista compactas
+    (B, ~850 tokens em vez de ~3 mil) ANTES do normal — assim os dois aproveitam a leitura do dossiê. Só guarda p/
+    comparar; quem decide é o veredito normal (A)."""
+    try:
+        v, m = _veredito(client, texto, cats, scats, regras=listas_ia.regras_lista_compacta())
+        return {"B": {**{k: v.get(k) for k in _AB_CAMPOS},
+                      **{k: m.get(k) for k in ("segundos", "tokens", "tokens_pergunta", "leitura_s", "escrita_s")}}}
+    except Exception as e:  # noqa: BLE001 — o teste nunca derruba a investigação
+        log.info("A/B das regras: %s", e)
+        return None
 
 
 # ------------------------------------------------------------------ fila e aplicação
@@ -1750,6 +1763,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
             etapas.append({"etapa": f"rodada {rodada}", "segundos": round(time.monotonic() - t0, 1)})
     dos.juntar(fontes)
     ev, texto = dos.ev, dos.texto()
+    ab_regras = _ab_regras(client, texto, cats, scats) if cfg.investigacao_ab_regras and not _gpu(client) else None
     v, meta_v = _veredito(client, texto, cats, scats)
     for k in ("confidence", "lista_confianca"):
         if k in v:
@@ -1777,7 +1791,7 @@ def _investigar(client, cats: list[dict], scats: list[dict], d: dict, dossie: di
               "rodadas": rodadas + [meta_v] + ([meta_r] if meta_r else []),
               "evidencias": ev[len(base):], "antes": {k: d.get(k) for k in ("classification", "category", "lista_ia",
                                                                           "lista_wl", "lista_fonte")},
-              **({"ab_veredito": ab} if ab else {})}
+              **({"ab_veredito": ab} if ab else {}), **({"ab_regras": ab_regras} if ab_regras else {})}
     with db.conn() as c:
         c.execute("UPDATE domains SET investigado_at = now(), investigacao_claimed_at = NULL, investigacao = %s, "
                   "online_pedido_at = CASE WHEN %s THEN now() ELSE online_pedido_at END WHERE id = %s",

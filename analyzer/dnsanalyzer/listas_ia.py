@@ -397,6 +397,24 @@ def regras_lista(curta: bool = False) -> str:
             + "\n\nWhitelists (sites liberados):\n" + "\n".join(f"- {k}: {v}" for k, v in WL.items()))
 
 
+def _rotulo(texto: str, n: int) -> str:
+    t = _curta(texto)
+    return (t[:n - 3] + "...") if len(t) > n else t
+
+
+def regras_lista_compacta() -> str:
+    """Regras de lista em ~3 mil caracteres (~850 tokens; a completa tem ~10 mil, ~3 mil tokens): na CPU o veredito lia
+    ~70-85 s só de regras (23/10, teste A/B INVESTIGACAO_AB_REGRAS). Mantém as regras que mais decidem e um rótulo
+    curto por lista; Ameaças/VPN/DoH/Não identificados com a descrição mais longa (têm ressalvas)."""
+    return ("Lista: diga O QUE O SITE É (lista de bloqueio) ou, se não é de nenhuma, uma whitelist (wl:...). Domínio "
+            "técnico (CDN, API, arquivos, app) de um serviço vai para a lista DO SERVIÇO; CDN genérica sem serviço "
+            "identificado = wl:cdn. A página do próprio site que mostra com clareza o tipo basta para a lista de bloqueio "
+            "(lista_confianca até 0.9); whitelist só com conhecimento, CNPJ, certificado ou busca (página sozinha: até 0.8). "
+            "lista_confianca 1.0 só com certeza; 0.4 ou menos se está chutando.\n"
+            "Listas de bloqueio:\n" + "\n".join(f"- {k}: {_rotulo(v, 110 if k in _DESCRICAO_INTEIRA else 55)}" for k, v in LISTAS_IA.items())
+            + "\n\nWhitelists:\n" + "\n".join(f"- {k}: {_rotulo(v, 45)}" for k, v in WL.items()))
+
+
 def _proximo(fim: tuple | None, alta: bool) -> str:
     """O que aconteceu com a resposta (aplicar): decide / segue p/ a fase N / IA online, com o motivo da trava."""
     if not fim:   # IA online desligada: a certeza da IA local basta

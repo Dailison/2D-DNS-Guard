@@ -128,6 +128,7 @@ class Settings:
     investigacao_rodadas_max_cpu: int  # (23/10) idem nas máquinas só com CPU (VM, OLLAMA_CPU_URLS): cada plano relê o dossiê
     investigacao_fontes_max: int       # (23/10) s de espera pelas fontes de rede da investigação (a que atrasa fica de fora)
     investigacao_ab_veredito: bool     # (22/10) teste A/B: veredito sem raciocínio longo guardado p/ comparar (só GPU)
+    investigacao_ab_regras: bool       # (23/10) teste A/B: veredito com regras de lista compactas guardado p/ comparar (só CPU)
     investigacao_veredito_raciocinio: bool   # (22/10) veredito com raciocínio longo na GPU (padrão: não; o revisor tem)
     investigacao_regras_curtas: bool   # (21/10) veredito com a descrição curta das listas (menos leitura; medir antes)
     urlscan_api_key: str               # fase 6: detalhe das varreduras (script que chama o domínio); vazio = só a busca pública
@@ -287,6 +288,7 @@ def load_settings() -> Settings:
         # em 5 chamadas seriais e o OTX instável); o veredito na GPU leva ~20 s. As buscas têm 60 s a mais (intervalo entre buscas)
         investigacao_fontes_max=_int("INVESTIGACAO_FONTES_MAX", 75),
         investigacao_ab_veredito=_bool(os.environ.get("INVESTIGACAO_AB_VEREDITO"), False),
+        investigacao_ab_regras=_bool(os.environ.get("INVESTIGACAO_AB_REGRAS"), False),
         investigacao_veredito_raciocinio=_bool(os.environ.get("INVESTIGACAO_VEREDITO_RACIOCINIO"), False),
         investigacao_regras_curtas=_bool(os.environ.get("INVESTIGACAO_REGRAS_CURTAS"), False),
         urlscan_api_key=os.environ.get("URLSCAN_API_KEY", "").strip(),

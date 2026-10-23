@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import catalog, controle, db, dnsativo, enrich, listas, listas_ia, online, ti, webintel, whitelist, whois
+from . import catalog, controle, db, dnsativo, enrich, listas, listas_ia, online, paises, ti, webintel, whitelist, whois
 from .config import settings
 from .features import analyze_name
 from .llm import LLMBadOutput, LLMUnavailable, OllamaClient
@@ -183,6 +183,12 @@ def phase_a(limit: int = 2000) -> int:
         for drow in rows:
             dossier = build_dossier(c, drow, with_rdap=False)
             rule = evaluate(dossier)
+            if paises.bloqueado(drow["name"]):   # (22/10, pedido do usuário) China/Rússia: direto p/ a lista, sem IA
+                save(c, drow, dossier, rule, rules_only(rule, False), False, None)
+                paises.aplicar(c, [drow["id"]])
+                tally["China/Rússia (lista, sem IA)"] += 1
+                n += 1
+                continue
             skip_llm = (not rule.needs_llm) or (cfg.llm_skip_hosting_subdomains and dossier.get("private_suffix"))
             # IA só se for necessária E se as evidências relevantes mudaram desde a última IA
             already = drow["classified_by"] == "llm" and drow["evidence_hash"] == rule.evidence_hash
@@ -264,6 +270,7 @@ def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE llm_pending AND NOT locked
+               AND NOT name ~ '\\.(cn|xn--fiqs8s|xn--fiqz9s|ru|su|xn--p1ai)$'   -- (22/10) China/Rússia: só a regra (paises.py)
                AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
                AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
              ORDER BY EXISTS (SELECT 1 FROM classification_history h WHERE h.domain_id = domains.id

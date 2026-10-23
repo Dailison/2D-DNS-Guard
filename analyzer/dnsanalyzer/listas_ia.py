@@ -583,7 +583,7 @@ def ameaca_sem_confirmacao(c, r: dict) -> str | None:
 
 
 # listas que dizem o TIPO do site (o resto é risco, falta de identificação ou arrumação: não classifica ninguém)
-_SEM_CLASSE = {"ameaca", NAO_IDENT, INFRA, OUTROS, PARA_REVISAR, listas.BLACKLIST, listas.DNS_INATIVO}
+_SEM_CLASSE = {"ameaca", NAO_IDENT, INFRA, OUTROS, PARA_REVISAR, listas.BLACKLIST, listas.DNS_INATIVO, listas.CHINA_RUSSIA}
 _SUGERIU = re.compile(r"sugeriu (TRABALHO|NAO_TRABALHO)")
 
 
@@ -697,8 +697,11 @@ def aplicar(c, limite: int = 3000, ids: list[int] | None = None) -> dict:
     # reanálise pedida termina aqui também quando a decisão humana/migração segura a lista (28/09: ~1.100 decididos
     # reanalisados ficavam com reanalise_pedida = true p/ sempre e pareciam "na fila")
     fim_pedida = "UPDATE domains SET revisado_at = now(), reanalise_pedida = false WHERE id = %s AND reanalise_pedida"
+    from . import paises
     for r in rows:
         c.execute("UPDATE domains SET lista_aplicada_at = lista_at WHERE id = %s", (r["id"],))
+        if paises.bloqueado(r["name"]):   # (22/10) China/Rússia: a regra decide, resposta nenhuma da IA muda a lista
+            continue
         cat = r["lista_ia"]
         em = dict(x.split("|", 1) for x in (r["em"] or []))                    # {lista: quem pôs}
         da_ia = {k for k, v in em.items() if v.startswith((AUTO_BY, "bloqueio automático"))}   # postas pela IA

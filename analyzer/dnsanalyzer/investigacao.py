@@ -37,7 +37,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from psycopg.types.json import Jsonb
 
-from . import db, listas_ia, webintel
+from . import db, listas_ia, paises, webintel
 from .llm import maquina as llm_maquina
 from .config import settings
 from .features import analyze_name
@@ -1529,6 +1529,7 @@ _FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "
 # decidido (pela IA ou por pessoa), menos os liberados: na whitelist ou com decisão "liberado" (global ou de empresa).
 # A lista posta por pessoa continua valendo (listas_ia.aplicar: a IA não desfaz a correção humana).
 FILA_SQL = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') AND NOT locked AND NOT llm_pending "
+            "AND NOT " + paises.sql("name") + " "   # (22/10) China/Rússia: só a regra
             "AND (NOT dominio_decidido(id) OR (classification = 'DESCONHECIDO' "
             "     AND NOT EXISTS (SELECT 1 FROM whitelist_domains w WHERE w.domain = domains.name) "
             "     AND NOT EXISTS (SELECT 1 FROM global_reviews g WHERE g.domain_id = domains.id AND g.status = 'allowed') "

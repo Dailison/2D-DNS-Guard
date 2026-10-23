@@ -244,7 +244,7 @@ def grupo_da_rede(cidr, ngm):
 SECOES_LISTA = [
     ("Segurança", [("ameaca", "Ameaças"), ("blacklist", "Blacklist"), ("vpn_proxy", "VPN / Proxy"), ("doh_dns", "DoH / DNS"),
                    ("adware", "Adware / Apps indesejados"), ("nao_identificado", "Não identificados"),
-                   ("dns_inativo", "DNS Inativo")]),
+                   ("dns_inativo", "DNS Inativo"), ("china_russia", "China e Rússia")]),
     ("Conteúdo", [("adulto", "Adulto"), ("apostas", "Apostas"), ("jogos", "Jogos"), ("redes_sociais", "Redes sociais"),
                   ("streaming", "Streaming"), ("mensageiros", "Mensageiros"), ("cripto_trading", "Cripto / Trading")]),
     ("Web", [("publicidade", "Publicidade / Rastreamento"), ("noticias", "Notícias"), ("pirataria", "Pirataria / Downloads")]),

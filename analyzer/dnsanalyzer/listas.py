@@ -32,7 +32,9 @@ CATEGORIAS_MANUAIS = ("infra_bloqueio", "outros_bloqueios", "para_revisar")
 BLACKLIST = "blacklist"
 # DNS Inativo (01/10): domínio que não resolve (dnsativo.py) — teste de DNS na etapa 1, sem IA
 DNS_INATIVO = "dns_inativo"
-CATEGORIAS_VERIFICACAO = (BLACKLIST, DNS_INATIVO)
+# China e Rússia (22/10, pedido do usuário): domínio de país .cn/.ru/.su/.рф, direto pela regra (paises.py), sem IA
+CHINA_RUSSIA = "china_russia"
+CATEGORIAS_VERIFICACAO = (BLACKLIST, DNS_INATIVO, CHINA_RUSSIA)
 CATEGORIAS = CATEGORIAS_RISCO + CATEGORIAS_CURADAS + CATEGORIAS_VERIFICACAO + CATEGORIAS_MANUAIS
 AUTO_BY = "bloqueio automático"
 

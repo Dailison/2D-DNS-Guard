@@ -533,3 +533,46 @@ def test_cloudfunctions_vai_para_a_whitelist_sem_ia(api):
     assert wl == {"us-central1-loja-ab12.cloudfunctions.net": "infraestrutura"}, wl
     assert bl == {"us-central1-jogo-prod.cloudfunctions.net": "jogos"}, bl
     assert d["lista_fonte"] == "catalogo" and d["lista_conf"] == 1.0 and d["lista_wl"] == "infraestrutura", d
+
+
+def test_china_e_russia_direto_para_a_lista_sem_ia(api):
+    """22/10 (pedido do usuário): domínio da China/Rússia (.cn, .ru, .su, .рф) vai direto p/ a lista "China e Rússia" na
+    fase A e nenhuma etapa da IA pega; os já vistos migram (saem das listas e whitelists automáticas; pessoa fica)."""
+    from dnsanalyzer import classifier, db, investigacao, listas_ia, online, paises
+    with db.conn() as c:
+        novo = c.execute("INSERT INTO domains (name, kind, needs_analysis, total_queries) VALUES ('loja-nova.com.cn', 'public', true, 5) "
+                         "RETURNING id").fetchone()["id"]
+        velho = c.execute("INSERT INTO domains (name, kind, classification, classified_by, total_queries, analyzed_at) "
+                          "VALUES ('servico-velho.ru', 'public', 'TRABALHO', 'llm', 9, now()) RETURNING id").fetchone()["id"]
+        pessoa = c.execute("INSERT INTO domains (name, kind, classification, total_queries, analyzed_at) "
+                           "VALUES ('liberado-pessoa.su', 'public', 'TRABALHO', 3, now()) RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('streaming', 'servico-velho.ru', 'IA automática (streaming)')")
+        c.execute("INSERT INTO whitelist_domains (category, domain, added_by, publicar) VALUES ('infraestrutura', 'servico-velho.ru', 'IA online', true), "
+                  "('infraestrutura', 'liberado-pessoa.su', 'op@2d', true)")
+        c.execute("INSERT INTO category_lists (category, domain, added_by) VALUES ('dns_inativo', 'sumiu.cn', 'regras (DNS inativo)'), "
+                  "('ameaca', 'ruim.ru', 'op@2d')")
+    classifier.phase_a()
+    with db.conn() as c:
+        assert paises.migrar(c) == 3
+        d = {r["name"]: r for r in c.execute("SELECT * FROM domains WHERE id = ANY(%s)", ([novo, velho, pessoa],))}
+        em = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain = ANY(%s)",
+                                                               (list(d),))}
+        wl = {r["domain"] for r in c.execute("SELECT domain FROM whitelist_domains WHERE domain = ANY(%s)", (list(d),))}
+        assert not d["loja-nova.com.cn"]["llm_pending"] and d["loja-nova.com.cn"]["classification"] == "NAO_TRABALHO"
+        assert {("china_russia", n) for n in d} <= em and ("streaming", "servico-velho.ru") not in em
+        assert wl == {"liberado-pessoa.su"}, "a liberação de pessoa fica (vence no DNS)"
+        fora = {(r["category"], r["domain"]) for r in c.execute("SELECT category, domain FROM category_lists WHERE domain IN ('sumiu.cn', 'ruim.ru')")}
+        assert fora == {("china_russia", "sumiu.cn"), ("china_russia", "ruim.ru"), ("ameaca", "ruim.ru")}, fora
+        assert c.execute("SELECT status FROM global_reviews WHERE domain_id = %s", (velho,)).fetchone()["status"] == "blocked"
+        # resposta nova da IA (ex.: em voo) não muda a lista
+        c.execute("UPDATE domains SET lista_ia = 'compras', lista_fonte = 'online:gemini', lista_conf = 0.9, lista_at = now() + interval '1 second' "
+                  "WHERE id = %s", (velho,))
+        listas_ia.aplicar(c, ids=[velho])
+        assert not c.execute("SELECT 1 FROM category_lists WHERE domain = 'servico-velho.ru' AND category = 'compras'").fetchone()
+        c.execute("UPDATE domains SET classification = 'DESCONHECIDO', web_search_at = now(), online_at = NULL WHERE id = %s", (velho,))
+        assert not c.execute("SELECT 1 FROM domains d WHERE d.id = %s AND " + online._FILA, (velho,)).fetchone()
+        assert not c.execute("SELECT 1 FROM domains WHERE id = %(i)s AND " + investigacao.FILA_SQL, {"i": velho, "dias": 14}).fetchone()
+        c.execute("DELETE FROM global_reviews WHERE domain_id = ANY(%s)", ([novo, velho, pessoa],))
+        c.execute("DELETE FROM category_lists WHERE domain = ANY(%s)", (list(d) + ["sumiu.cn", "ruim.ru"],))
+        c.execute("DELETE FROM whitelist_domains WHERE domain = ANY(%s)", (list(d),))
+        c.execute("DELETE FROM domains WHERE id = ANY(%s)", ([novo, velho, pessoa],))

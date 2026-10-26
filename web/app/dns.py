@@ -1117,6 +1117,38 @@ def empresa_politica(tid):
         return _json(False, f"Falha: {e}")
 
 
+@admin_bp.post("/empresas/<int:tid>/horarios")
+@login_required
+def empresa_horario_add(tid):
+    """Horário livre da empresa ou de uma unidade (26/10): nos dias e horas, as listas escolhidas não bloqueiam."""
+    from app import politicas as pol
+    d = request.get_json(silent=True) or {}
+    unidade = (d.get("unidade") or "").strip()
+    scope = f"unit:{tid}:{unidade}" if unidade else f"tenant:{tid}"
+    try:
+        api.post("/horarios", {"scope": scope, "dias": [int(x) for x in d.get("dias") or []], "inicio": d.get("inicio") or "",
+                               "fim": d.get("fim") or "", "listas": d.get("listas") or [], "by": admin_atual().email})
+        pol.sincronizar()   # se o horário já está em vigor, vale agora
+        current_app.logger.info("DNS: %s: horário livre %s %s %s-%s %s", admin_atual().email, scope, d.get("dias"),
+                                d.get("inicio"), d.get("fim"), d.get("listas"))
+        return _json(True, "Horário salvo (vale no DNS em até 2 min dentro do horário).")
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
+@admin_bp.post("/empresas/<int:tid>/horarios/<int:hid>/remover")
+@login_required
+def empresa_horario_rem(tid, hid):
+    from app import politicas as pol
+    try:
+        api.delete(f"/horarios/{hid}")
+        pol.sincronizar()
+        current_app.logger.info("DNS: %s: horário livre %d removido (empresa %d)", admin_atual().email, hid, tid)
+        return _json(True, "Horário removido.")
+    except Exception as e:  # noqa: BLE001
+        return _json(False, f"Falha: {e}")
+
+
 @admin_bp.post("/listas-categoria/empresas")
 @login_required
 def lista_empresas():

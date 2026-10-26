@@ -42,4 +42,6 @@ def create_app(config_object=Config) -> Flask:
     def health():
         return jsonify(status="ok")
 
+    from app.horarios import iniciar_agendador   # (26/10) horários livres: vira sozinho no começo/fim de cada horário
+    iniciar_agendador(app)
     return app

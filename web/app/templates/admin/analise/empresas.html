@@ -92,6 +92,7 @@
           {% if p.blocked %}<div class="t-er" style="font-size:.75rem;margin-top:.15rem">bloqueia também: {% for s in p.blocked %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
           {% if p.services %}<div class="t-ok" style="font-size:.75rem;margin-top:.15rem">libera: {% for s in p.services %}{{ nomes_srv.get(s, s) }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
           {% if p.unidades %}<div style="font-size:.75rem;color:var(--mut);margin-top:.15rem">exceção: {{ p.unidades.keys()|join(', ') }}</div>{% endif %}
+          {% set hs = (horarios or {}).get('tenant:%d' % t.id, []) %}{% if hs %}<div style="font-size:.75rem;margin-top:.15rem" title="{% for h in hs %}{{ h.inicio }}–{{ h.fim }}: {% for x in h.listas %}{{ dict(cats).get(x, x) }}{{ ', ' if not loop.last }}{% endfor %}{{ ' | ' if not loop.last }}{% endfor %}"><i class="bi bi-clock"></i> {% for h in hs %}{{ h.inicio }}–{{ h.fim }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
           <div><button type="button" class="btn mini" style="margin-top:.25rem" data-pol='{{ {"tid": t.id, "nome": t.name, "unidades": t.networks|map(attribute="unit")|select|unique|list, "pol": p}|tojson }}' onclick="abrirPolitica(this)">Listas…</button></div>
         </td>
         <td class="num">{{ t.clients }}</td>
@@ -164,6 +165,20 @@ II 10.52.0.0/16"></textarea>
     <button type="button" onclick="document.getElementById('dlgPol').close()"><i class="bi bi-x-lg"></i>Cancelar</button>
     <button type="button" class="primary" id="pSalvar"><i class="bi bi-check-lg"></i>Salvar e aplicar</button>
   </div>
+  <details id="hBox" style="margin-top:.7rem;border-top:1px solid var(--bd);padding-top:.4rem">
+    <summary style="cursor:pointer;font-weight:600" title="Nos dias e horas escolhidos, as listas marcadas não bloqueiam (ex.: redes sociais no almoço). A unidade sem horários próprios segue os da empresa. Ameaças, Blacklist e VPN/Proxy não entram.">
+      <i class="bi bi-clock"></i> Horários livres <span id="hCont" class="mut" style="font-weight:400"></span></summary>
+    <div id="hLista" style="margin:.4rem 0"></div>
+    <div class="row" style="align-items:flex-end;margin:.2rem 0">
+      <div><label>Dias</label><div style="display:flex;gap:.4rem;flex-wrap:wrap">{% for n, rot in dias_semana or [] %}<label class="chk" style="margin:0;font-weight:400"><input type="checkbox" class="hDia" value="{{ n }}" {{ 'checked' if 1 <= n <= 5 }}> <span>{{ rot }}</span></label>{% endfor %}</div></div>
+      <div style="flex:0"><label>Início</label><input type="time" id="hIni" value="12:00"></div>
+      <div style="flex:0"><label>Fim</label><input type="time" id="hFim" value="13:00"></div>
+    </div>
+    <div style="max-height:30vh;overflow:auto">{{ caixas("hListas", 'class="hLista"', ['para_revisar'] + (listas_travadas or [])) }}</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:.4rem">
+      <button type="button" id="hAdd"><i class="bi bi-plus-lg"></i>Adicionar horário</button>
+    </div>
+  </details>
 </dialog>
 <script>
 (function () {
@@ -176,7 +191,53 @@ II 10.52.0.0/16"></textarea>
     dlg.querySelectorAll(".pLista").forEach(i => i.checked = (p.lists || []).includes(i.value));
     dlg.querySelectorAll(".pAvulsa").forEach(i => i.checked = (p.services || []).includes(i.value));
   }
+  const HORARIOS = {{ (horarios or {})|tojson }}, NOMES = {{ dict(cats)|tojson }}, DIAS = {{ (dias_semana or [])|tojson }};
+  const URL_H = {{ url_for('admin.empresa_horario_add', tid=0)|tojson }};
+  function escopoH() { return esc.value ? "unit:" + atual.tid + ":" + esc.value : "tenant:" + atual.tid; }
+  function dias(ds) {
+    const n = DIAS.filter(d => ds.includes(d[0])).map(d => d[1]);
+    return n.length === 7 ? "todos os dias" : n.join(", ");
+  }
+  function horarios() {   // os do escopo escolhido; unidade sem horários próprios mostra os da empresa (só leitura)
+    const box = document.getElementById("hLista"), sc = escopoH(), proprios = HORARIOS[sc] || [];
+    const herdados = esc.value && !proprios.length ? (HORARIOS["tenant:" + atual.tid] || []) : [];
+    box.textContent = "";
+    document.getElementById("hCont").textContent = proprios.length ? "(" + proprios.length + ")" : (herdados.length ? "(da empresa)" : "");
+    (proprios.length ? proprios : herdados).forEach(h => {
+      const d = document.createElement("div"); d.style.cssText = "display:flex;gap:.4rem;align-items:center;margin:.15rem 0;font-size:.88rem";
+      const t = document.createElement("span");
+      t.textContent = dias(h.dias) + " · " + h.inicio + "–" + h.fim + " · " + h.listas.map(x => NOMES[x] || x).join(", ");
+      if (!proprios.length) t.className = "mut";
+      d.appendChild(t);
+      if (proprios.length) {
+        const b = document.createElement("button"); b.type = "button"; b.className = "mini danger"; b.title = "Remover este horário";
+        b.innerHTML = '<i class="bi bi-trash"></i>';
+        b.onclick = async () => {
+          if (!confirm("Remover este horário livre?")) return;
+          const r = await fetch(URL_H.replace("/0/", "/" + atual.tid + "/") + "/" + h.id + "/remover", {method: "POST", credentials: "same-origin",
+            headers: {"X-Requested-With": "fetch"}});
+          const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+        };
+        d.appendChild(b);
+      }
+      box.appendChild(d);
+    });
+  }
+  document.getElementById("hAdd").addEventListener("click", async (ev) => {
+    const body = {unidade: esc.value, dias: [...dlg.querySelectorAll(".hDia:checked")].map(i => +i.value),
+      inicio: document.getElementById("hIni").value, fim: document.getElementById("hFim").value,
+      listas: [...dlg.querySelectorAll(".hLista:checked")].map(i => i.value)};
+    if (!body.dias.length || !body.listas.length || !body.inicio || !body.fim) { alert("Escolha dias, horário e ao menos uma lista."); return; }
+    ev.target.disabled = true;
+    try {
+      const r = await fetch(URL_H.replace("/0/", "/" + atual.tid + "/"), {method: "POST", credentials: "same-origin",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "fetch"}, body: JSON.stringify(body)});
+      const j = await r.json(); alert(j.msg); if (j.ok) location.reload();
+    } catch (e) { alert("Falha ao salvar (sessão expirou?)"); }
+    ev.target.disabled = false;
+  });
   function mostra() {
+    horarios();
     const u = esc.value, pu = (atual.pol.unidades || {})[u];
     herdarBox.style.display = u ? "" : "none";
     herdar.checked = u ? !pu : false;

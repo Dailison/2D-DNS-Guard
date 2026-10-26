@@ -643,14 +643,18 @@ def clientes():  # nome antigo
 def empresas():
     from app import politicas as pol
     ctx = _ctx()
-    resumo, default = {}, {}
+    from app import horarios as hz
+    resumo, default, horarios = {}, {}, {}
     try:
         por = pol.por_escopo()
         resumo = pol.resumo_empresas([t for t in ctx["tenants"] if not t.get("auto_created")], por)
         default = por.get("default") or {}
+        for h in hz.lista():   # (26/10) horários livres por escopo (empresa/unidade)
+            horarios.setdefault(h["scope"], []).append({k: h[k] for k in ("id", "dias", "inicio", "fim", "listas")})
     except AnalyzerError as e:
         flash(f"Não foi possível carregar as políticas: {e}", "erro")
     return render_template("admin/analise/empresas.html", aba="empresas", pol=resumo, pol_default=default,
+                           horarios=horarios, dias_semana=hz.DIAS, listas_travadas=list(hz.TRAVADAS),
                            cats=dnslib.CATEGORIAS_LISTA, cats_risco=sorted(dnslib.CATEGORIAS_RISCO),
                            pacotes=_listas_liberacao(), **ctx)
 

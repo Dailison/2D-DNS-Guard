@@ -744,3 +744,25 @@ def test_evento_guarda_quem_analisou(api):
     classifier.event("llm_done", "quem-analisou.com", None, "TRABALHO", seconds=12.0, detail="reforço (CPU)", maquina="10.9.10.10")
     ev = next(e for e in api.get("/ai/events", headers=H).json()["events"] if e["name"] == "quem-analisou.com")
     assert ev["maquina"] == "10.9.10.10"
+
+
+def test_horarios_livres_e_virada(api):
+    """26/10 (pedido do usuário): horários livres por empresa/unidade; listas de segurança não entram; a virada só vale
+    p/ o primeiro processo que trouxer uma chave diferente."""
+    r = api.post("/horarios", headers=H, json={"scope": "tenant:1", "dias": [1, 2, 3, 4, 5, 9], "inicio": "12:00", "fim": "13:00",
+                                              "listas": ["redes_sociais", "streaming"], "by": "ti@2d"})
+    assert r.status_code == 200
+    hid = r.json()["id"]
+    assert api.post("/horarios", headers=H, json={"scope": "tenant:1", "dias": [1], "inicio": "12:00", "fim": "13:00",
+                                                  "listas": ["ameaca"]}).status_code == 400, "segurança fica travada"
+    assert api.post("/horarios", headers=H, json={"scope": "tenant:1", "dias": [1], "inicio": "25:00", "fim": "13:00",
+                                                  "listas": ["jogos"]}).status_code == 400
+    assert api.post("/horarios", headers=H, json={"scope": "default", "dias": [1], "inicio": "12:00", "fim": "13:00",
+                                                  "listas": ["jogos"]}).status_code == 400
+    h = next(x for x in api.get("/horarios", headers=H).json() if x["id"] == hid)
+    assert h["dias"] == [1, 2, 3, 4, 5] and (h["inicio"], h["fim"]) == ("12:00", "13:00") and h["listas"] == ["redes_sociais", "streaming"]
+    api.delete("/horarios/virada", headers=H)
+    assert api.post("/horarios/virada", headers=H, json={"chave": "tenant:1=redes_sociais"}).json()["mudou"] is True
+    assert api.post("/horarios/virada", headers=H, json={"chave": "tenant:1=redes_sociais"}).json()["mudou"] is False, "o 2º processo não"
+    assert api.post("/horarios/virada", headers=H, json={"chave": ""}).json()["mudou"] is True
+    assert api.delete(f"/horarios/{hid}", headers=H).status_code == 200 and api.delete(f"/horarios/{hid}", headers=H).status_code == 404

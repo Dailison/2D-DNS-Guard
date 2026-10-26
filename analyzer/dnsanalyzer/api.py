@@ -2585,6 +2585,85 @@ def policy_delete(scope: str):
     return {"ok": True}
 
 
+# ------------------------------------------------------------------ horários livres (26/10)
+# nunca liberadas num horário livre: segurança, não conteúdo
+LISTAS_TRAVADAS = ("ameaca", "blacklist", "vpn_proxy")
+
+
+class HorarioIn(BaseModel):
+    scope: str
+    dias: list[int]
+    inicio: str          # "HH:MM"
+    fim: str
+    listas: list[str]
+    by: str = ""
+
+
+@app.get("/horarios", dependencies=[Depends(auth)])
+def horarios_list():
+    with db.conn() as c:
+        return c.execute("SELECT id, scope, dias, to_char(inicio, 'HH24:MI') AS inicio, to_char(fim, 'HH24:MI') AS fim, "
+                         "listas, criado_por, criado_em FROM horarios_livres ORDER BY scope, inicio, id").fetchall()
+
+
+@app.post("/horarios", dependencies=[Depends(auth)])
+def horario_add(body: HorarioIn):
+    """Horário livre de uma empresa/unidade: nos dias e horas, as listas escolhidas não bloqueiam."""
+    import re
+    if body.scope == "default" or not _scope_ok(body.scope):
+        raise HTTPException(400, "escopo inválido")
+    dias = sorted({d for d in body.dias if 0 <= d <= 6})
+    if not dias:
+        raise HTTPException(400, "escolha ao menos um dia")
+    if not all(re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", x or "") for x in (body.inicio, body.fim)) or body.inicio == body.fim:
+        raise HTTPException(400, "horário inválido (HH:MM, início diferente do fim)")
+    ls = sorted(set(body.listas))
+    if not ls:
+        raise HTTPException(400, "escolha ao menos uma lista")
+    ruins = [x for x in ls if x not in listas.CATEGORIAS]
+    if ruins:
+        raise HTTPException(400, f"lista desconhecida: {', '.join(ruins)}")
+    travadas = [x for x in ls if x in LISTAS_TRAVADAS]
+    if travadas:
+        raise HTTPException(400, f"lista de segurança não pode ser liberada por horário: {', '.join(travadas)}")
+    with db.conn() as c:
+        r = c.execute("INSERT INTO horarios_livres (scope, dias, inicio, fim, listas, criado_por) VALUES (%s,%s,%s,%s,%s,%s) "
+                      "RETURNING id", (body.scope, dias, body.inicio, body.fim, ls, body.by or None)).fetchone()
+    return {"ok": True, "id": r["id"]}
+
+
+@app.delete("/horarios/{hid}", dependencies=[Depends(auth)])
+def horario_del(hid: int):
+    with db.conn() as c:
+        n = c.execute("DELETE FROM horarios_livres WHERE id=%s", (hid,)).rowcount
+    if not n:
+        raise HTTPException(404, "horário não encontrado")
+    return {"ok": True}
+
+
+class ViradaIn(BaseModel):
+    chave: str
+
+
+@app.post("/horarios/virada", dependencies=[Depends(auth)])
+def horario_virada(body: ViradaIn):
+    """O agendador do console (um por processo) manda a chave dos horários em vigor a cada minuto: só o PRIMEIRO que
+    trouxer uma chave diferente da guardada recebe mudou=true e sincroniza o Technitium (gravação atômica)."""
+    with db.conn() as c:
+        r = c.execute("INSERT INTO ingest_state (key, value) VALUES ('horarios_vigentes', %s) "
+                      "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now() "
+                      "WHERE ingest_state.value IS DISTINCT FROM EXCLUDED.value RETURNING key", (body.chave,)).fetchone()
+    return {"mudou": bool(r)}
+
+
+@app.delete("/horarios/virada", dependencies=[Depends(auth)])
+def horario_virada_reset():
+    """A sincronização da virada falhou: esquece a chave p/ o próximo minuto tentar de novo."""
+    with db.conn() as c:
+        c.execute("DELETE FROM ingest_state WHERE key = 'horarios_vigentes'")
+    return {"ok": True}
+
+
 @app.get("/auto-block/candidates", dependencies=[Depends(auth)])
 def auto_block_candidates(limit: int = Query(300, le=2000)):
     """O que o bloqueio automático vai colocar nas listas no próximo ciclo."""

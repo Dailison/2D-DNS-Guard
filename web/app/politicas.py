@@ -52,7 +52,13 @@ def sincronizar() -> dict:
         ajustes = list((api.get("/ajustes").get("escopos") or {}))
     except Exception:  # noqa: BLE001 — analisador antigo: sem ajustes
         ajustes = []
-    r = dnslib.sincronizar_politicas(empresas, lista(), por=por, ajustes=ajustes, ips=ips_servicos(),
+    from app import horarios as hz
+    try:   # (26/10) horários livres em vigor: as listas liberadas saem da política do escopo enquanto durar
+        politicas = hz.vigentes(empresas, lista(), hz.lista(), dnslib.agora_local())
+    except Exception:  # noqa: BLE001 — sem a relação de horários, aplica as políticas como estão
+        current_app.logger.exception("horários livres: não consegui ler; políticas sem horário")
+        politicas = lista()
+    r = dnslib.sincronizar_politicas(empresas, politicas, por=por, ajustes=ajustes, ips=ips_servicos(),
                                      parciais=liberados_parciais())
     current_app.logger.info("políticas -> Technitium: criados %s, apagados %s, %d rede(s)",
                             r["criados"], r["apagados"], r["redes"])

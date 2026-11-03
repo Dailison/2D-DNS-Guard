@@ -25,6 +25,9 @@ auditoria ficam no PostgreSQL do analisador, acessados pela API. **Só o console
 Technitium**: a configuração do Advanced Blocking e os `allowed` de exceção imediata.
 O analisador apenas publica as listas em texto, e o Technitium as baixa.
 
+Migração dos clientes para o hub WireGuard na VPS (túnel, rotas e DNS com failover): ver
+[docs/MIGRACAO-HUB-VPS.md](docs/MIGRACAO-HUB-VPS.md).
+
 **Réplicas (Technitium Cloud).** Cada Technitium em `TECHNITIUM_REPLICAS` (hoje o Cloud na VPS,
 `http://10.250.100.1:5380`) recebe a mesma configuração do Advanced Blocking do principal: logo
 depois de cada gravação e, a cada minuto, quando a dele estiver diferente (réplica que estava fora do

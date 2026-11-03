@@ -52,6 +52,16 @@ são feitas pelo console ou pelo Technitium local: o console reenvia a configura
    - **domínio AD local**, como `gd.local` ou `moderna.local`: precisa de encaminhamento FWD para o DC (Fase 5).
 5. **DNS Guard:** conferir se a rede `10.N.0.0/16` está cadastrada numa empresa no console. Sem cadastro, o
    cliente cai no grupo `default`.
+6. **Sites da mesma empresa que conversam entre si** (rota para a rede do outro site pelo túnel antigo, como
+   Economize ↔ Ice Beer): liberar o par na VPS e **migrar os sites na mesma janela**. Com só um deles na VPS, o
+   tráfego entre eles quebra no meio (o escritório não pode repassar origem de outro site para a VPS).
+   ```bash
+   # na VPS, em /etc/nftables/vpn.nft, set pares_sites (os dois sentidos):
+   #   elements = { 10.33.0.0/16 . 10.34.0.0/16, 10.34.0.0/16 . 10.33.0.0/16 }
+   nft -c -f /etc/nftables/vpn.nft && nft -f /etc/nftables/vpn.nft
+   ```
+   No túnel novo do site, o `allowed-address` do peer `VPS-2D` inclui a rede do outro site, e a Fase 3 cria
+   também a rota para ela.
 
 ## Fase 1: VPS (preparação)
 
@@ -95,6 +105,15 @@ Sem o ASN cadastrado, o WireGuard do cliente é barrado (e registrado como `wg-b
 Faça os dois lados um logo depois do outro. Com um lado só trocado, o tráfego fica assimétrico e a VPS
 descarta as respostas (`ct state invalid`).
 
+**Ordem e acesso:**
+1. Trocar primeiro o escritório.
+2. Depois, os sites, pelo **IP do túnel antigo** (`10.100.100.N`). Com o escritório já trocado, o IP da LAN do
+   site fica assimétrico até o site trocar, e o SSH por ele não abre.
+3. A sessão SSH cai logo depois de o comando de troca ser executado no site (as respostas passam a sair pelo
+   túnel novo). Por isso, rode cada troca com `timeout` (ex.: `timeout 15 ssh ...`), para uma sessão presa não
+   travar a próxima troca.
+4. Depois, acessar o site pelo IP da LAN.
+
 1. **Roteador do cliente:**
    ```
    /ip firewall nat add chain=srcnat out-interface=wg-vps-2d action=accept comment="hub novo: sem NAT no tunel da VPS" place-before=0
@@ -132,6 +151,17 @@ antigo.
 
 ## Fase 5: DNS (padrão)
 
+**Site que já tem as regras `FORCE_*` do escritório** (Economize, Ice Beer): não crie regras novas. Nas
+existentes:
+- aponte para `10.250.100.1` e acrescente ` (dns-failover)` ao comentário;
+- nas `FORCE_DNS_UDP`/`TCP`, tire a exceção de destino (`!dst-address-list`) e mantenha a de origem;
+- acrescente `10.250.100.1` à lista `INTERNAL_DNS`;
+- confira a porta do `FORCE_DOH` (no Ice Beer estava 8082 em vez de 443);
+- se houver um failover antigo (netwatch por ping que liga e desliga as regras `FORCE_`), **desligue-o** antes:
+  ele mexeria nas regras novas também.
+
+Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
+
 1. **Listas de endereços:**
    ```
    :foreach a in={"8.8.8.8";"8.8.4.4";"1.1.1.1";"1.0.0.1";"9.9.9.9";"149.112.112.112";"208.67.222.222";"208.67.220.220";"94.140.14.14";"94.140.15.15";"45.90.28.0/24"} do={ /ip firewall address-list add list=PUBLIC_DNS address=$a }
@@ -153,6 +183,9 @@ antigo.
    - **Os dois Technitium fora:** troca também o `/ip dns servers` para `8.8.8.8,1.1.1.1`, e volta depois.
    - **Permissões:** `policy=read,write,test dont-require-permissions=yes`. Sem isso, o netwatch não consegue
      rodar o script e falha em silêncio.
+   - **Variáveis escapadas:** no comando abaixo, cada variável vai como `\$c`, `\$alvo`... Sem a barra, o
+     RouterOS troca a variável por vazio ao gravar, e o script dá `syntax error` ao rodar. Confira depois com
+     `/system script run dns-failover`.
    ```
    /system script add name=dns-failover policy=read,write,test dont-require-permissions=yes comment="DNS: Technitium Cloud > Technitium local > 8.8.8.8 > 1.1.1.1" source=":local c [/tool netwatch get [find comment=\"dns-cloud\"] status]; :local l [/tool netwatch get [find comment=\"dns-local\"] status]; :local p [/tool netwatch get [find comment=\"dns-publico\"] status]; :local alvo \"1.1.1.1\"; :local srv \"8.8.8.8,1.1.1.1\"; :if (\$c = \"up\") do={ :set alvo \"10.250.100.1\"; :set srv \"10.250.100.1,10.100.10.15\" } else={ :if (\$l = \"up\") do={ :set alvo \"10.100.10.15\"; :set srv \"10.250.100.1,10.100.10.15\" } else={ :if (\$p = \"up\") do={ :set alvo \"8.8.8.8\" } } }; :if ([:tostr [/ip dns get servers]] != [:tostr [:toarray \$srv]]) do={ /ip dns set servers=\$srv; /log warning (\"dns-failover: /ip dns servers=\" . \$srv) }; :local r [/ip firewall nat find comment~\"(dns-failover)\"]; :if ([:len \$r] = 0) do={ :return \"\" }; :local atual [/ip firewall nat get [:pick \$r 0] to-addresses]; :local off [/ip firewall nat get [:pick \$r 0] disabled]; :if (\$off or \$atual != \$alvo) do={ /ip firewall nat set \$r to-addresses=\$alvo disabled=no; /log warning (\"dns-failover: clientes no DNS \" . \$alvo) }"
    ```
@@ -207,6 +240,11 @@ antigo.
 | DHCP entregando o roteador com `allow-remote-requests` desligado: sem internet | DHCP com `dns-server` vazio |
 | `FORCE_DNS` com exceção `INTERNAL_DNS`: sem failover para quem consulta o Technitium direto | Sem a exceção nos sites |
 | Usuário `claude` no grupo `write`: `/export file=` sem permissão | Exportar pela tela (`/export terse`) e salvar no PC |
+| Ping vindo do túnel barrado na VPS: o `check-gateway=ping` das rotas novas falha | A VPS aceita `icmp echo-request` do `wg0` (já liberado) |
+| Troca de rota disparada e a sessão SSH presa, sem a troca seguinte | `timeout` em cada SSH; sites pelo IP do túnel antigo (Fase 3) |
+| Script gravado sem `\$`: `syntax error` e failover parado | Escapar as variáveis; rodar o script uma vez para conferir |
+| Sites da mesma empresa migrados em janelas diferentes: o tráfego entre eles quebra | Par em `pares_sites` e migração na mesma janela |
+| Failover antigo (netwatch por ping) mexendo nas regras `FORCE_` novas | Desligar o netwatch antigo antes do novo |
 
 ## Pendências antes dos próximos clientes
 
@@ -225,3 +263,5 @@ antigo.
 |---|---|---|---|---|
 | Escritório 2D (2DRTR001) | 100 | 03/11/2026 | AS264512 | só a faixa do túnel e as rotas dos sites migrados |
 | AgenciaCanaa (AGCRTR001) | 39 | 03/11/2026 | AS264525 Coelho Tecnologia | DNS no padrão; usuário `claude` no grupo `write` |
+| Economize (EMZRTR001) | 33 | 03/11/2026 | AS264512 | par com o Ice Beer; já tinha `FORCE_*`; tem VPN própria de usuários (`wg-VPN`, `10.33.50.x`); rota antiga do galpão (`10.22.0.0/16`) ficou no túnel antigo |
+| Economize - Ice Beer (EMZRTR003) | 34 | 03/11/2026 | AS264512 (CGNAT) | par com o Economize; `FORCE_DOH` corrigido (8082 → 443); netwatch antigo desligado |

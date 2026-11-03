@@ -8,13 +8,17 @@ de volta — nunca tocamos nos `groups`.
 """
 import ipaddress
 import json
+import logging
 import re
+import threading
+import time
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app
 
+log = logging.getLogger(__name__)
 APP_NAME = "Advanced Blocking"
 
 # Valores aceitos pelo filtro `responseType` do app Query Logs (Sqlite) do
@@ -87,25 +91,26 @@ def _grupo():
     return current_app.config.get("TECHNITIUM_LIBERADOS_GROUP") or "Liberados"
 
 
-def _api_get(path, timeout=15):
-    sep = "&" if "?" in path else "?"
-    url = f"{_base()}/api/{path}{sep}token={urllib.parse.quote(_token())}"
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        d = json.loads(r.read().decode())
-    if d.get("status") != "ok":
-        raise RuntimeError(d.get("errorMessage") or f"Technitium status={d.get('status')}")
-    return d.get("response", {})
-
-
-def _api_post(path, data, timeout=25):
-    data = {"token": _token(), **data}
-    body = urllib.parse.urlencode(data).encode()
-    req = urllib.request.Request(f"{_base()}/api/{path}", data=body)
+def _chamar(base, token, path, data=None, timeout=15):
+    """Chama a API de um Technitium: GET com o token na URL (data=None) ou POST com o token no corpo."""
+    if data is None:
+        sep = "&" if "?" in path else "?"
+        req = f"{base}/api/{path}{sep}token={urllib.parse.quote(token)}"
+    else:
+        req = urllib.request.Request(f"{base}/api/{path}", data=urllib.parse.urlencode({"token": token, **data}).encode())
     with urllib.request.urlopen(req, timeout=timeout) as r:
         d = json.loads(r.read().decode())
     if d.get("status") != "ok":
         raise RuntimeError(d.get("errorMessage") or f"Technitium status={d.get('status')}")
     return d.get("response", {})
+
+
+def _api_get(path, timeout=15):
+    return _chamar(_base(), _token(), path, timeout=timeout)
+
+
+def _api_post(path, data, timeout=25):
+    return _chamar(_base(), _token(), path, data, timeout=timeout)
 
 
 def _get_config():
@@ -128,6 +133,72 @@ def _set_config(cfg, por="console", motivo="", anterior=None):
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"não foi possível guardar o backup do Technitium ({e}); nada foi gravado") from e
     _api_post("apps/config/set", {"name": APP_NAME, "config": json.dumps(cfg)})
+    alvos = _alvos_replicas()
+    if alvos:   # o principal já gravou: as réplicas recebem a mesma config sem atrasar a tela
+        _em_segundo_plano(_espelhar, alvos, json.dumps(cfg), False)
+
+
+# ---- Réplicas (03/11: Technitium Cloud na VPS) -------------------------------------------------------------
+# Cada réplica recebe a MESMA config do Advanced Blocking do principal: logo depois de cada gravação e, a cada
+# ESPELHO_INTERVALO_S, quando a dela estiver diferente (réplica que estava fora do ar ou mudança feita direto no
+# painel do principal). Falha numa réplica nunca falha a gravação no principal — fica em estado_replicas().
+ESPELHO_INTERVALO_S = 60
+_ESPELHO = {"estado": {}, "iniciado": False}
+_ESPELHO_LOCK = threading.Lock()   # uma cópia por vez: gravações seguidas chegam na ordem
+
+
+def _alvos_replicas():
+    tok = current_app.config.get("TECHNITIUM_REPLICA_TOKEN") or _token()
+    return [(u, tok) for u in current_app.config.get("TECHNITIUM_REPLICAS") or []]
+
+
+def _em_segundo_plano(fn, *args):
+    threading.Thread(target=fn, args=args, daemon=True, name="technitium-replicas").start()
+
+
+def _espelhar(alvos, texto: str, comparar: bool) -> None:
+    """Grava a config (JSON) em cada réplica; comparar=True: só onde a dela for diferente. Não levanta exceção."""
+    canon = _canon(json.loads(texto))
+    with _ESPELHO_LOCK:
+        for url, tok in alvos:
+            est = {"em": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            try:
+                if comparar:
+                    atual = _chamar(url, tok, f"apps/config/get?name={urllib.parse.quote(APP_NAME)}", timeout=10).get("config")
+                    atual = json.loads(atual) if isinstance(atual, str) else (atual or {})
+                    if _canon(atual) == canon:
+                        _ESPELHO["estado"][url] = {**est, "ok": True, "acao": "igual ao principal"}
+                        continue
+                _chamar(url, tok, "apps/config/set", {"name": APP_NAME, "config": texto}, timeout=20)
+                est.update(ok=True, acao="config gravada")
+                log.info("réplica do Technitium %s: config do %s gravada%s", url, APP_NAME, " (estava diferente)" if comparar else "")
+            except Exception as e:  # noqa: BLE001 — a réplica nunca derruba o console
+                est.update(ok=False, erro=str(e)[:200])
+                log.warning("réplica do Technitium %s: falhou (%s)", url, e)
+            _ESPELHO["estado"][url] = est
+
+
+def estado_replicas() -> dict:
+    """{url: {"em", "ok", "acao"|"erro"}} da última cópia em cada réplica (vazio sem réplicas)."""
+    return dict(_ESPELHO["estado"])
+
+
+def iniciar_espelho(app) -> None:
+    """Thread da reconciliação das réplicas (uma por processo do gunicorn; só grava onde a config diferir)."""
+    if (_ESPELHO["iniciado"] or app.config.get("TESTING") or not app.config.get("TECHNITIUM_ENABLED")
+            or not app.config.get("TECHNITIUM_REPLICAS")):
+        return
+    _ESPELHO["iniciado"] = True
+
+    def laco():
+        while True:
+            try:
+                with app.app_context():
+                    _espelhar(_alvos_replicas(), json.dumps(_get_config()), True)
+            except Exception:  # noqa: BLE001 — principal fora do ar: tenta no próximo ciclo
+                app.logger.exception("réplicas do Technitium: falha na reconciliação")
+            time.sleep(ESPELHO_INTERVALO_S)
+    threading.Thread(target=laco, daemon=True, name="technitium-espelho").start()
 
 
 def _read_modify_write(fn, por="console", motivo=""):

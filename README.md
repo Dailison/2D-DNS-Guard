@@ -25,6 +25,14 @@ auditoria ficam no PostgreSQL do analisador, acessados pela API. **Só o console
 Technitium**: a configuração do Advanced Blocking e os `allowed` de exceção imediata.
 O analisador apenas publica as listas em texto, e o Technitium as baixa.
 
+**Réplicas (Technitium Cloud).** Cada Technitium em `TECHNITIUM_REPLICAS` (hoje o Cloud na VPS,
+`http://10.250.100.1:5380`) recebe a mesma configuração do Advanced Blocking do principal: logo
+depois de cada gravação e, a cada minuto, quando a dele estiver diferente (réplica que estava fora do
+ar ou mudança feita direto no painel do principal). O token é o mesmo (o Cloud foi clonado com os
+mesmos usuários); `TECHNITIUM_REPLICA_TOKEN` troca se precisar. Falha numa réplica não falha a
+gravação no principal e aparece em `GET /health` (`technitium_replicas`). Só a configuração do
+Advanced Blocking é copiada: zonas e configurações gerais do servidor não.
+
 ## Como funciona
 
 **Fluxo de um domínio novo** (o mesmo vale para os que estão em *Outros*):

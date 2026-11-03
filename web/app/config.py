@@ -17,6 +17,10 @@ class Config:
     TECHNITIUM_TOKEN = os.environ.get("TECHNITIUM_TOKEN", "")
     TECHNITIUM_LIBERADOS_GROUP = os.environ.get("TECHNITIUM_LIBERADOS_GROUP", "Liberados")
     TECHNITIUM_ENABLED = bool(TECHNITIUM_URL and TECHNITIUM_TOKEN)
+    # Réplicas que recebem a MESMA config do Advanced Blocking a cada gravação e na reconciliação de 1 min
+    # (03/11: Technitium Cloud na VPS, http://10.250.100.1:5380). Vírgula separa; vazio = só o principal.
+    TECHNITIUM_REPLICAS = [u.strip().rstrip("/") for u in os.environ.get("TECHNITIUM_REPLICAS", "").split(",") if u.strip()]
+    TECHNITIUM_REPLICA_TOKEN = os.environ.get("TECHNITIUM_REPLICA_TOKEN", "")   # vazio = o mesmo TECHNITIUM_TOKEN
 
     # Analisador (IA local na VM 10.100.10.4, pasta analyzer/ deste repo). Também guarda
     # os operadores do console e os metadados dos liberados.

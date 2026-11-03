@@ -40,8 +40,12 @@ def create_app(config_object=Config) -> Flask:
 
     @app.get("/health")
     def health():
-        return jsonify(status="ok")
+        from app import technitium as dnslib
+        rep = dnslib.estado_replicas()
+        return jsonify(status="ok", **({"technitium_replicas": rep} if rep else {}))
 
     from app.horarios import iniciar_agendador   # (26/10) horários livres: vira sozinho no começo/fim de cada horário
     iniciar_agendador(app)
+    from app.technitium import iniciar_espelho   # (03/11) Technitium Cloud recebe a mesma config do principal
+    iniciar_espelho(app)
     return app

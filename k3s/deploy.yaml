@@ -15,6 +15,8 @@ metadata:
   namespace: dns-guard
 data:
   TECHNITIUM_URL: http://10.100.10.15:5380
+  # Technitium Cloud (VPS, túnel 10.250.100.0/24): recebe a mesma config do Advanced Blocking do principal
+  TECHNITIUM_REPLICAS: http://10.250.100.1:5380
   TECHNITIUM_LIBERADOS_GROUP: Liberados
   ANALYZER_URL: http://10.100.10.4:8088
   PORTAL_KIT_URL: https://portal.2dtecnologia.com/kit/launcher.js

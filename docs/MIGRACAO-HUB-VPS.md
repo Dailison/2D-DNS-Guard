@@ -38,8 +38,10 @@ Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519
 - `migra-tunel.sh N "Nome" IP_LAN "rota da 2D no site" "rota do site no escritório" ASN`: Fases 1 a 4 para um
   site com uma rede `10.N.0.0/16` e sem par com outro site. Para antes da troca se o túnel novo não pinga ou se a
   reversão automática não puder ser armada; cancela as reversões só se os testes passarem.
-- `dns-padrao.sh IP_LAN 10.N.0.0/16 NOME`: Fase 5 completa (com o teste de failover) para um site **sem** regras
-  `FORCE_*`. Se já houver regras `FORCE_*`, para e avisa: adaptar à mão.
+- `dns-padrao.sh IP_LAN 10.N.0.0/16 NOME`: Fase 5 completa, com o teste de failover. Sem regras `FORCE_*`, cria tudo.
+  Com regras `FORCE_*` (inclusive desligadas), adapta: desliga o failover antigo (netwatch por ping), aponta as
+  cinco regras para o Cloud e as reativa, tira a exceção de destino e o `to-ports`, e força a porta 443 no DoH.
+  Para se não achar exatamente as cinco regras.
 - `wg-status.py`: cópia do `/usr/local/sbin/wg-status` da VPS.
 
 ## Fase 0: Levantamento (antes de mexer)
@@ -293,4 +295,5 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Boiadeiro (BOIRTR001) | 19 | 04/11/2026 | AS270996 Link Prime Tecnologia | DNS antes: 10.100.10.5 + 8.8.8.8 sem desvio; já tinha empresa no DNS Guard; nome fixo BOISRV001 ficou no roteador sem uso (decisão do usuário) |
 | Canaa Importados (CIMRTR001) | 62 | 04/11/2026 | AS270240 | `device-mode home`: sem scheduler (reversão automática só do lado do escritório); DNS antes 8.8.8.8 sem filtro, política `default` até o cadastro |
 | Churrascaria Tocantins (MikroTik) | 54 | 04/11/2026 | AS264257 Livre WiFi Telecom | ASN não aparece no RIPEstat (LACNIC): usar `dig TXT <ip-invertido>.origin.asn.cymru.com`; rede de convidados entregava 8.8.8.8 pelo DHCP e passou ao padrão |
+| Clinica do Trabalhador (CDTRTR001) | 38 | 04/11/2026 | AS264512 (CGNAT) | unidade da Inclua Mais no DNS Guard; tinha `FORCE_*` todas desligadas (resolvia no 8.8.8.8) e `FORCE_DOH` com `to-ports=8082`: adaptadas pelo `dns-padrao.sh`; nome fixo SRVCONCENT ficou no roteador sem uso |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

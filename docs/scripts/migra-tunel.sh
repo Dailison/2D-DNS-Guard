@@ -14,8 +14,19 @@ echo "## Fase 2: backup e túnel novo"
 F=~/Documents/mikrotik-backups/$(echo "$NOME" | tr -d '()' | tr ' ' '_')-antes-hub-novo-$(date +%Y%m%d-%H%M).rsc
 timeout 40 ssh -i $K -o BatchMode=yes -o IdentitiesOnly=yes claude@$VELHO '/export terse' 2>/dev/null | tr -d '\r' > "$F"; echo "backup no PC: $(wc -l < "$F") linhas"
 S $VELHO '/export file=antes-hub-novo'
-S $VELHO "/interface wireguard add name=wg-vps-2d listen-port=13232 mtu=1420 comment=\"hub novo: VPS 187.41.115.189\"; /interface wireguard peers add interface=wg-vps-2d name=VPS-2D public-key=\"iKud2SFrya0Ddqv8EJtq1Zf/Ig5CXADTWCSv1IX+CXk=\" endpoint-address=187.41.115.189 endpoint-port=13231 allowed-address=10.250.100.0/24,10.100.0.0/16 persistent-keepalive=25s comment=\"hub novo\"; /ip address add address=$NOVO/24 interface=wg-vps-2d comment=\"hub novo: tunel VPS\""
+# porta livre (a 13232 pode estar em uso, ex.: túnel direto da Locan com o Haras) e reaproveita wg-vps-2d já existente
+PORTA=$(S $VELHO ':local p 13232; :while ([:len [/interface wireguard find where listen-port=$p and name!="wg-vps-2d"]] > 0) do={ :set p ($p + 1) }; :put $p' | tail -1 | tr -d ' ')
+if [ "$(S $VELHO ':put [:len [/interface wireguard find name=wg-vps-2d]]' | tail -1)" = "1" ]; then
+  echo "wg-vps-2d já existe: reaproveitando (porta $PORTA)"; S $VELHO "/interface wireguard set [find name=wg-vps-2d] listen-port=$PORTA disabled=no"
+  [ "$(S $VELHO ':put [:len [/interface wireguard peers find interface=wg-vps-2d]]' | tail -1)" = "1" ] || S $VELHO "/interface wireguard peers add interface=wg-vps-2d name=VPS-2D public-key=\"iKud2SFrya0Ddqv8EJtq1Zf/Ig5CXADTWCSv1IX+CXk=\" endpoint-address=187.41.115.189 endpoint-port=13231 allowed-address=10.250.100.0/24,10.100.0.0/16 persistent-keepalive=25s comment=\"hub novo\""
+  [ "$(S $VELHO ':put [:len [/ip address find interface=wg-vps-2d]]' | tail -1)" = "1" ] || S $VELHO "/ip address add address=$NOVO/24 interface=wg-vps-2d comment=\"hub novo: tunel VPS\""
+else
+  S $VELHO "/interface wireguard add name=wg-vps-2d listen-port=$PORTA mtu=1420 comment=\"hub novo: VPS 187.41.115.189\"; /interface wireguard peers add interface=wg-vps-2d name=VPS-2D public-key=\"iKud2SFrya0Ddqv8EJtq1Zf/Ig5CXADTWCSv1IX+CXk=\" endpoint-address=187.41.115.189 endpoint-port=13231 allowed-address=10.250.100.0/24,10.100.0.0/16 persistent-keepalive=25s comment=\"hub novo\"; /ip address add address=$NOVO/24 interface=wg-vps-2d comment=\"hub novo: tunel VPS\""
+fi
+sleep 2
 KEY=$(S $VELHO ':put [/interface wireguard get [find name=wg-vps-2d] public-key]' | tail -1 | tr -d ' ')
+[ ${#KEY} = 44 ] || { sleep 3; KEY=$(S $VELHO ':put [/interface wireguard get [find name=wg-vps-2d] public-key]' | tail -1 | tr -d ' '); }
+[ ${#KEY} = 44 ] || { echo "ABORTADO: não consegui ler a chave do wg-vps-2d"; exit 1; }
 ssh -i $V -o BatchMode=yes root@187.41.115.189 "wg-site add $N '$KEY' '$NOME'; sleep 8; wg-status | grep -E '^$N '"
 P=$(S $VELHO '/ping 10.250.100.1 count=3' | grep -oE "received=[0-9]+"); echo "site -> VPS: $P"
 [ "$P" = "received=3" ] || { echo "ABORTADO: túnel novo sem ping"; exit 1; }

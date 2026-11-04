@@ -42,6 +42,7 @@ Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519
   Com regras `FORCE_*` (inclusive desligadas), adapta: desliga o failover antigo (netwatch por ping), aponta as
   cinco regras para o Cloud e as reativa, tira a exceção de destino e o `to-ports`, e força a porta 443 no DoH.
   Para se não achar exatamente as cinco regras.
+- `levanta.sh N "trecho do nome do peer"`: Fase 0 (só leitura) — peer, ASN, rotas, NAT, DNS, DHCP, netwatch, empresa no DNS Guard; avisa quando o escritório vê o peer com IP privado.
 - `wg-status.py`: cópia do `/usr/local/sbin/wg-status` da VPS.
 
 ## Fase 0: Levantamento (antes de mexer)
@@ -280,6 +281,8 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | IP do site sem acesso à Hostinger (ex.: Centro Cardio): o túnel novo não faz handshake | `migra-tunel.sh` para antes da troca; confirmar com `tcpdump -ni eth0 host <IP>` na VPS (vê antes do firewall) e abrir chamado na Hostinger/provedor |
 | Rotas do escritório com o MESMO comentário (ex.: `ROTA G&D` para 10.70/71/72) | `migra-tunel.sh` localiza a rota do escritório pelo comentário E pela rede |
 | Roteador sem `device-mode` com scheduler (G&D, Canaa Importados) | `SEM_REVERSAO_SITE=1 migra-tunel.sh ...`: segue só com a reversão do escritório (o `check-gateway` ainda protege) |
+| Porta 13232 já usada por outro WireGuard do roteador (ex.: Locan): `wg-vps-2d` fica desligada (X) e nunca envia | `migra-tunel.sh` escolhe a primeira porta livre a partir da 13232 e reaproveita uma `wg-vps-2d` já criada |
+| AD com DC dentro do site (ex.: Locan): o Cloud não resolve o domínio enquanto o site está no túnel antigo | Normal: a VPS só alcança a rede do site depois da migração; conferir `:resolve dominio server=10.250.100.1` no fim |
 | Provedor do site sem internet real (só rede interna até o escritório, ex.: Haras GV) | Ver o IP com que o escritório enxerga o peer (privado = alerta); capturar `udp[8] = 1` na VPS; manter no túnel antigo |
 | ASN sem resultado no RIPEstat (blocos da LACNIC) | Na VPS: `dig +short TXT <IP invertido>.origin.asn.cymru.com` |
 | `device-mode home` (ex.: Canaa Importados): `/system scheduler` bloqueado, sem reversão automática no site | Conferir `/system device-mode print`; mudar o modo exige acesso físico ao roteador (botão). Netwatch e scripts funcionam |
@@ -323,5 +326,10 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | G&D Operação (S11DOP) | 72 | 04/11/2026 | AS14593 Starlink | `device-mode` sem scheduler; AD `gd.local`; aceitava 10.70 no túnel, mas Matriz e Operação se falam pela internet (sem par) |
 | G&D Infra (S11DINFRA) | 73 | 04/11/2026 | AS14593 Starlink | `device-mode` sem scheduler; AD `gd.local` |
 | Hotel Lancaster (HLCRTR001) | 56 | 04/11/2026 | AS264512 (CGNAT) | DHCP entregava 8.8.8.8 em todas as redes; já tinha empresa no DNS Guard; sem regras de filtro |
+| Imperio (IMPRTR001) | 16 | 04/11/2026 | AS264525 Coelho | DNS antes 8.8.8.8; nomes fixos SERVIDOR/servidor.2d.local ficaram no roteador sem uso; redirecionamentos da internet p/ 10.16.200.200 mantidos |
+| Inclua Mais (MK Clinica Inclua Mais) | 24 | 04/11/2026 | AS264512 | `DNS_AD` 10.100.10.5 (domínio 2d.local); redes extras 192.168.0.0/24 e 192.168.18.0/24 só com 1 equipamento cada; sem par com a Clínica (38) |
+| Lebom (LEBRTR001) | 26 | 04/11/2026 | AS264512 | masquerade sem out-interface; DNS antes 8.8.8.8; sem empresa no DNS Guard; rede 192.168.18.0/24 vazia |
+| Madá (MHCRTR001) | 43 | 04/11/2026 | AS264525 Coelho | `DNS_AD` 10.100.10.5; netwatch de log no 1.1.1.1 mantido; 1ª rodada não leu a chave (script agora repete a leitura) |
+| Locan (LOCRTR001) | 17 | 04/11/2026 | AS264512 | AD próprio `locan.local` (DC locad001 10.17.10.5, `DNS_AD` 10.17.10.5 + 10.100.10.5): o Cloud só resolve o domínio depois da migração; túnel direto `wireguard-Haras` (porta 13232) com o Haras GV, fora do hub → `wg-vps-2d` na 13233; o AD tem registros antigos de `locan.local` (10.0.10.5 e .54) |
 | **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

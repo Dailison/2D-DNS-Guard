@@ -36,7 +36,7 @@ são feitas pelo console ou pelo Technitium local: o console reenvia a configura
 Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519_mikrotik` e `id_ed25519_vps`):
 
 - `migra-tunel.sh N "Nome" IP_LAN "rota da 2D no site" "rota do site no escritório" ASN`: Fases 1 a 4 para um
-  site com uma rede `10.N.0.0/16` e sem par com outro site. Para antes da troca se o túnel novo não pinga ou se a
+  site com uma rede `10.N.0.0/16` e sem par com outro site (`SEM_REVERSAO_SITE=1` para roteador sem scheduler). Para antes da troca se o túnel novo não pinga ou se a
   reversão automática não puder ser armada; cancela as reversões só se os testes passarem.
 - `dns-padrao.sh IP_LAN 10.N.0.0/16 NOME`: Fase 5 completa, com o teste de failover. Sem regras `FORCE_*`, cria tudo.
   Com regras `FORCE_*` (inclusive desligadas), adapta: desliga o failover antigo (netwatch por ping), aponta as
@@ -278,6 +278,9 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Comando de verificação via SSH em IP novo sem `StrictHostKeyChecking=accept-new`: falha e o "0 pendentes" parece sucesso (quase deixou reversões armadas no Dom Bosco/Estácio) | Sempre `accept-new` e conferir a resposta do roteador, não a contagem do `grep` |
 | Usuário `claude` no grupo `write`: `/export file=` sem permissão | Exportar pela tela (`/export terse`) e salvar no PC |
 | IP do site sem acesso à Hostinger (ex.: Centro Cardio): o túnel novo não faz handshake | `migra-tunel.sh` para antes da troca; confirmar com `tcpdump -ni eth0 host <IP>` na VPS (vê antes do firewall) e abrir chamado na Hostinger/provedor |
+| Rotas do escritório com o MESMO comentário (ex.: `ROTA G&D` para 10.70/71/72) | `migra-tunel.sh` localiza a rota do escritório pelo comentário E pela rede |
+| Roteador sem `device-mode` com scheduler (G&D, Canaa Importados) | `SEM_REVERSAO_SITE=1 migra-tunel.sh ...`: segue só com a reversão do escritório (o `check-gateway` ainda protege) |
+| Provedor do site sem internet real (só rede interna até o escritório, ex.: Haras GV) | Ver o IP com que o escritório enxerga o peer (privado = alerta); capturar `udp[8] = 1` na VPS; manter no túnel antigo |
 | ASN sem resultado no RIPEstat (blocos da LACNIC) | Na VPS: `dig +short TXT <IP invertido>.origin.asn.cymru.com` |
 | `device-mode home` (ex.: Canaa Importados): `/system scheduler` bloqueado, sem reversão automática no site | Conferir `/system device-mode print`; mudar o modo exige acesso físico ao roteador (botão). Netwatch e scripts funcionam |
 | Ping vindo do túnel barrado na VPS: o `check-gateway=ping` das rotas novas falha | A VPS aceita `icmp echo-request` do `wg0` (já liberado) |
@@ -315,4 +318,9 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Disneylandia (DLARTR001) | 48 | 04/11/2026 | AS18881 Vivo/Telefônica (link reserva, em uso) + AS264525 Coelho (principal, fora do ar na migração) | dois links com failover próprio por netwatch no 8.8.8.8 (o `dns-publico` fica `down` com a Coelho fora: no failover público os clientes vão p/ o 1.1.1.1); sem regras de entrada no firewall; sem empresa no DNS Guard; relógio do roteador 1 h atrasado |
 | Dom Bosco (FVRTR001) | 28 | 04/11/2026 | AS264512 Gigabyte (principal, CGNAT) + AS264525 Coelho (reserva) | par com a Estácio (os dois conversavam pelo escritório); AD `fevi.local` no DC 10.100.10.6 do escritório: lista `DNS_AD` (10.100.10.5/6) como única exceção de destino nas FORCE_DNS; usuário `claude` estava no grupo `read`; redes 10.1.x.x por um equipamento local (10.28.200.241), fora da VPN |
 | Estácio (ESTRTR001) | 29 | 04/11/2026 | AS264512 | par com o Dom Bosco; mesma empresa (unidade) e mesmo AD `fevi.local`; failover antigo desligado; `/ip dns` tinha o DC como 2ª opção |
+| G&D Matriz (GDRTR001) | 70 | 04/11/2026 | AS264512 (CGNAT) | `device-mode` sem scheduler; AD `gd.local` no DC 10.100.10.20 (lista `DNS_AD`); usuário `claude` estava desativado |
+| G&D Reman (S11DREMAN) | 71 | 04/11/2026 | AS14593 Starlink | AD `gd.local` (`DNS_AD`); rede extra 10.10.10.0/23 no DHCP, sem dispositivos |
+| G&D Operação (S11DOP) | 72 | 04/11/2026 | AS14593 Starlink | `device-mode` sem scheduler; AD `gd.local`; aceitava 10.70 no túnel, mas Matriz e Operação se falam pela internet (sem par) |
+| G&D Infra (S11DINFRA) | 73 | 04/11/2026 | AS14593 Starlink | `device-mode` sem scheduler; AD `gd.local` |
+| **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

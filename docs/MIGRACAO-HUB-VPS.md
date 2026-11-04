@@ -20,6 +20,9 @@ Chave pública do hub: `iKud2SFrya0Ddqv8EJtq1Zf/Ig5CXADTWCSv1IX+CXk=`.
 Na VPS:
 - `wg-site add N CHAVE "NOME"`: cadastra o peer do site (`10.250.100.N/32` + `10.N.0.0/16`).
 - `wg-asn add ASN "nome"`: libera a porta 13231 para os prefixos do provedor (atualização semanal).
+- `wg-status` (ou `wg-site list`): clientes conectados, como a tela de peers da Mikrotik — nome, IP do túnel,
+  redes, endpoint, último handshake, tráfego e status (ATIVO = handshake nos últimos 3 min). `wg-status -w 5`
+  atualiza a cada 5 s. O `wg show` puro mostra o mesmo, mas só com as chaves públicas.
 - Firewall: `/etc/nftables/vpn.nft`.
   - Da internet entram só o escritório (`132.255.228.131`), o WireGuard dos ASNs e o ping deles.
   - Pela VPN: DNS (53, DoH 443, DoT 853) de todos; o resto só do escritório.

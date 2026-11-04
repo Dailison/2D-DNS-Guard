@@ -55,7 +55,14 @@ são feitas pelo console ou pelo Technitium local: o console reenvia a configura
    - **domínio AD local**, como `gd.local` ou `moderna.local`: precisa de encaminhamento FWD para o DC (Fase 5).
 5. **DNS Guard:** conferir se a rede `10.N.0.0/16` está cadastrada numa empresa no console. Sem cadastro, o
    cliente cai no grupo `default`.
-6. **Sites da mesma empresa que conversam entre si** (rota para a rede do outro site pelo túnel antigo, como
+6. **Mais de um link de internet** (ex.: Alencar, Coelho + Fibralink): o túnel novo sai pelo link ativo. Cadastre o ASN de
+   todos os links com `wg-asn`; se o de reserva não estiver liberado, o `check-gateway` devolve o tráfego ao túnel
+   antigo quando ele estiver em uso. IP público de um link específico: rota temporária `/32` para o `icanhazip.com`
+   pelo link e `/tool fetch url="http://icanhazip.com" output=user`.
+7. **Site sem DNS no padrão** (ex.: Alencar, que usava 8.8.8.8): aplicar o padrão faz o site passar a ser filtrado.
+   Confirmar com o usuário e cadastrar a empresa no console. Entradas `/ip dns static` do roteador deixam de
+   valer para os clientes.
+8. **Sites da mesma empresa que conversam entre si** (rota para a rede do outro site pelo túnel antigo, como
    Economize ↔ Ice Beer): liberar o par na VPS e **migrar os sites na mesma janela**. Com só um deles na VPS, o
    tráfego entre eles quebra no meio (o escritório não pode repassar origem de outro site para a VPS).
    ```bash
@@ -268,3 +275,4 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | AgenciaCanaa (AGCRTR001) | 39 | 03/11/2026 | AS264525 Coelho Tecnologia | DNS no padrão; usuário `claude` no grupo `write` |
 | Economize (EMZRTR001) | 33 | 03/11/2026 | AS264512 | par com o Ice Beer; já tinha `FORCE_*`; tem VPN própria de usuários (`wg-VPN`, `10.33.50.x`); rota antiga do galpão (`10.22.0.0/16`) ficou no túnel antigo |
 | Economize - Ice Beer (EMZRTR003) | 34 | 03/11/2026 | AS264512 (CGNAT) | par com o Economize; `FORCE_DOH` corrigido (8082 → 443); netwatch antigo desligado |
+| Alencar (ALCRTR001) | 25 | 04/11/2026 | AS264525 Coelho Tecnologia (link principal) | antes usava 8.8.8.8 sem filtro: passou a ser filtrado (política `default` até o cadastro); link reserva Fibralink (CGNAT) sem ASN cadastrado: se a Coelho cair, o `check-gateway` volta ao túnel antigo; nomes fixos ALCNOTURNO001/002 no roteador ficaram sem uso (decisão do usuário) |

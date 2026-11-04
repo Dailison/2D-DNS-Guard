@@ -18,7 +18,8 @@ Nos comandos, troque **N** pelo número do site (rede `10.N.0.0/16`), **NOME** p
 Chave pública do hub: `iKud2SFrya0Ddqv8EJtq1Zf/Ig5CXADTWCSv1IX+CXk=`.
 
 Na VPS:
-- `wg-site add N CHAVE "NOME"`: cadastra o peer do site (`10.250.100.N/32` + `10.N.0.0/16`).
+- `wg-site add N CHAVE "NOME" [REDE_EXTRA ...]`: cadastra o peer do site (`10.250.100.N/32` + `10.N.0.0/16` + redes
+  fora do padrão, ex.: `172.16.10.0/23` da Moral PBS), com as rotas na VPS. Cópia em `docs/scripts/wg-site.sh`.
 - `wg-asn add ASN "nome"`: libera a porta 13231 para os prefixos do provedor (atualização semanal).
 - `wg-status` (ou `wg-site list`): clientes conectados, como a tela de peers da Mikrotik — nome, IP do túnel,
   redes, endpoint, último handshake, tráfego e status (ATIVO = handshake nos últimos 3 min). `wg-status -w 5`
@@ -36,13 +37,16 @@ são feitas pelo console ou pelo Technitium local: o console reenvia a configura
 Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519_mikrotik` e `id_ed25519_vps`):
 
 - `migra-tunel.sh N "Nome" IP_LAN "rota da 2D no site" "rota do site no escritório" ASN`: Fases 1 a 4 para um
-  site com uma rede `10.N.0.0/16` e sem par com outro site (`SEM_REVERSAO_SITE=1` para roteador sem scheduler). Para antes da troca se o túnel novo não pinga ou se a
+  site sem par com outro site (`SEM_REVERSAO_SITE=1` para roteador sem scheduler; `EXTRAS="172.16.10.0/23"` para
+  redes fora do `10.N`, que entram na VPS, no peer `VPS-2D` e nas rotas do escritório — a rota antiga de cada uma
+  é achada pela rede + `gateway=10.100.100.N`). Backup vazio pelo SSH: busca o export gravado no roteador por `scp`. Para antes da troca se o túnel novo não pinga ou se a
   reversão automática não puder ser armada; cancela as reversões só se os testes passarem.
 - `dns-padrao.sh IP_LAN 10.N.0.0/16 NOME`: Fase 5 completa, com o teste de failover. Sem regras `FORCE_*`, cria tudo.
   Com regras `FORCE_*` (inclusive desligadas), adapta: desliga o failover antigo (netwatch por ping), aponta as
   cinco regras para o Cloud e as reativa, tira a exceção de destino e o `to-ports`, e força a porta 443 no DoH.
   Para se não achar exatamente as cinco regras.
 - `levanta.sh N "trecho do nome do peer"`: Fase 0 (só leitura) — peer, ASN, rotas, NAT, DNS, DHCP, netwatch, empresa no DNS Guard; avisa quando o escritório vê o peer com IP privado.
+- `wg-site.sh`: cópia do `/usr/local/sbin/wg-site` da VPS.
 - `wg-status.py`: cópia do `/usr/local/sbin/wg-status` da VPS.
 
 ## Fase 0: Levantamento (antes de mexer)
@@ -291,11 +295,17 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Script gravado sem `\$`: `syntax error` e failover parado | Escapar as variáveis; rodar o script uma vez para conferir |
 | Sites da mesma empresa migrados em janelas diferentes: o tráfego entre eles quebra | Par em `pares_sites` e migração na mesma janela |
 | Failover antigo (netwatch por ping) mexendo nas regras `FORCE_` novas | Desligar o netwatch antigo antes do novo |
+| Regra `FORCE_` duplicada (Tropical: duas `FORCE_DNS_UDP` iguais) ou só as de DNS (Barretos): o `dns-padrao.sh` para | Remover a cópia idêntica / completar as cinco antes de rodar |
+| `FORCE_` antigas desligadas e incompletas (Goiás: só UDP/TCP para 10.100.50.202) | Remover e rodar no modo de criação |
+| Modo de criação põe a `FORCE_DNS_UDP` no topo: passaria na frente dos `LIBERADOS` | Recriar as regras `LIBERADOS_*` (8.8.8.8 / accept) com `place-before` da primeira `FORCE_` |
+| Rede `192.168.x` do site sem rota no escritório (Barretos, Goiás, Moral CAN): fora da VPS | Só funciona porque está em `LIBERADOS` (vai direto ao 8.8.8.8); se sair da lista, precisa de `EXTRAS` |
+| Rota antiga numa tabela de política (Tropical `to_wan2`) aparece ativa no teste | Conferir `routing-table`; a do `main` é a que vale |
+| Backup `/export terse` pelo SSH volta vazio ou cortado (roteador lento) | `/export file=` + `scp` (o script já faz quando sai vazio) |
 
 ## Pendências antes dos próximos clientes
 
-1. **Redes extras no `wg-site`:** ensinar o `wg-site` a aceitar redes fora do padrão `10.N` (Cotrel, Moral PBS,
-   Goiás, Semetra, Thibruma).
+1. **Redes extras:** feito (`wg-site ... REDE_EXTRA`, `EXTRAS=` no `migra-tunel.sh`; Moral PBS). Faltam Cotrel,
+   Semetra e Thibruma.
 2. **Logs do Cloud no DNS Guard:** o analisador coleta logs só do Technitium local, então os clientes migrados
    somem do DNS Guard.
 3. **Cadastro da AgenciaCanaa:** a rede `10.39.0.0/16` ainda não está numa empresa no console (cai no grupo
@@ -334,5 +344,12 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Posto ISO (ISORTR001) | 65 | 04/11/2026 | AS270996 Link Prime | `DNS_AD` 10.100.10.5 (domínio 2D.local); rede 192.168.0.0/24 na LAN sem DHCP |
 | Norte e Sul I (SNSRTR001) | 51 | 04/11/2026 | AS264512 | túnel direto `wg-NorteSul` com a unidade II (10.52), fora do hub; DNS antes 8.8.8.8 (sem FORCE_*) |
 | Norte e Sul II (SNSRTR002) | 52 | 04/11/2026 | AS264512 | túnel direto `wg-norteSul` com a unidade I, fora do hub; DNS antes 8.8.8.8 (sem FORCE_*); sem regras de filtro |
+| Talisma (TLMRTR001) | 8 | 04/11/2026 | AS264512 | DNS antes 8.8.x sem desvio e `allow-remote` ligado; sem empresa no DNS Guard (política `default`) |
+| Vila da Mata (VLMRTR001) | 61 | 04/11/2026 | AS61851 Garra Fibra (principal) | DHCP entregava 8.8.8.8; reserva LivreWifi (CGNAT, ASN não cadastrado): com ela, volta ao túnel antigo pelo `check-gateway` |
+| Tropical (TPCRTR001) | 11 | 04/11/2026 | AS264512 | já tinha `FORCE_*` (uma `FORCE_DNS_UDP` duplicada removida); rota da 2D também na tabela `to_wan2` (respostas do link reserva) |
+| Moral CAN (MORAL-CANAA) | 58 | 04/11/2026 | AS264496 Fibralink | túnel direto `wg-matriz` com a PBS (10.57 e 172.16.10.0/23), fora do hub; 192.168.11.0/24 em `LIBERADOS`; SEM regras de filtro e a `pppoe-fibra-link` fora da lista `WAN` |
+| Moral PBS (MORAL-MATRIZ-N) | 57 | 04/11/2026 | AS266568 MBG Tecnologia | 1ª com rede extra: `172.16.10.0/23` (maioria das máquinas) via `EXTRAS=`; túnel direto `wg-Filiais` com a CAN; `FORCE_DOH` corrigido (8082 → 443) |
+| Barretos (SBRTR001) | 9 | 04/11/2026 | AS264525 Coelho (principal) | AD próprio `barretos.local` (DC sbad001 10.9.10.5, `DNS_AD`); 192.168.0.0/24 em `LIBERADOS` (8.8.8.8), sem rota no escritório; reserva via 192.168.18.1 |
+| Goiás (GOIRTR001) | 27 | 04/11/2026 | AS264525 Coelho | DNS antes 8.8.8.8 sem desvio (FORCE_ antigas desligadas, removidas); `LIBERADOS` (celulares + "REDE ANTIGA" 192.168.1.0/24) recriados antes das `FORCE_` |
 | **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

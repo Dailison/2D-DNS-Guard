@@ -8,6 +8,7 @@ S() { timeout 30 ssh -i $K -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostK
 
 F=~/Documents/mikrotik-backups/$NOME-antes-dns-$(date +%Y%m%d-%H%M).rsc
 timeout 40 ssh -i $K -o BatchMode=yes -o IdentitiesOnly=yes claude@$H '/export terse' 2>/dev/null | tr -d '\r' > "$F"; echo "backup: $(wc -l < "$F") linhas em $F"
+[ -s "$F" ] || { S '/export file=antes-dns'; sleep 5; scp -q -i $K -o BatchMode=yes -o IdentitiesOnly=yes claude@$H:antes-dns.rsc "$F"; echo "backup (scp): $(wc -l < "$F") linhas"; }
 ADAPTA=0
 if [ "$(S ':put [:len [/ip firewall nat find comment~"FORCE_"]]' | tail -1)" != "0" ]; then
   ADAPTA=1; echo "regras FORCE_* existentes: adaptando (failover antigo desligado, destino Cloud, sem exceção de destino, DoH na 443)"

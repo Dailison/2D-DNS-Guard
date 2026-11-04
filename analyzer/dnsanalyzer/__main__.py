@@ -142,14 +142,15 @@ def run_collector() -> None:
     while not _STOP:
         inicio = time.monotonic()
         # coleta: processa janelas até alcançar o "agora - lag" (limite por ciclo), uma janela de cada Technitium por
-        # rodada — réplica recém-ligada (dias de atraso) não segura o principal. Falha num não para os outros.
+        # rodada. Falha num não para os outros. Quem está atrasado (réplica recém-ligada, dias de atraso) só continua
+        # até INGEST_INTERVAL: o ciclo seguinte começa logo e o principal, em dia, não espera o atraso do outro.
         pendentes = []
         for f in fontes:
             f["total"] = {"entries": 0, "rows": 0, "windows": 0}
             f["rid"] = db.begin_run(f["kind"])
             pendentes.append(f)
         for _ in range(48):
-            if _STOP or not pendentes:
+            if _STOP or not pendentes or time.monotonic() - inicio >= cfg.ingest_interval:
                 break
             for f in list(pendentes):
                 try:

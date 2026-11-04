@@ -70,7 +70,9 @@ Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519
    cliente cai no grupo `default`.
 6. **Mais de um link de internet** (ex.: Alencar, Coelho + Fibralink): o túnel novo sai pelo link ativo. Cadastre o ASN de
    todos os links com `wg-asn`; se o de reserva não estiver liberado, o `check-gateway` devolve o tráfego ao túnel
-   antigo quando ele estiver em uso. IP público de um link específico: rota temporária `/32` para o `icanhazip.com`
+   antigo quando ele estiver em uso. ASN grande (ex.: AS18881 da Vivo, ~1.000 prefixos) é aceito, mas amplia bem a lista
+   de liberados. Se o site tem failover de internet por netwatch no 8.8.8.8, o `dns-publico` pode ficar `down` com o
+   principal fora (o desvio público cai no 1.1.1.1). IP público de um link específico: rota temporária `/32` para o `icanhazip.com`
    pelo link e `/tool fetch url="http://icanhazip.com" output=user`.
 7. **Site sem DNS no padrão** (ex.: Alencar, que usava 8.8.8.8): aplicar o padrão faz o site passar a ser filtrado.
    Confirmar com o usuário e cadastrar a empresa no console. Entradas `/ip dns static` do roteador deixam de
@@ -298,4 +300,5 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Clinica do Trabalhador (CDTRTR001) | 38 | 04/11/2026 | AS264512 (CGNAT) | unidade da Inclua Mais no DNS Guard; tinha `FORCE_*` todas desligadas (resolvia no 8.8.8.8) e `FORCE_DOH` com `to-ports=8082`: adaptadas pelo `dns-padrao.sh`; nome fixo SRVCONCENT ficou no roteador sem uso |
 | Conexao Espetaria (CONRTR001) | 47 | 04/11/2026 | AS264512 (CGNAT) | DNS antes 8.8.8.8 sem filtro; no DNS Guard só a empresa automática "Rede 10.47.0.0/16"; roteador SEM nenhuma regra de filtro; nome fixo CX001 (PC caixa/servidor) ficou no roteador sem uso (decisão do usuário) |
 | Dentista Facil (DFRTR001) | 41 | 04/11/2026 | AS264512 | DNS antes 8.8.8.8 sem filtro; sem empresa no DNS Guard (política `default`); roteador SEM regras de filtro; listas de endereços antigas sem uso (DOH_SERVERS, TRUSTED_DNS) |
+| Disneylandia (DLARTR001) | 48 | 04/11/2026 | AS18881 Vivo/Telefônica (link reserva, em uso) + AS264525 Coelho (principal, fora do ar na migração) | dois links com failover próprio por netwatch no 8.8.8.8 (o `dns-publico` fica `down` com a Coelho fora: no failover público os clientes vão p/ o 1.1.1.1); sem regras de entrada no firewall; sem empresa no DNS Guard; relógio do roteador 1 h atrasado |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

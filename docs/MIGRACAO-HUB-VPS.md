@@ -322,5 +322,6 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | G&D Reman (S11DREMAN) | 71 | 04/11/2026 | AS14593 Starlink | AD `gd.local` (`DNS_AD`); rede extra 10.10.10.0/23 no DHCP, sem dispositivos |
 | G&D Operação (S11DOP) | 72 | 04/11/2026 | AS14593 Starlink | `device-mode` sem scheduler; AD `gd.local`; aceitava 10.70 no túnel, mas Matriz e Operação se falam pela internet (sem par) |
 | G&D Infra (S11DINFRA) | 73 | 04/11/2026 | AS14593 Starlink | `device-mode` sem scheduler; AD `gd.local` |
+| Hotel Lancaster (HLCRTR001) | 56 | 04/11/2026 | AS264512 (CGNAT) | DHCP entregava 8.8.8.8 em todas as redes; já tinha empresa no DNS Guard; sem regras de filtro |
 | **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

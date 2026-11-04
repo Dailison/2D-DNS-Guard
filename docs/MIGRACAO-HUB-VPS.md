@@ -176,6 +176,16 @@ antigo.
 
 ## Fase 5: DNS (padrão)
 
+**Site com AD no escritório** (ex.: Dom Bosco/Estácio, `fevi.local` no DC 10.100.10.6): depois do `dns-padrao.sh`, crie a
+lista `DNS_AD` com os DCs e use-a como única exceção de destino nas `FORCE_DNS_UDP/TCP` (consultas diretas ao DC não são
+desviadas; Technitium e o próprio roteador continuam desviados):
+```
+:foreach a in={"10.100.10.5";"10.100.10.6"} do={ /ip firewall address-list add list=DNS_AD address=$a comment="servidor AD" }
+/ip firewall nat set [find comment~"FORCE_DNS_(UDP|TCP)"] dst-address-list=!DNS_AD
+```
+Limitação: com os DOIS Technitium fora, o desvio vai para o DNS público e o domínio AD não resolve pelos clientes (o
+`/ip dns static type=FWD` só vale para o próprio roteador, que não atende os clientes).
+
 **Site que já tem as regras `FORCE_*` do escritório** (Economize, Ice Beer): não crie regras novas. Nas
 existentes:
 - aponte para `10.250.100.1` e acrescente ` (dns-failover)` ao comentário;
@@ -227,7 +237,8 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
    ```
    Com `dns-server` vazio, o DHCP entrega a lista do `/ip dns`. **Nunca** entregar o IP do roteador com o
    `allow-remote-requests` desligado: os clientes ficam sem internet.
-6. **Cliente com AD.** Os nomes internos continuam resolvendo no failover público:
+6. **Cliente com AD.** Veja "Site com AD no escritório" acima. A entrada abaixo só faz o PRÓPRIO roteador resolver o
+   domínio no failover público (os clientes são desviados para o DNS público e não a usam):
    ```
    /ip dns static add type=FWD name=<zona.local> match-subdomain=yes forward-to=<IP do DC>
    ```
@@ -264,6 +275,7 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Chrome/Edge com `8.8.8.8` usam DoH e escapam do desvio da porta 53 | `FORCE_DOH` e `FORCE_QUIC` |
 | DHCP entregando o roteador com `allow-remote-requests` desligado: sem internet | DHCP com `dns-server` vazio |
 | `FORCE_DNS` com exceção `INTERNAL_DNS`: sem failover para quem consulta o Technitium direto | Sem a exceção nos sites |
+| Comando de verificação via SSH em IP novo sem `StrictHostKeyChecking=accept-new`: falha e o "0 pendentes" parece sucesso (quase deixou reversões armadas no Dom Bosco/Estácio) | Sempre `accept-new` e conferir a resposta do roteador, não a contagem do `grep` |
 | Usuário `claude` no grupo `write`: `/export file=` sem permissão | Exportar pela tela (`/export terse`) e salvar no PC |
 | IP do site sem acesso à Hostinger (ex.: Centro Cardio): o túnel novo não faz handshake | `migra-tunel.sh` para antes da troca; confirmar com `tcpdump -ni eth0 host <IP>` na VPS (vê antes do firewall) e abrir chamado na Hostinger/provedor |
 | ASN sem resultado no RIPEstat (blocos da LACNIC) | Na VPS: `dig +short TXT <IP invertido>.origin.asn.cymru.com` |
@@ -301,4 +313,6 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Conexao Espetaria (CONRTR001) | 47 | 04/11/2026 | AS264512 (CGNAT) | DNS antes 8.8.8.8 sem filtro; no DNS Guard só a empresa automática "Rede 10.47.0.0/16"; roteador SEM nenhuma regra de filtro; nome fixo CX001 (PC caixa/servidor) ficou no roteador sem uso (decisão do usuário) |
 | Dentista Facil (DFRTR001) | 41 | 04/11/2026 | AS264512 | DNS antes 8.8.8.8 sem filtro; sem empresa no DNS Guard (política `default`); roteador SEM regras de filtro; listas de endereços antigas sem uso (DOH_SERVERS, TRUSTED_DNS) |
 | Disneylandia (DLARTR001) | 48 | 04/11/2026 | AS18881 Vivo/Telefônica (link reserva, em uso) + AS264525 Coelho (principal, fora do ar na migração) | dois links com failover próprio por netwatch no 8.8.8.8 (o `dns-publico` fica `down` com a Coelho fora: no failover público os clientes vão p/ o 1.1.1.1); sem regras de entrada no firewall; sem empresa no DNS Guard; relógio do roteador 1 h atrasado |
+| Dom Bosco (FVRTR001) | 28 | 04/11/2026 | AS264512 Gigabyte (principal, CGNAT) + AS264525 Coelho (reserva) | par com a Estácio (os dois conversavam pelo escritório); AD `fevi.local` no DC 10.100.10.6 do escritório: lista `DNS_AD` (10.100.10.5/6) como única exceção de destino nas FORCE_DNS; usuário `claude` estava no grupo `read`; redes 10.1.x.x por um equipamento local (10.28.200.241), fora da VPN |
+| Estácio (ESTRTR001) | 29 | 04/11/2026 | AS264512 | par com o Dom Bosco; mesma empresa (unidade) e mesmo AD `fevi.local`; failover antigo desligado; `/ip dns` tinha o DC como 2ª opção |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

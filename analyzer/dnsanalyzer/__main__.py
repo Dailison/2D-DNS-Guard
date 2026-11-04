@@ -134,42 +134,53 @@ def run_collector() -> None:
     from . import collector
     from .technitium import TechnitiumClient
     cfg = settings()
-    client = TechnitiumClient()
+    # (04/11) um cliente/cursor por Technitium (principal + réplicas); o run "collect" segue sendo o do principal
+    fontes = [{"url": u, "chave": k, "client": TechnitiumClient(u, tok),
+               "kind": "collect" if k == collector.CURSOR_KEY else f"collect {u}"} for u, tok, k in collector.fontes()]
     # daemon: no stop do serviço, um feed de TI no meio do download não segura a saída do processo
     threading.Thread(target=_tarefas_coletor, name="tarefas-coletor", daemon=True).start()
     while not _STOP:
         inicio = time.monotonic()
-        # coleta: processa janelas até alcançar o "agora - lag" (limite por ciclo)
-        total = {"entries": 0, "rows": 0, "windows": 0}
-        caught_up = True
-        rid = db.begin_run("collect")
-        try:
-            for _ in range(48):
-                if _STOP:
-                    break
-                st = collector.collect_once(client)
-                if st.get("window_end") is None:
-                    break
-                total["entries"] += st.get("entries", 0)
-                total["rows"] += st.get("rows", 0)
-                total["windows"] += 1
-                total["cursor"] = st["window_end"]
-                caught_up = st.get("caught_up", True)
-                if caught_up:
-                    break
-            db.end_run(rid, True, total)
-            if total["entries"]:
-                log.info("coleta: %d consultas em %d janela(s) -> %d agregados (cursor %s)",
-                         total["entries"], total["windows"], total["rows"], total.get("cursor"))
-        except Exception as e:  # noqa: BLE001
-            log.exception("coleta falhou")
-            db.end_run(rid, False, total, str(e))
-            caught_up = True
+        # coleta: processa janelas até alcançar o "agora - lag" (limite por ciclo), uma janela de cada Technitium por
+        # rodada — réplica recém-ligada (dias de atraso) não segura o principal. Falha num não para os outros.
+        pendentes = []
+        for f in fontes:
+            f["total"] = {"entries": 0, "rows": 0, "windows": 0}
+            f["rid"] = db.begin_run(f["kind"])
+            pendentes.append(f)
+        for _ in range(48):
+            if _STOP or not pendentes:
+                break
+            for f in list(pendentes):
+                try:
+                    st = collector.collect_once(f["client"], f["chave"])
+                except Exception as e:  # noqa: BLE001
+                    log.exception("coleta falhou (Technitium %s)", f["url"])
+                    db.end_run(f.pop("rid"), False, f["total"], str(e))
+                    pendentes.remove(f)
+                    continue
+                if st.get("window_end") is not None:
+                    t = f["total"]
+                    t["entries"] += st.get("entries", 0)
+                    t["rows"] += st.get("rows", 0)
+                    t["windows"] += 1
+                    t["cursor"] = st["window_end"]
+                if st.get("window_end") is None or st.get("caught_up", True):
+                    pendentes.remove(f)
+        for f in fontes:
+            if "rid" in f:
+                db.end_run(f.pop("rid"), True, f["total"])
+                t = f["total"]
+                if t["entries"]:
+                    log.info("coleta (%s): %d consultas em %d janela(s) -> %d agregados (cursor %s)",
+                             f["url"], t["entries"], t["windows"], t["rows"], t.get("cursor"))
+        caught_up = not pendentes
 
         # o intervalo conta do início do ciclo: a duração da coleta não empurra a próxima
         while caught_up and not _STOP and time.monotonic() - inicio < cfg.ingest_interval:
             time.sleep(1)
-    client.close()
+    for f in fontes:
+        f["client"].close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -217,8 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "import-tenants":
         cmd_import_tenants(args.path, args.replace)
     elif args.cmd == "collect":
-        from .collector import collect_once
-        print(json.dumps(collect_once(), default=str, indent=2))
+        from .collector import collect_once, fontes
+        from .technitium import TechnitiumClient
+        print(json.dumps({u: collect_once(TechnitiumClient(u, tok), k) for u, tok, k in fontes()}, default=str, indent=2))
     elif args.cmd == "revisar-ameacas":
         from . import investigacao
         print(json.dumps(investigacao.revisar_ameacas(args.aplicar, args.limite, parar=lambda: _STOP), ensure_ascii=False, default=str))
@@ -264,7 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         from .classifier import status
         print(json.dumps(status(), indent=2))
     elif args.cmd == "run-collector":
-        log.info("coletor iniciado (Technitium %s)", cfg.technitium_url)
+        log.info("coletor iniciado (Technitium %s%s)", cfg.technitium_url,
+                 "".join(f" + {u}" for u in cfg.technitium_replicas))
         run_collector()
     elif args.cmd == "run-classifier":
         from .classifier import run_forever

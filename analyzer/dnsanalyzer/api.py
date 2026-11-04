@@ -19,7 +19,7 @@ from fastapi.responses import PlainTextResponse
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import __version__, db, listas
+from . import __version__, collector, db, listas
 from .config import settings
 from .features import analyze_name
 from .llm import OllamaClient
@@ -63,6 +63,7 @@ def health():
             out["db"] = True
             out["ingest_cursor"] = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'")
                                     .fetchone() or {}).get("value")
+            out["ingest_cursors"] = collector.cursores(c)   # (04/11) principal + réplicas
             out["queue"] = dict(c.execute(
                 "SELECT count(*) FILTER (WHERE needs_analysis) AS regras, "
                 "count(*) FILTER (WHERE llm_pending AND NOT aguarda_recorrencia AND NOT dominio_decidido(id)) AS ia, "
@@ -100,7 +101,7 @@ def stats():
                          "FROM analysis_runs ORDER BY kind, started_at DESC").fetchall()
         return {"queue": q, "last_runs": runs,
                 "cursor": (c.execute("SELECT value, updated_at FROM ingest_state WHERE key='ingest_cursor'")
-                           .fetchone())}
+                           .fetchone()), "cursores": collector.cursores(c)}
 
 
 # ------------------------------------------------------------------ tenants
@@ -1290,7 +1291,7 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
     with db.conn() as c:
         rows = c.execute(sql, p).fetchall()
         cap, rows = len(rows) > limit, rows[:limit]
-        cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
+        cursor = collector.coletado_ate(c)   # o Technitium mais atrasado
         # (22/10) o agregado não guarda a resposta: nos bloqueados, a última com cadeia CNAME (do log de consultas), p/ o
         # console achar o culpado — api.sec.intl.miui.com é bloqueado por xiaomi.com (CNAME) e aparecia "em nenhuma lista"
         bloq = sorted({r["dominio"] for r in rows if r["bloqueadas"]})
@@ -1356,7 +1357,7 @@ def logs_detalhe(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
     with db.conn() as c:
         c.execute("SET LOCAL statement_timeout = '25s'")   # filtro raro num período longo: erro claro, não a tela presa
         rows = c.execute(sql, p).fetchall()
-        cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
+        cursor = collector.coletado_ate(c)   # o Technitium mais atrasado
         desde = c.execute("SELECT min(ts) AS t FROM query_log").fetchone()["t"]
     cap = len(rows) > limit
     rows = rows[:limit]
@@ -1480,7 +1481,7 @@ def charts(start: datetime, end: datetime, tid: int = 0, cls: list[str] = Query(
             f" count(DISTINCT domain_id) FILTER (WHERE {lib} + {blk} > 0) AS sites, "
             f" COALESCE(sum({lib} + {blk}) FILTER (WHERE cls IN ('MALICIOSO', 'SUSPEITO')), 0) AS ameacas FROM ch"
         ).fetchone()
-        cursor = (c.execute("SELECT value FROM ingest_state WHERE key='ingest_cursor'").fetchone() or {}).get("value")
+        cursor = collector.coletado_ate(c)   # o Technitium mais atrasado
     def limpa(rows):   # com o filtro de resposta, tira o que zerou
         return [r for r in rows if (r["liberadas"] or 0) + (r["bloqueadas"] or 0) > 0]
     return {"granularidade": gran, "serie": serie, "por_classificacao": limpa(por_cls),

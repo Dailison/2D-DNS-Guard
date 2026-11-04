@@ -336,6 +336,12 @@ comentário na mesma linha do valor.** Principais: `DATABASE_URL`, `TECHNITIUM_U
 `OLLAMA_MODEL`, `LLM_ENABLED`, `EXCLUDE_CLIENTS`, `RETENTION_DAYS`, `API_TOKEN`,
 `WEB_SEARCH_URL`, `LISTS_ALLOWED_IPS`, `WEBHOOK_URLS/KINDS`.
 
+Mais de um Technitium (04/11): `TECHNITIUM_REPLICAS` (lista separada por vírgula; padrão o Technitium Cloud
+`http://10.250.100.1:5380`, vazio desliga) também tem os logs coletados, cada um com o próprio cursor
+(`ingest_cursor@<url>` em `ingest_state`; o principal segue em `ingest_cursor`). Token: `TECHNITIUM_REPLICA_TOKEN`,
+ou o `TECHNITIUM_TOKEN` quando vazio. As telas mostram "coletado até" pelo Technitium mais atrasado; `/health`
+traz `ingest_cursors` e cada réplica tem o próprio registro em `analysis_runs` (`collect <url>`).
+
 IA online (fase 4): `GEMINI_API_KEY` (sem ela a fase 4 fica desligada), `GEMINI_API_KEY_2..4` (chaves de outros
 projetos, cada uma com a própria cota por modelo; usadas depois da principal), `ONLINE_ENABLED`,
 `ONLINE_WORKERS` (6), `ONLINE_CONFIANCA_MIN` (0,8), `GEMINI_MODELS` (volume),

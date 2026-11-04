@@ -52,6 +52,8 @@ class Settings:
     technitium_token: str
     technitium_logs_app: str
     technitium_logs_class: str
+    technitium_replicas: list[str]     # (04/11) outros Technitium cujos logs também são coletados (cada um com seu cursor)
+    technitium_replica_token: str
 
     ingest_interval: int
     ingest_lag: int
@@ -169,6 +171,10 @@ def load_settings() -> Settings:
         technitium_token=os.environ.get("TECHNITIUM_TOKEN", ""),
         technitium_logs_app=os.environ.get("TECHNITIUM_LOGS_APP", "Query Logs (Sqlite)"),
         technitium_logs_class=os.environ.get("TECHNITIUM_LOGS_CLASS", "QueryLogsSqlite.App"),
+        # (04/11) Technitium Cloud (VPS, túnel 10.250.100.0/24): clientes migrados consultam só ele. TECHNITIUM_REPLICAS=
+        # vazio desliga; o token é o do principal quando TECHNITIUM_REPLICA_TOKEN não vier
+        technitium_replicas=[u.rstrip("/") for u in _list("TECHNITIUM_REPLICAS", "http://10.250.100.1:5380")],
+        technitium_replica_token=os.environ.get("TECHNITIUM_REPLICA_TOKEN", ""),
         # (07/10) coleta a cada 1 min: a vista Detalhado dos Logs passou a ler daqui (query_log)
         ingest_interval=_int("INGEST_INTERVAL_SECONDS", 60),
         ingest_lag=_int("INGEST_LAG_SECONDS", 60),

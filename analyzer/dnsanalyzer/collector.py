@@ -3,6 +3,9 @@
 Janelas fechadas [início, fim) com fim = agora - INGEST_LAG (o Technitium grava
 os logs em lote; o atraso evita perder entradas). O cursor só avança na mesma
 transação em que os agregados são gravados -> sem perdas nem duplicação.
+
+(04/11) Mais de um Technitium: o principal e as réplicas (TECHNITIUM_REPLICAS), cada um com o próprio cursor.
+Um cliente consulta um deles (os dois resolvem direto na internet, um não repassa ao outro), então somar não duplica.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from .technitium import TechnitiumClient, parse_ts
 from .tenants import TenantResolver, auto_network_for, slugify
 
 log = logging.getLogger(__name__)
-CURSOR_KEY = "ingest_cursor"
+CURSOR_KEY = "ingest_cursor"   # do principal (nome antigo); réplica: "ingest_cursor@<url>"
 BLOCKED_TYPES = {"Blocked", "UpstreamBlocked", "CacheBlocked"}
 SEM_IP_RCODES = {"NxDomain", "ServerFailure"}   # (REFUSED é política, não "não existe")
 RESOLVIDO_TYPES = {"Recursive", "Cached"}         # só estas refletem a resolução na internet (Authoritative = zona local/app)
@@ -308,11 +311,34 @@ def _buscar_logs(client: TechnitiumClient, start: datetime, end: datetime, page_
                 + _buscar_logs(client, mid, end, page_size, pulados))
 
 
-def collect_once(client: TechnitiumClient | None = None) -> dict:
-    """Processa UMA janela. Retorna estatísticas (window_end=None se nada a fazer)."""
+def fontes() -> list[tuple[str, str, str]]:
+    """(url, token, chave do cursor) de cada Technitium coletado; o principal primeiro, com a chave de sempre."""
+    cfg = settings()
+    tok = cfg.technitium_replica_token or cfg.technitium_token
+    return [(cfg.technitium_url, cfg.technitium_token, CURSOR_KEY)] + [
+        (u, tok, f"{CURSOR_KEY}@{u}") for u in dict.fromkeys(cfg.technitium_replicas) if u != cfg.technitium_url]
+
+
+def cursores(c) -> dict[str, str | None]:
+    """{url: coletado até} de cada Technitium configurado (None = ainda não coletou nada)."""
+    fs = fontes()
+    vals = {r["key"]: r["value"] for r in c.execute(
+        "SELECT key, value FROM ingest_state WHERE key = ANY(%s)", ([k for _, _, k in fs],)).fetchall()}
+    return {u: vals.get(k) for u, _, k in fs}
+
+
+def coletado_ate(c) -> str | None:
+    """Até quando TODOS os Technitium foram coletados (o cursor mais atrasado): as telas não prometem dado que falta.
+    Réplica que nunca coletou fica de fora (acabou de ser ligada)."""
+    vals = [v for v in cursores(c).values() if v]
+    return min(vals, key=parse_ts) if vals else None
+
+
+def collect_once(client: TechnitiumClient | None = None, cursor_key: str = CURSOR_KEY) -> dict:
+    """Processa UMA janela de um Technitium. Retorna estatísticas (window_end=None se nada a fazer)."""
     cfg = settings()
     client = client or TechnitiumClient()
-    cur_s = db.get_state(CURSOR_KEY)
+    cur_s = db.get_state(cursor_key)
     now = datetime.now(timezone.utc)
     start = parse_ts(cur_s) if cur_s else (now - timedelta(hours=cfg.ingest_backfill_hours)).replace(
         second=0, microsecond=0)
@@ -332,7 +358,7 @@ def collect_once(client: TechnitiumClient | None = None) -> dict:
         c.execute(
             "INSERT INTO ingest_state (key, value) VALUES (%s, %s) "
             "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()",
-            (CURSOR_KEY, end.isoformat()),
+            (cursor_key, end.isoformat()),
         )
     stats.update({"entries": len(entries), "window_start": start.isoformat(), "window_end": end.isoformat(),
                   "caught_up": end >= limit, **({"skipped_seconds": pulados} if pulados else {})})

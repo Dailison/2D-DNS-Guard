@@ -261,6 +261,8 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | DHCP entregando o roteador com `allow-remote-requests` desligado: sem internet | DHCP com `dns-server` vazio |
 | `FORCE_DNS` com exceção `INTERNAL_DNS`: sem failover para quem consulta o Technitium direto | Sem a exceção nos sites |
 | Usuário `claude` no grupo `write`: `/export file=` sem permissão | Exportar pela tela (`/export terse`) e salvar no PC |
+| IP do site sem acesso à Hostinger (ex.: Centro Cardio): o túnel novo não faz handshake | `migra-tunel.sh` para antes da troca; confirmar com `tcpdump -ni eth0 host <IP>` na VPS (vê antes do firewall) e abrir chamado na Hostinger/provedor |
+| ASN sem resultado no RIPEstat (blocos da LACNIC) | Na VPS: `dig +short TXT <IP invertido>.origin.asn.cymru.com` |
 | `device-mode home` (ex.: Canaa Importados): `/system scheduler` bloqueado, sem reversão automática no site | Conferir `/system device-mode print`; mudar o modo exige acesso físico ao roteador (botão). Netwatch e scripts funcionam |
 | Ping vindo do túnel barrado na VPS: o `check-gateway=ping` das rotas novas falha | A VPS aceita `icmp echo-request` do `wg0` (já liberado) |
 | Troca de rota disparada e a sessão SSH presa, sem a troca seguinte | `timeout` em cada SSH; sites pelo IP do túnel antigo (Fase 3) |
@@ -290,3 +292,5 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Alencar (ALCRTR001) | 25 | 04/11/2026 | AS264525 Coelho Tecnologia (link principal) | antes usava 8.8.8.8 sem filtro: passou a ser filtrado (política `default` até o cadastro); link reserva Fibralink (CGNAT) sem ASN cadastrado: se a Coelho cair, o `check-gateway` volta ao túnel antigo; nomes fixos ALCNOTURNO001/002 no roteador ficaram sem uso (decisão do usuário) |
 | Boiadeiro (BOIRTR001) | 19 | 04/11/2026 | AS270996 Link Prime Tecnologia | DNS antes: 10.100.10.5 + 8.8.8.8 sem desvio; já tinha empresa no DNS Guard; nome fixo BOISRV001 ficou no roteador sem uso (decisão do usuário) |
 | Canaa Importados (CIMRTR001) | 62 | 04/11/2026 | AS270240 | `device-mode home`: sem scheduler (reversão automática só do lado do escritório); DNS antes 8.8.8.8 sem filtro, política `default` até o cadastro |
+| Churrascaria Tocantins (MikroTik) | 54 | 04/11/2026 | AS264257 Livre WiFi Telecom | ASN não aparece no RIPEstat (LACNIC): usar `dig TXT <ip-invertido>.origin.asn.cymru.com`; rede de convidados entregava 8.8.8.8 pelo DHCP e passou ao padrão |
+| **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

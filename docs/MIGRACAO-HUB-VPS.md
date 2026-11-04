@@ -31,6 +31,17 @@ Na VPS:
 Painel do Technitium Cloud: `http://10.250.100.1:5380`, a partir do escritório. Mudanças no Advanced Blocking
 são feitas pelo console ou pelo Technitium local: o console reenvia a configuração ao Cloud a cada minuto.
 
+## Scripts
+
+Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519_mikrotik` e `id_ed25519_vps`):
+
+- `migra-tunel.sh N "Nome" IP_LAN "rota da 2D no site" "rota do site no escritório" ASN`: Fases 1 a 4 para um
+  site com uma rede `10.N.0.0/16` e sem par com outro site. Para antes da troca se o túnel novo não pinga ou se a
+  reversão automática não puder ser armada; cancela as reversões só se os testes passarem.
+- `dns-padrao.sh IP_LAN 10.N.0.0/16 NOME`: Fase 5 completa (com o teste de failover) para um site **sem** regras
+  `FORCE_*`. Se já houver regras `FORCE_*`, para e avisa: adaptar à mão.
+- `wg-status.py`: cópia do `/usr/local/sbin/wg-status` da VPS.
+
 ## Fase 0: Levantamento (antes de mexer)
 
 1. **Identificar o site** no 2DRTR001 (peer em `wireguard_2D`):
@@ -250,6 +261,7 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | DHCP entregando o roteador com `allow-remote-requests` desligado: sem internet | DHCP com `dns-server` vazio |
 | `FORCE_DNS` com exceção `INTERNAL_DNS`: sem failover para quem consulta o Technitium direto | Sem a exceção nos sites |
 | Usuário `claude` no grupo `write`: `/export file=` sem permissão | Exportar pela tela (`/export terse`) e salvar no PC |
+| `device-mode home` (ex.: Canaa Importados): `/system scheduler` bloqueado, sem reversão automática no site | Conferir `/system device-mode print`; mudar o modo exige acesso físico ao roteador (botão). Netwatch e scripts funcionam |
 | Ping vindo do túnel barrado na VPS: o `check-gateway=ping` das rotas novas falha | A VPS aceita `icmp echo-request` do `wg0` (já liberado) |
 | Troca de rota disparada e a sessão SSH presa, sem a troca seguinte | `timeout` em cada SSH; sites pelo IP do túnel antigo (Fase 3) |
 | Script gravado sem `\$`: `syntax error` e failover parado | Escapar as variáveis; rodar o script uma vez para conferir |
@@ -276,3 +288,5 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Economize (EMZRTR001) | 33 | 03/11/2026 | AS264512 | par com o Ice Beer; já tinha `FORCE_*`; tem VPN própria de usuários (`wg-VPN`, `10.33.50.x`); rota antiga do galpão (`10.22.0.0/16`) ficou no túnel antigo |
 | Economize - Ice Beer (EMZRTR003) | 34 | 03/11/2026 | AS264512 (CGNAT) | par com o Economize; `FORCE_DOH` corrigido (8082 → 443); netwatch antigo desligado |
 | Alencar (ALCRTR001) | 25 | 04/11/2026 | AS264525 Coelho Tecnologia (link principal) | antes usava 8.8.8.8 sem filtro: passou a ser filtrado (política `default` até o cadastro); link reserva Fibralink (CGNAT) sem ASN cadastrado: se a Coelho cair, o `check-gateway` volta ao túnel antigo; nomes fixos ALCNOTURNO001/002 no roteador ficaram sem uso (decisão do usuário) |
+| Boiadeiro (BOIRTR001) | 19 | 04/11/2026 | AS270996 Link Prime Tecnologia | DNS antes: 10.100.10.5 + 8.8.8.8 sem desvio; já tinha empresa no DNS Guard; nome fixo BOISRV001 ficou no roteador sem uso (decisão do usuário) |
+| Canaa Importados (CIMRTR001) | 62 | 04/11/2026 | AS270240 | `device-mode home`: sem scheduler (reversão automática só do lado do escritório); DNS antes 8.8.8.8 sem filtro, política `default` até o cadastro |

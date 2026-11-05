@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from psycopg.types.json import Jsonb
@@ -1294,12 +1295,20 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
         cursor = collector.coletado_ate(c)   # o Technitium mais atrasado
         # (22/10) o agregado não guarda a resposta: nos bloqueados, a última com cadeia CNAME (do log de consultas), p/ o
         # console achar o culpado — api.sec.intl.miui.com é bloqueado por xiaomi.com (CNAME) e aparecia "em nenhuma lista"
+        # (05/11) pelo índice parcial query_log_cname_bloqueado; é um extra: passou de 5 s, a tela sai sem a cadeia
         bloq = sorted({r["dominio"] for r in rows if r["bloqueadas"]})
-        cad = {x["qname"]: x["answer"] for x in c.execute(
-            "SELECT DISTINCT ON (l.qname) l.qname, l.answer FROM query_log l "
-            "WHERE l.domain_id IN (SELECT domain_id FROM fqdns WHERE name = ANY(%(n)s)) AND l.qname = ANY(%(n)s) "
-            " AND l.ts BETWEEN %(s)s AND %(e)s AND l.rtype LIKE '%%Blocked%%' AND l.answer LIKE 'CNAME%%' "
-            "ORDER BY l.qname, l.ts DESC", {"n": bloq, "s": start, "e": end})} if bloq else {}
+        cad = {}
+        if bloq:
+            try:
+                with c.transaction():
+                    c.execute("SET LOCAL statement_timeout = '5s'")
+                    cad = {x["qname"]: x["answer"] for x in c.execute(
+                        "SELECT DISTINCT ON (l.qname) l.qname, l.answer FROM query_log l "
+                        "WHERE l.qname = ANY(%(n)s) AND l.ts BETWEEN %(s)s AND %(e)s "
+                        " AND l.rtype LIKE '%%Blocked%%' AND l.answer LIKE 'CNAME%%' "
+                        "ORDER BY l.qname, l.ts DESC", {"n": bloq, "s": start, "e": end})}
+            except psycopg.errors.QueryCanceled:
+                log.warning("logs agrupados: cadeia CNAME dos bloqueados passou de 5 s (%d nomes); saiu sem ela", len(bloq))
     for r in rows:
         r["answer"] = cad.get(r["dominio"])
     return {"rows": rows, "cap": cap, "coletado_ate": cursor}

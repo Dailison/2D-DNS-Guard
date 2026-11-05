@@ -181,8 +181,8 @@ adicionar = `INSERT` na tabela). Só `confidence = high` leva a `MALICIOSO`.
 
 | Fonte | Confiança | Uso |
 |---|---|---|
-| URLhaus (abuse.ch) | alta | hosts com malware online |
-| ThreatFox (abuse.ch) | alta | IOCs de malware/C2 |
+| URLhaus (abuse.ch, via espelho malware-filter) | alta | hosts com malware online |
+| ThreatFox (abuse.ch) | alta | IOCs de malware/C2 — **exige `ABUSECH_AUTH_KEY`** |
 | HaGeZi TIF (via registro AdGuard `filter_44`) | média | feed agregado de ameaças |
 | HaGeZi Badware Hoster / DynDNS / Bypass (VPN/DoH) / TLDs abusados | baixa | sinais |
 | Phishing.Database | baixa | tem falsos positivos em plataformas grandes |
@@ -191,6 +191,13 @@ Entradas de lista que são **sufixos públicos/plataformas** (ex.: `s3.us-east-1
 `github.io`) são descartadas, e o casamento nunca sobe acima do domínio registrável —
 um site malicioso em plataforma compartilhada não condena a plataforma. Falsos
 positivos marcados no admin viram supressões (`ti_suppressions`).
+
+Desde 21-22/10/2026 o abuse.ch só entrega as listas com **Auth-Key** (os `/downloads/…` sem chave
+respondem 410). O URLhaus vem do espelho público `malware-filter` (mesmos hosts, sem chave). A URL de uma
+fonte pode ter o marcador `{ABUSECH_AUTH_KEY}`, trocado pelo valor da variável de ambiente na hora do
+download (a chave não fica no banco nem aparece em erro/tela). Sem a variável a fonte fica *aguardando
+chave*: não baixa, não registra erro, e os indicadores já baixados continuam valendo. A chave gratuita
+(auth.abuse.ch) é só para uso não comercial; uso comercial pede assinatura.
 
 ### Multiempresa
 

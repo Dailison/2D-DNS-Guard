@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from . import db
+from .config import settings
 from .features import is_public_suffix, normalize
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,31 @@ _DOMAIN_RE = re.compile(r"^(?=.{3,253}$)[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?(\.
 _ADBLOCK_RE = re.compile(r"^\|\|([^\^/$|]+)\^(\$.*)?$")
 _SKIP_HOSTS = {"localhost", "localhost.localdomain", "local", "broadcasthost", "0.0.0.0", "ip6-localhost"}
 MAX_FEED_BYTES = 300 * 1024 * 1024
+_SEGREDOS = {"ABUSECH_AUTH_KEY": "abusech_auth_key"}   # marcador na URL -> campo do settings()
+
+
+class SemChave(Exception):
+    """A URL da fonte pede uma chave que não está no ambiente: a fonte é pulada, sem erro."""
+
+
+def resolve_url(url: str) -> str:
+    """Troca os marcadores {NOME} da URL pelos segredos do ambiente (a chave não fica no banco nem na tela)."""
+    for nome, campo in _SEGREDOS.items():
+        marca = "{" + nome + "}"
+        if marca in url:
+            valor = getattr(settings(), campo, "")
+            if not valor:
+                raise SemChave(nome)
+            url = url.replace(marca, valor)
+    return url
+
+
+def _sem_segredo(texto: str) -> str:
+    for campo in _SEGREDOS.values():
+        valor = getattr(settings(), campo, "")
+        if valor:
+            texto = texto.replace(valor, "***")
+    return texto
 
 
 def parse_line(kind: str, line: str) -> str | None:
@@ -85,7 +111,7 @@ def _download(url: str) -> str:
 
 def refresh_source(src: dict) -> int:
     """Atualiza uma fonte (substitui o conjunto de indicadores dela). Retorna nº de entradas."""
-    path = _download(src["url"])
+    path = _download(resolve_url(src["url"]))
     items: set[str] = set()
     try:
         with open(path, encoding="utf-8", errors="ignore") as f:
@@ -134,11 +160,17 @@ def refresh_due(force: bool = False, only: str | None = None) -> dict:
             n = refresh_source(s)
             done[s["name"]] = n
             log.info("TI %s: %d indicadores", s["name"], n)
-        except Exception as e:  # noqa: BLE001
-            errors[s["name"]] = str(e)[:300]
-            log.error("TI %s falhou: %s", s["name"], e)
+        except SemChave as e:
+            # sem a chave a fonte fica parada (os indicadores já baixados continuam valendo); não é erro
             with db.conn() as c:
-                c.execute("UPDATE ti_sources SET last_status=%s WHERE id=%s", (f"erro: {e}"[:300], s["id"]))
+                c.execute("UPDATE ti_sources SET last_status=%s WHERE id=%s",
+                          (f"aguardando chave: defina {e} no ambiente do analisador", s["id"]))
+        except Exception as e:  # noqa: BLE001
+            msg = _sem_segredo(str(e))
+            errors[s["name"]] = msg[:300]
+            log.error("TI %s falhou: %s", s["name"], msg)
+            with db.conn() as c:
+                c.execute("UPDATE ti_sources SET last_status=%s WHERE id=%s", (f"erro: {msg}"[:300], s["id"]))
     marked = mark_changed_domains() if done else 0
     return {"refreshed": done, "errors": errors, "marked_for_reanalysis": marked}
 

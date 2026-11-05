@@ -184,15 +184,20 @@ def run(since: datetime | None = None) -> dict:
                                       "threshold": round(thr)}, r["client_id"]):
                         created["new_domains_spike"] += 1
 
-            # 5) pico de volume: última hora vs média horária do próprio computador (7 dias)
+            # 5) pico de volume: última hora vs média horária do próprio computador (até 7 dias). A média divide
+            # pelas horas desde a 1ª consulta do computador na janela (máx. 168) e exige ≥ 24 h de histórico:
+            # computador recém-visto (ex.: os da réplica, coletados desde 04/11) não tem média com que comparar
+            fim_hist = now - timedelta(hours=1)
             for r in c.execute(
-                "WITH h AS (SELECT client_id, sum(queries) FILTER (WHERE bucket >= %s) AS last_h, "
-                "  sum(queries) FILTER (WHERE bucket < %s AND bucket >= %s) / 168.0 AS avg_h "
-                "  FROM query_agg WHERE tenant_id=%s AND bucket >= %s GROUP BY client_id) "
-                "SELECT h.*, host(cl.ip) AS ip FROM h JOIN clients cl ON cl.id=h.client_id "
+                "WITH h AS (SELECT client_id, sum(queries) FILTER (WHERE bucket >= %(fim)s) AS last_h, "
+                "  sum(queries) FILTER (WHERE bucket < %(fim)s) AS hist, "
+                "  min(bucket) FILTER (WHERE bucket < %(fim)s) AS desde "
+                "  FROM query_agg WHERE tenant_id=%(t)s AND bucket >= %(ini)s GROUP BY client_id), "
+                "m AS (SELECT client_id, last_h, hist / LEAST(GREATEST(extract(epoch FROM %(fim)s - desde) / 3600.0, 1), 168) "
+                "  AS avg_h FROM h WHERE desde <= %(fim)s - interval '24 hours') "
+                "SELECT m.*, host(cl.ip) AS ip FROM m JOIN clients cl ON cl.id=m.client_id "
                 "WHERE last_h >= 500 AND last_h >= 5 * GREATEST(avg_h, 1)",
-                    (now - timedelta(hours=1), now - timedelta(hours=1), now - timedelta(days=7, hours=1), tid,
-                     now - timedelta(days=7, hours=1))):
+                    {"fim": fim_hist, "t": tid, "ini": now - timedelta(days=7, hours=1)}):
                 if _upsert_alert(c, tid, "volume_spike", "medium",
                                  f"{r['ip']}: {int(r['last_h'])} consultas na última hora "
                                  f"(média {r['avg_h']:.0f}/h)",

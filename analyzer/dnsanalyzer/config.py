@@ -54,6 +54,7 @@ class Settings:
     technitium_logs_class: str
     technitium_replicas: list[str]     # (04/11) outros Technitium cujos logs também são coletados (cada um com seu cursor)
     technitium_replica_token: str
+    abusech_auth_key: str              # (05/11) Auth-Key do abuse.ch: troca {ABUSECH_AUTH_KEY} na URL das fontes de TI
 
     ingest_interval: int
     ingest_lag: int
@@ -175,6 +176,7 @@ def load_settings() -> Settings:
         # vazio desliga; o token é o do principal quando TECHNITIUM_REPLICA_TOKEN não vier
         technitium_replicas=[u.rstrip("/") for u in _list("TECHNITIUM_REPLICAS", "http://10.250.100.1:5380")],
         technitium_replica_token=os.environ.get("TECHNITIUM_REPLICA_TOKEN", ""),
+        abusech_auth_key=os.environ.get("ABUSECH_AUTH_KEY", "").strip(),
         # (07/10) coleta a cada 1 min: a vista Detalhado dos Logs passou a ler daqui (query_log)
         ingest_interval=_int("INGEST_INTERVAL_SECONDS", 60),
         ingest_lag=_int("INGEST_LAG_SECONDS", 60),

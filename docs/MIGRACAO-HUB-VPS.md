@@ -92,6 +92,9 @@ Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519
    #   elements = { 10.33.0.0/16 . 10.34.0.0/16, 10.34.0.0/16 . 10.33.0.0/16 }
    nft -c -f /etc/nftables/vpn.nft && nft -f /etc/nftables/vpn.nft
    ```
+   Inclua também o IP de túnel de cada roteador contra a rede do outro (os dois sentidos), por exemplo
+   `10.250.100.33 . 10.34.0.0/16, 10.34.0.0/16 . 10.250.100.33`. Sem isso, o ping ou o Winbox feito no próprio Mikrotik,
+   que sai com o IP de túnel, não chega ao par (as redes se falam, o roteador não). Feito em 05/11 para os dois pares.
    No túnel novo do site, o `allowed-address` do peer `VPS-2D` inclui a rede do outro site, e a Fase 3 cria
    também a rota para ela.
 
@@ -285,6 +288,7 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Faixa do túnel conflitando com rede local (a `10.100.200.0/24` era a `bridge-Lan` do escritório) | Conferir `/ip address` no levantamento |
 | Masquerade sem interface de saída: o cliente aparece como IP do túnel e cai no grupo da 2D (`10.100.0.0/16`) | NAT `accept` para `wg-vps-2d` antes do masquerade |
 | Rota trocada de um lado só: tráfego assimétrico, e a VPS descarta como pacote inválido | Fase 3 nos dois lados em sequência |
+| Ping do próprio Mikrotik (sem `src-address`) sai com o IP de túnel `10.250.100.N`: a VPS isola IPs de túnel | Escritório: liberado na VPS (`10.250.100.100`); pares: IP de túnel no `pares_sites`; nos demais, usar `src-address` da LAN |
 | `/tool fetch` termina sem erro mesmo sem conectar (falso "aberto") | Testar com `tcpdump` na VPS ou olhar o `status` do fetch |
 | Netwatch não roda o script | `policy=read,write,test` + `dont-require-permissions=yes` |
 | Chrome/Edge com `8.8.8.8` usam DoH e escapam do desvio da porta 53 | `FORCE_DOH` e `FORCE_QUIC` |

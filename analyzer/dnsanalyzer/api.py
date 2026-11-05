@@ -10,6 +10,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -1325,15 +1326,22 @@ def _cadeia_cname(c, rows, start, end) -> None:
 
 def _logs_grouped_por_resposta(start, end, tid, ip, cidr, ip_like, dominio, resposta, cls, categoria, sem_locais,
                                excluir, limit) -> dict:
-    """/logs/grouped com tipo de resposta: agrupa query_log (o agregado por hora não guarda o tipo)."""
+    """/logs/grouped com tipo de resposta: agrupa query_log (o agregado por hora não guarda o tipo). Em dois passos:
+    primeiro só o log (nome × domínio × empresa × IP), depois as junções com domínio/empresa/ajuste — Cached do dia
+    inteiro (~3 milhões de linhas) caiu de 21 s para ~4 s."""
     where, p = _filtros_query_log(start, end, tid, ip, cidr, ip_like, dominio, resposta, cls, categoria, sem_locais,
                                   excluir, limit)
-    sql = ("SELECT l.qname AS dominio, count(*) AS n, count(*) FILTER (WHERE l.rtype LIKE '%%Blocked%%') AS bloqueadas, "
-           " count(DISTINCT l.client_ip) AS nclientes, max(l.ts) AS ultima, "
-           " array_agg(DISTINCT t.name ORDER BY t.name) AS empresas, " + _CLS_COLS + " "
-           "FROM query_log l JOIN domains d ON d.id = l.domain_id JOIN tenants t ON t.id = l.tenant_id "
-           "LEFT JOIN tenant_domains td ON td.tenant_id = l.tenant_id AND td.domain_id = l.domain_id "
-           f"WHERE {' AND '.join(where)} GROUP BY l.qname ORDER BY max(l.ts) DESC LIMIT %(lim)s")
+    fora = [w for w in where if re.search(r"\b(d|td)\.", w)]   # filtros do domínio/ajuste: depois de agrupar
+    dentro = [w for w in where if w not in fora]
+    sql = ("SELECT g.qname AS dominio, sum(g.n) AS n, sum(g.b) AS bloqueadas, count(DISTINCT g.client_ip) AS nclientes, "
+           " max(g.ultima) AS ultima, array_agg(DISTINCT t.name ORDER BY t.name) AS empresas, " + _CLS_COLS + " "
+           "FROM (SELECT l.qname, l.domain_id, l.tenant_id, l.client_ip, count(*) AS n, "
+           "       count(*) FILTER (WHERE l.rtype LIKE '%%Blocked%%') AS b, max(l.ts) AS ultima "
+           f"      FROM query_log l WHERE {' AND '.join(dentro)} GROUP BY 1, 2, 3, 4) g "
+           "JOIN domains d ON d.id = g.domain_id JOIN tenants t ON t.id = g.tenant_id "
+           "LEFT JOIN tenant_domains td ON td.tenant_id = g.tenant_id AND td.domain_id = g.domain_id "
+           + (f"WHERE {' AND '.join(fora)} " if fora else "")
+           + "GROUP BY g.qname ORDER BY max(g.ultima) DESC LIMIT %(lim)s")
     with db.conn() as c:
         c.execute("SET LOCAL statement_timeout = '25s'")   # filtro raro num período longo: erro claro, não a tela presa
         rows = c.execute(sql, p).fetchall()

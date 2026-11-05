@@ -12,6 +12,18 @@
 #                    http://searxng:8080, LOG_DIR vazio (stdout), DATA_DIR=/data.
 # A api escuta também em 10.100.50.202:8088 (hostPort só na VPN, não no IP público): os Technitium baixam as listas
 # dali (LISTS_ALLOWED_IPS confere o IP de origem, que o hostPort preserva).
+#
+# O PostgreSQL também escuta em 10.100.50.202:5432 (mesma regra: só o wg0), para o 2D-Backup levar o banco para
+# fora da VPS. O CronJob daqui guarda 3 dumps num PVC local-path — mesmo disco do nó onde o banco vive, então não
+# protege contra perda do disco. Dois passos de admin, uma vez:
+#
+#   1. Papel só-leitura para o backup (NÃO usar o superusuário postgres no agente):
+#        kubectl -n dns-guard exec sts/analyzer-db -- psql -U postgres -c #          "CREATE ROLE backup_2d LOGIN PASSWORD 'TROCAR'; GRANT pg_read_all_data TO backup_2d;"
+#      pg_read_all_data (PG14+) dá SELECT em tudo e USAGE nos schemas: suficiente para o dump, e sem poder
+#      escrever nem apagar nada se a credencial vazar.
+#
+#   2. Firewall do host: liberar 5432 apenas na interface wg0. O hostIP já impede o bind no IP público, mas a
+#      regra explícita evita que uma mudança futura de hostIP abra a porta sem ninguém perceber.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -90,7 +102,15 @@ spec:
             - name: TZ
               value: America/Sao_Paulo
           ports:
+            # Backup externo (2D-Backup faz o dump pelo protocolo, via Npgsql).
+            # hostPort ligado SÓ ao wg0 (10.100.50.202): não escuta no IP
+            # público da VPS nem em 0.0.0.0 — mesma regra da api :8088.
+            # StatefulSet de 1 réplica não precisa de "Recreate" como a api:
+            # o rolling update de StatefulSet apaga o pod antes de recriar,
+            # então nunca há dois disputando a porta do host.
             - containerPort: 5432
+              hostPort: 5432
+              hostIP: 10.100.50.202
           readinessProbe:
             exec: {command: ["pg_isready", "-U", "postgres"]}
             periodSeconds: 10

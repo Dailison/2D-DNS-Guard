@@ -65,4 +65,4 @@ Para desfazer à mão, por roteador:
 Na VPS: `systemctl disable --now frr`.
 
 **Latência:** Barretos → escritório pela VPS ~68 ms (duas pernas de ~34 ms: site → VPS → escritório); pelo túnel
-direto ~34 ms. Ver "preferência" abaixo.
+direto ~34 ms. Pendente: decidir se o tráfego escritório ↔ site passa a preferir o túnel direto (`local-pref`).

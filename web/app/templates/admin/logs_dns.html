@@ -27,7 +27,7 @@
     {% if row.categoria %}<span class="cls-cat">{{ cat_label.get(row.categoria, row.categoria) }}</span>{% endif %}
   {% else %}<span class="mut">—</span>{% endif %}
 {% endmacro %}
-<div class="pg-h"><h1 title="Technitium, com empresa por IP"><i class="bi bi-clock-history"></i>Logs</h1></div>
+<div class="pg-h"><h1 title="Cópia dos logs do Technitium no analisador, com empresa por IP"><i class="bi bi-clock-history"></i>Logs</h1></div>
 {# explicações em tooltip, no rótulo do campo e no cabeçalho da coluna a que se referem #}
 {% set T_CLS = "A do analisador para o site; o ajuste manual da empresa (marcado com o lápis) prevalece. Juntando empresas numa linha, vale a pior. Ameaças = Malicioso + Suspeito" %}
 {% set T_RESP = "Como o Technitium respondeu: Blocked = bloqueado pelo filtro; Cached, Recursive… = resolvido" %}
@@ -111,9 +111,9 @@
       {% else %}{{ linhas|length }} registro(s){% endif %}
     </h2>
     <span class="mut" style="font-size:.8rem">
-      {% if fonte_analisador is defined %}<span class="selo" title="Fonte: analisador, agregado por hora (~5-7 min de atraso). Tempo real: vista Detalhado"><i class="bi bi-clock-history"></i>coletado até {{ (coletado_ate or '—')[11:16] }}</span>{% if cap %} <span class="selo av" title="Só os 1000 domínios mais acessados aparecem: refine o filtro"><i class="bi bi-exclamation-triangle"></i>limite de 1000 domínios</span>{% endif %}
-      {% elif fonte_detalhe is defined %}fonte: analisador (coletado até {{ (coletado_ate or '—')[11:16] }}){% if coberto_desde %} · de <b>{{ coberto_desde[11:16] }}</b>{% if coberto_desde[:10] != fim[:10] %} ({{ coberto_desde[8:10] }}/{{ coberto_desde[5:7] }}){% endif %} em diante · <a href="{{ url_antigos }}">mais antigos</a>{% endif %}{% if guardado_desde %} · guardado desde {{ guardado_desde[8:10] }}/{{ guardado_desde[5:7] }} {{ guardado_desde[11:16] }}{% endif %} · <a href="{{ url_aovivo }}" title="consulta direto o Technitium: tempo real, mais lento">ao vivo</a>
-      {% else %}{{ scanned }} varridos{% if coberto_desde %} · de <b>{{ coberto_desde[11:16] }}</b>{% if coberto_desde[:10] != fim[:10] %} ({{ coberto_desde[8:10] }}/{{ coberto_desde[5:7] }}){% endif %} em diante · <a href="{{ url_antigos }}">mais antigos</a>{% endif %}{% if url_analisador %} · ao vivo (Technitium) · <a href="{{ url_analisador }}">voltar ao analisador</a>{% endif %}{% endif %}
+      {% if fonte_analisador is defined %}<span class="selo" title="Fonte: cópia dos logs no analisador (~1-2 min de atraso)"><i class="bi bi-clock-history"></i>coletado até {{ (coletado_ate or '—')[11:16] }}</span>{% if cap %} <span class="selo av" title="Só os 1000 domínios mais acessados aparecem: refine o filtro"><i class="bi bi-exclamation-triangle"></i>limite de 1000 domínios</span>{% endif %}
+      {% elif fonte_detalhe is defined %}fonte: analisador (coletado até {{ (coletado_ate or '—')[11:16] }}){% if coberto_desde %} · de <b>{{ coberto_desde[11:16] }}</b>{% if coberto_desde[:10] != fim[:10] %} ({{ coberto_desde[8:10] }}/{{ coberto_desde[5:7] }}){% endif %} em diante · <a href="{{ url_antigos }}">mais antigos</a>{% endif %}{% if guardado_desde %} · guardado desde {{ guardado_desde[8:10] }}/{{ guardado_desde[5:7] }} {{ guardado_desde[11:16] }}{% endif %}
+      {% endif %}
     </span>
   </div>
   {% macro desbloquear(row) %}

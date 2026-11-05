@@ -1229,12 +1229,17 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
                  dominio: Optional[str] = None, blocked: bool = False,
                  cls: list[str] = Query(default=[]), categoria: list[str] = Query(default=[]),
                  por_cliente: bool = False, sem_locais: bool = False, excluir: list[str] = Query(default=[]),
-                 limit: int = Query(1000, le=5000)):
+                 resposta: Optional[str] = None, limit: int = Query(1000, le=5000)):
     """Logs DNS agrupados por nome consultado (a partir de query_agg, por hora), com os
     mesmos filtros da tela Logs DNS. Atraso = o da coleta (~5-7 min).
     Cada linha traz a classificação efetiva (ajuste da empresa > IA; juntando empresas, a pior).
     cls = classificações (PENDENTE = ainda sem classificação); por_cliente = uma linha por
-    nome × computador × empresa (quem acessou)."""
+    nome × computador × empresa (quem acessou).
+    resposta = tipo de resposta do Technitium (Recursive, Cached, Authoritative...): o agregado não guarda, então agrupa a
+    cópia linha a linha (query_log, 7 dias) — a tela de Logs não consulta mais o Technitium (05/11)."""
+    if resposta and resposta.strip() != "Blocked" and not por_cliente:
+        return _logs_grouped_por_resposta(start, end, tid, ip, cidr, ip_like, dominio, resposta, cls, categoria,
+                                          sem_locais, excluir, limit)
     where = ["q.bucket >= date_trunc('hour', %(s)s::timestamptz)", "q.bucket < %(e)s",
              "q.last_seen >= %(s)s", "q.first_seen <= %(e)s"]
     p: dict = {"s": start, "e": end, "lim": limit + 1}
@@ -1293,37 +1298,54 @@ def logs_grouped(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
         rows = c.execute(sql, p).fetchall()
         cap, rows = len(rows) > limit, rows[:limit]
         cursor = collector.coletado_ate(c)   # o Technitium mais atrasado
-        # (22/10) o agregado não guarda a resposta: nos bloqueados, a última com cadeia CNAME (do log de consultas), p/ o
-        # console achar o culpado — api.sec.intl.miui.com é bloqueado por xiaomi.com (CNAME) e aparecia "em nenhuma lista"
-        # (05/11) pelo índice parcial query_log_cname_bloqueado; é um extra: passou de 5 s, a tela sai sem a cadeia
-        bloq = sorted({r["dominio"] for r in rows if r["bloqueadas"]})
-        cad = {}
-        if bloq:
-            try:
-                with c.transaction():
-                    c.execute("SET LOCAL statement_timeout = '5s'")
-                    cad = {x["qname"]: x["answer"] for x in c.execute(
-                        "SELECT DISTINCT ON (l.qname) l.qname, l.answer FROM query_log l "
-                        "WHERE l.qname = ANY(%(n)s) AND l.ts BETWEEN %(s)s AND %(e)s "
-                        " AND l.rtype LIKE '%%Blocked%%' AND l.answer LIKE 'CNAME%%' "
-                        "ORDER BY l.qname, l.ts DESC", {"n": bloq, "s": start, "e": end})}
-            except psycopg.errors.QueryCanceled:
-                log.warning("logs agrupados: cadeia CNAME dos bloqueados passou de 5 s (%d nomes); saiu sem ela", len(bloq))
-    for r in rows:
-        r["answer"] = cad.get(r["dominio"])
+        _cadeia_cname(c, rows, start, end)
     return {"rows": rows, "cap": cap, "coletado_ate": cursor}
 
 
-@app.get("/logs/detalhe", dependencies=[Depends(auth)])
-def logs_detalhe(start: datetime, end: datetime, tid: int = 0, ip: Optional[str] = None,
-                 cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
-                 dominio: Optional[str] = None, resposta: Optional[str] = None,
-                 cls: list[str] = Query(default=[]), categoria: list[str] = Query(default=[]),
-                 sem_locais: bool = False, excluir: list[str] = Query(default=[]),
-                 limit: int = Query(1000, le=5000)):
-    """Logs DNS linha a linha (query_log: cópia dos logs do Technitium feita pelo coletor a cada minuto, 7 dias), com
-    os filtros da tela Logs DNS — os mais recentes primeiro. `disponivel_desde` = a consulta mais antiga guardada;
-    `mais_antigos` = horário da última linha quando há mais além do limite (a tela continua dali)."""
+def _cadeia_cname(c, rows, start, end) -> None:
+    """(22/10) O agregado não guarda a resposta: nos bloqueados, a última com cadeia CNAME (do log de consultas), p/ o
+    console achar o culpado — api.sec.intl.miui.com é bloqueado por xiaomi.com (CNAME) e aparecia "em nenhuma lista".
+    (05/11) Pelo índice parcial query_log_cname_bloqueado; é um extra: passou de 5 s, a tela sai sem a cadeia."""
+    bloq = sorted({r["dominio"] for r in rows if r["bloqueadas"]})
+    cad = {}
+    if bloq:
+        try:
+            with c.transaction():
+                c.execute("SET LOCAL statement_timeout = '5s'")
+                cad = {x["qname"]: x["answer"] for x in c.execute(
+                    "SELECT DISTINCT ON (l.qname) l.qname, l.answer FROM query_log l "
+                    "WHERE l.qname = ANY(%(n)s) AND l.ts BETWEEN %(s)s AND %(e)s "
+                    " AND l.rtype LIKE '%%Blocked%%' AND l.answer LIKE 'CNAME%%' "
+                    "ORDER BY l.qname, l.ts DESC", {"n": bloq, "s": start, "e": end})}
+        except psycopg.errors.QueryCanceled:
+            log.warning("logs agrupados: cadeia CNAME dos bloqueados passou de 5 s (%d nomes); saiu sem ela", len(bloq))
+    for r in rows:
+        r["answer"] = cad.get(r["dominio"])
+
+
+def _logs_grouped_por_resposta(start, end, tid, ip, cidr, ip_like, dominio, resposta, cls, categoria, sem_locais,
+                               excluir, limit) -> dict:
+    """/logs/grouped com tipo de resposta: agrupa query_log (o agregado por hora não guarda o tipo)."""
+    where, p = _filtros_query_log(start, end, tid, ip, cidr, ip_like, dominio, resposta, cls, categoria, sem_locais,
+                                  excluir, limit)
+    sql = ("SELECT l.qname AS dominio, count(*) AS n, count(*) FILTER (WHERE l.rtype LIKE '%%Blocked%%') AS bloqueadas, "
+           " count(DISTINCT l.client_ip) AS nclientes, max(l.ts) AS ultima, "
+           " array_agg(DISTINCT t.name ORDER BY t.name) AS empresas, " + _CLS_COLS + " "
+           "FROM query_log l JOIN domains d ON d.id = l.domain_id JOIN tenants t ON t.id = l.tenant_id "
+           "LEFT JOIN tenant_domains td ON td.tenant_id = l.tenant_id AND td.domain_id = l.domain_id "
+           f"WHERE {' AND '.join(where)} GROUP BY l.qname ORDER BY max(l.ts) DESC LIMIT %(lim)s")
+    with db.conn() as c:
+        c.execute("SET LOCAL statement_timeout = '25s'")   # filtro raro num período longo: erro claro, não a tela presa
+        rows = c.execute(sql, p).fetchall()
+        cap, rows = len(rows) > limit, rows[:limit]
+        cursor = collector.coletado_ate(c)
+        _cadeia_cname(c, rows, start, end)
+    return {"rows": rows, "cap": cap, "coletado_ate": cursor}
+
+
+def _filtros_query_log(start, end, tid, ip, cidr, ip_like, dominio, resposta, cls, categoria, sem_locais, excluir,
+                       limit) -> tuple[list[str], dict]:
+    """WHERE e parâmetros dos filtros da tela Logs DNS sobre query_log (alias l; d = domains, td = tenant_domains)."""
     where = ["l.ts >= %(s)s", "l.ts < %(e)s"]
     p: dict = {"s": start, "e": end, "lim": limit + 1}
     if tid:
@@ -1357,6 +1379,21 @@ def logs_detalhe(start: datetime, end: datetime, tid: int = 0, ip: Optional[str]
         where.append("(" + " OR ".join(cond) + ")")
     if categoria:
         where.append("d.category = ANY(%(cat)s)"); p["cat"] = categoria
+    return where, p
+
+
+@app.get("/logs/detalhe", dependencies=[Depends(auth)])
+def logs_detalhe(start: datetime, end: datetime, tid: int = 0, ip: Optional[str] = None,
+                 cidr: list[str] = Query(default=[]), ip_like: Optional[str] = None,
+                 dominio: Optional[str] = None, resposta: Optional[str] = None,
+                 cls: list[str] = Query(default=[]), categoria: list[str] = Query(default=[]),
+                 sem_locais: bool = False, excluir: list[str] = Query(default=[]),
+                 limit: int = Query(1000, le=5000)):
+    """Logs DNS linha a linha (query_log: cópia dos logs do Technitium feita pelo coletor a cada minuto, 7 dias), com
+    os filtros da tela Logs DNS — os mais recentes primeiro. `disponivel_desde` = a consulta mais antiga guardada;
+    `mais_antigos` = horário da última linha quando há mais além do limite (a tela continua dali)."""
+    where, p = _filtros_query_log(start, end, tid, ip, cidr, ip_like, dominio, resposta, cls, categoria, sem_locais,
+                                  excluir, limit)
     sql = ("SELECT l.ts, host(l.client_ip) AS ip, l.tenant_id, l.qname AS dominio, l.qtype AS tipo, l.rtype AS resposta, "
            " l.rcode, l.answer, " + _CLS_EFETIVA + " AS classificacao, (td.override_classification IS NOT NULL) AS ajustada, "
            " d.category AS categoria "

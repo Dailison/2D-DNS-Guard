@@ -712,6 +712,30 @@ def test_grouped_bloqueado_traz_a_cadeia_cname(api):
             c.execute("DELETE FROM query_log WHERE qname = 'x.ruim.com'")
 
 
+def test_grouped_por_tipo_de_resposta_agrupa_a_copia_do_log(api):
+    """05/11: a tela de Logs não consulta mais o Technitium. Agrupado com tipo de resposta (o agregado por hora não guarda
+    o tipo) agrupa a cópia linha a linha (query_log), com os mesmos filtros e a classificação."""
+    from dnsanalyzer import collector, db
+    with db.conn() as c:
+        collector.ensure_log_partitions(c, AGORA, AGORA + timedelta(hours=1))
+        did = c.execute("SELECT id FROM domains WHERE name = 'ruim.com'").fetchone()["id"]
+        a = c.execute("SELECT id FROM tenants WHERE slug = 'a'").fetchone()["id"]
+        for ip, rt, m in (("10.1.0.5", "Cached", 1), ("10.1.0.6", "Cached", 2), ("10.1.0.5", "Recursive", 3)):
+            c.execute("INSERT INTO query_log (ts, tenant_id, client_ip, domain_id, qname, qtype, rtype, rcode, answer) "
+                      "VALUES (%s, %s, %s, %s, 'z.ruim.com', 'A', %s, 'NoError', 'A 1.2.3.4')",
+                      (AGORA + timedelta(minutes=m), a, ip, did, rt))
+    try:
+        rows = {r["dominio"]: r for r in _grouped(api, resposta="Cached")}
+        assert set(rows) == {"z.ruim.com"}, "só o que teve resposta Cached (o agregado não entra)"
+        z = rows["z.ruim.com"]
+        assert z["n"] == 2 and z["nclientes"] == 2 and z["bloqueadas"] == 0 and z["empresas"] == ["Empresa A"]
+        assert z["classificacao"] == "MALICIOSO"
+        assert {r["dominio"] for r in _grouped(api, resposta="Recursive", ip="10.1.0.6")} == set(), "filtros valem"
+    finally:
+        with db.conn() as c:
+            c.execute("DELETE FROM query_log WHERE qname = 'z.ruim.com'")
+
+
 def test_reforco_so_com_cpu_nao_substitui_a_vm(monkeypatch):
     """22/10: com as GPUs desligadas o laço principal mandava a análise da VM p/ o servidor só com CPU (10.9.10.10): a VM
     ficava parada e as duas filas dividiam a máquina de CPU (63 análises/h). Reforço só com CPU não entra no rodízio."""

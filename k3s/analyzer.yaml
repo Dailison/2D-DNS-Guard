@@ -250,3 +250,59 @@ spec:
       volumes:
         - name: data
           emptyDir: {}
+---
+# Backup diário do banco (pg_dump -Fc, zstd) no PVC analyzer-db-backup; guarda os 3 últimos. A cópia para fora do
+# k3s (VPS 187.41.115.189) está em docs/MIGRACAO-ANALISADOR-K3S.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: analyzer-db-backup
+  namespace: dns-guard
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests: {storage: 40Gi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: analyzer-db-backup
+  namespace: dns-guard
+spec:
+  schedule: "30 4 * * *"
+  timeZone: America/Sao_Paulo
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 7200
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: dump
+              image: docker.io/library/postgres:17
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: analyzer-db, key: POSTGRES_PASSWORD}
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  f=/backup/dnsanalyzer-$(date +%Y%m%d-%H%M).dump
+                  pg_dump -h analyzer-db -U postgres -d dnsanalyzer -Fc --compress=zstd:3 -f "$f.tmp"
+                  mv "$f.tmp" "$f"
+                  ls -1t /backup/dnsanalyzer-*.dump | tail -n +4 | xargs -r rm -f
+                  ls -la /backup
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {memory: 1Gi}
+          volumes:
+            - name: backup
+              persistentVolumeClaim: {claimName: analyzer-db-backup}

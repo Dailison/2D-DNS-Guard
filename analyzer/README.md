@@ -6,7 +6,9 @@ classifica cada domínio como **TRABALHO / NAO_TRABALHO / SUSPEITO / MALICIOSO /
 DESCONHECIDO**, calcula **RISK_SCORE** e **WORK_SCORE** (0–100) e gera **alertas
 comportamentais** por cliente.
 
-- **Onde roda:** VM dedicada `10.100.10.4` (Debian 13) — coleta, banco, IA e API.
+- **Onde roda:** desde 04/11/2026 no k3s (ns `dns-guard`, `k3s/analyzer.yaml`) — banco, coleta, classificação e API;
+  a VM `10.100.10.4` ficou só com o Ollama e os SearXNG (ver `docs/MIGRACAO-ANALISADOR-K3S.md`). A instalação
+  em VM descrita abaixo (`install.sh`) é o modo antigo, mantido p/ referência e rollback.
 - **Onde se vê:** console **2D DNS Guard** em `dns-guard.2dtecnologia.com` → **Análise (IA)**
   (código em `web/app/analise.py` deste repo). A VM não tem tela própria.
 - **Listas, não DNS:** o analisador põe cada domínio na lista da categoria (bloqueio ou
@@ -286,7 +288,9 @@ setx OLLAMA_CONTEXT_LENGTH 8192
 # na GPU e ~1 GB livre. (OLLAMA_GPU_OVERHEAD não tem efeito no Ollama 0.34.)
 setx LLAMA_ARG_FIT_TARGET 2600
 # firewall (admin): só a VM do analisador fala com o Ollama
-New-NetFirewallRule -DisplayName "Ollama (analisador DNS)" -Direction Inbound -Protocol TCP -LocalPort 11434 -RemoteAddress 10.100.10.4 -Action Allow
+New-NetFirewallRule -DisplayName "Ollama (analisador DNS)" -Direction Inbound -Protocol TCP -LocalPort 11434 -RemoteAddress 10.100.10.4,10.100.50.202 -Action Allow
+# (04/11: o classificador roda no k3s, que chega pela VPN como 10.100.50.202; num PC que já tem a regra:
+#  Set-NetFirewallRule -DisplayName "Ollama (analisador DNS)" -RemoteAddress 10.100.10.4,10.100.50.202)
 ```
 
 Desative as regras "ollama.exe" que o Windows cria no primeiro uso (liberam a porta para qualquer

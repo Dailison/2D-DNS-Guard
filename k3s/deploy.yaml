@@ -18,7 +18,11 @@ data:
   # Technitium Cloud (VPS, túnel 10.250.100.0/24): recebe a mesma config do Advanced Blocking do principal
   TECHNITIUM_REPLICAS: http://10.250.100.1:5380
   TECHNITIUM_LIBERADOS_GROUP: Liberados
-  ANALYZER_URL: http://10.100.10.4:8088
+  # analisador no k3s desde 04/11 (k3s/analyzer.yaml): o console fala por dentro do cluster; os Technitium baixam as
+  # listas pelo hostPort da VPN (não resolvem o nome interno); a VM 10.100.10.4 ficou só com Ollama e SearXNG
+  ANALYZER_URL: http://dnsanalyzer-api:8088
+  ANALYZER_LISTAS_URL: http://10.100.50.202:8088
+  ANALYZER_VM_IP: 10.100.10.4
   PORTAL_KIT_URL: https://portal.2dtecnologia.com/kit/launcher.js
   SSO_LOGIN_URL: https://portal.2dtecnologia.com/2dtecnologia/sso/login
   SESSION_COOKIE_SECURE: "true"

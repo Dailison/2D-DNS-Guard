@@ -10,11 +10,11 @@ por um fluxo de 4 fases e as IAs põem **todo** site numa lista (de bloqueio ou 
 | Parte | Onde roda | Pasta |
 |---|---|---|
 | **Console web**: Análise (IA), Empresas, Domínios bloqueados, Domínios liberados, IPs liberados, Logs, Gráficos, Operadores | k3s, ns `dns-guard`, `https://dns-guard.2dtecnologia.com` | [`web/`](web/) |
-| **Analisador**: coleta dos logs, regras, Threat Intel, IA local (Ollama/Qwen3), IA online (Gemini), listas, alertas, API | VM `10.100.10.4` (systemd + PostgreSQL) | [`analyzer/`](analyzer/) |
+| **Analisador**: coleta dos logs, regras, Threat Intel, IA local (Ollama/Qwen3), IA online (Gemini), listas, alertas, API | k3s `dns-guard` (PostgreSQL + api/coletor/classificador); Ollama e SearXNG na VM `10.100.10.4` | [`analyzer/`](analyzer/) |
 | **Resolvedor/filtro**: Technitium + app Advanced Blocking | VM `10.100.10.15` | (fora do repo) |
 
 ```
-clientes ──DNS──► Technitium (10.100.10.15) ──logs──► analisador (10.100.10.4) ──API :8088──┐
+clientes ──DNS──► Technitium (10.100.10.15) ──logs──► analisador (k3s)       ──API :8088──┐
                    ▲   ▲ baixa /listas/*.txt e /whitelist/*.txt (1 h)  │                    ▼
                    │   └───────────────────────────────────────────────┘                    │
                    └──────── políticas / exceções / logs ◄──────────────────── console web (k3s)

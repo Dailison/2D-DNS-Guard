@@ -40,11 +40,25 @@ minha /16").
   - **0 perda**: 90/90 do PC e 80/80 Ice Beer → Economize.
   - Na falha, o par usou a estática /16 pela VPS.
 
+## Túnel direto do par Economize ↔ Ice Beer (05/11, 13:50)
+
+Pela VPS o par dava ~66 ms (duas pernas de ~33 ms). As duas lojas estão no mesmo provedor, então foi criado um
+WireGuard direto entre elas:
+- **Economize** (IP público `138.255.202.8`, `pppoe-out_Ultrabyte`): `wg-par-icebeer`, porta 13240, `10.33.254.1/30`;
+  peer `IceBeer` sem endpoint; filtro de entrada aceita UDP 13240 do WAN.
+- **Ice Beer** (CGNAT `100.64.7.128`): `wg-par-economize`, `10.33.254.2/30`; inicia para `138.255.202.8:13240`, com
+  keepalive de 25 s.
+- **NAT:** nos dois, `accept` para a interface do par antes do masquerade, que não tem interface de saída.
+- **BGP:** sessão `bgp-par-*` sobre o túnel, cada lado aceita só a /16 do outro com `local-pref 200` (acima do
+  escritório direto 150 e da VPS 100); anuncia só as próprias redes.
+- **Resultado:** `10.33.20.1` ↔ `10.34.20.1` em **3,6 ms** (antes 66). Failover para a VPS em ~9 s e volta em ~1 s,
+  **0/60 perdidos**. Comentário `par-33-34` em tudo.
+- Para outros pares (ex.: Dom Bosco ↔ Estácio, Norte e Sul I ↔ II, Moral CAN ↔ PBS), o mesmo modelo. Vários já têm
+  túnel direto próprio (`wg-NorteSul`, `wg-matriz`), basta pôr o BGP por cima.
+
 ## Limites que faltam resolver para produção
 
-1. **Par sem reserva:** com o túnel da Economize com a VPS realmente fora, o tráfego Economize ↔ Ice Beer para. O
-   escritório não repassa entre sites, e a VPS só aceita do peer do escritório origem `10.100.0.0/16`. Se quiser reserva
-   para pares, o escritório precisa repassar as redes do par e liberar o encaminhamento entre os dois túneis.
+1. **Par:** resolvido para Economize ↔ Ice Beer com o túnel direto (principal) + VPS (reserva).
 2. **Isolamento no caminho direto:** o firewall do 2DRTR001 não barra site → site pelo `wireguard_2D`. O BGP não dá a
    rota, mas uma estática no site ainda passaria. Falta o equivalente ao `pares_sites` no escritório.
 3. **Escala:**

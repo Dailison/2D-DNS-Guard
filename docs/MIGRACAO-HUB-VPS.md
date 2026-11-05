@@ -352,6 +352,26 @@ A troca é automática em ~10 s e sem perda. Isso **substitui o failover que aca
 Detalhes, gerador e como incluir um site: [BGP-PRODUCAO.md](BGP-PRODUCAO.md). Para um site novo, depois da migração,
 acrescente a linha em `docs/scripts/bgp-sites.txt` e siga o passo a passo de lá.
 
+**Ainda no túnel antigo (levantamento de 05/11 no 2DRTR001):**
+
+| Site | N | Situação |
+|---|---|---|
+| Moura | 6 | Online (handshake ok; o comentário "OFFLINE" do peer está velho). **Só o Winbox (8291) aberto, SSH recusado.** |
+| Atacadão Peba | 31 | Online. Só o Winbox aberto, SSH recusado. |
+| Ponto | 37 | Online. Só o Winbox aberto, SSH recusado. |
+| Fazenda Casa Nova | 21 | Online, sem SSH (porta 22 fechada). |
+| Haras GV | 45 | Provedor sem internet. |
+| Map Elite | 15 | Peer sem handshake ("DEU RUIM"). |
+| Bonança | 20 / 53 | Peer sem handshake; o peer é `10.20`, a rota é `10.53`. |
+| Sup Vitória | 46 | Rota sem peer. |
+| Sicampo | 69 | Peer desativado. |
+| Economize galpão | 22 | Rota sem peer. |
+| 2D Fazenda / 2D Condomínio | 4 / 5 | **Não migram:** falam só com o escritório (decisão do usuário). |
+| Centro Cardio | 55 | Banida na Hostinger: fica. |
+
+Para migrar Moura, Peba, Ponto e Fazenda Casa Nova, é preciso habilitar o SSH (`/ip service`) e importar a chave do
+usuário `claude`.
+
 A **Centro Cardio (55)** está banida na Hostinger (informado pelo usuário em 05/11) e fica só no túnel antigo com o
 escritório.
 

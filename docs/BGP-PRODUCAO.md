@@ -17,7 +17,9 @@ simétrico) mantendo os clientes isolados.
   - Latência típica: de ~65 ms (duas pernas pela VPS) para a de um túnel só (2–35 ms).
   - Se o túnel direto cair, os dois lados passam para a VPS em ~10 s (keepalive 3 s, hold 9 s), sem perda nos testes.
 - **Par (matriz ↔ filial):**
-  - Dom Bosco ↔ Estácio vai pela VPS: a VPS manda a rede de um para o outro.
+  - Dom Bosco ↔ Estácio **deixou de ser par em 05/11** (o usuário informou que não usam nada entre eles):
+    - nos dois roteadores, saíram as rotas de um para o outro e a /16 do outro no `allowed-address` do `VPS-2D`;
+    - na VPS, saíram do `pares_sites` (backup `vpn.nft.antes-tirar-par-28-29`) e da tabela.
   - Economize ↔ Ice Beer tem túnel direto com BGP (`local-pref 200`) e a VPS como reserva.
   - Norte e Sul I ↔ II e Moral PBS ↔ CAN seguem nos túneis diretos próprios, com rotas estáticas, fora do BGP.
 - **Isolamento:**
@@ -77,7 +79,17 @@ Para só acrescentar uma rede num site que já tem BGP:
 ## Firewall
 
 - **VPS:** `vpn.nft` aceita `tcp dport 179` só de `10.250.100.0/24` vindo do `wg0`. Backup em `vpn.nft.antes-bgp-producao`.
-- **2DRTR001:** não filtra entrada pelos túneis (só `in-interface-list=WAN`).
+- **2DRTR001, entrada:** não filtra a entrada pelos túneis, só a que vem de `in-interface-list=WAN`.
+- **2DRTR001, isolamento (05/11, pedido do usuário):** a regra de forward
+  `isolamento: site -> site pelo escritorio BLOQUEADO` faz `drop` de `connection-state=new` com
+  `in-interface=wireguard_2D` **e** `out-interface=wireguard_2D`. O log tem o prefixo `SITE-SITE`.
+  - Fica antes do `jump bloqueio-vpn` e depois de `ESTABELECIDAS E RELACIONADAS`.
+  - É uma 2ª barreira: nos sites, o peer do túnel antigo já só aceita `10.100.0.0/16`. O teste
+    Barretos → Semetra com rota forçada nem saiu do roteador ("host unreachable").
+  - 2D Fazenda (10.4) e 2D Condomínio (10.5) também ficam só com o escritório (decisão do usuário).
+  - Escritório → sites, usuários da VPN (`wireguard-VPN`) e k3s → sites continuam liberados.
+  - Os pares usam a VPS (`pares_sites`) ou um túnel direto próprio.
+  - Backup: `2DRTR001-antes-isolamento-*.rsc`.
 
 ## Conferir
 

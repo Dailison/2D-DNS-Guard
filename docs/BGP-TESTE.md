@@ -52,7 +52,17 @@ minha /16").
      gravar o vizinho e as listas no FRR e no 2DRTR001;
    - os peers antigos de todos os sites migrados precisam voltar a ficar ativos, porque o túnel direto é a reserva.
 
-## Reversão
+## Situação: mantido em produção (05/11, 13:39, pedido do usuário)
 
-Scheduler/script `rollback-bgp` nos quatro Mikrotiks (remove tudo com comentário `bgp-2d` e volta a desativar os peers
-reativados) e `rollback-bgp` na VPS (para o FRR; `frr` desabilitado no boot).
+As reversões automáticas foram canceladas, e o `frr` está habilitado no boot da VPS. Os peers antigos de Barretos,
+Economize e Ice Beer seguem ativos no escritório.
+
+Para desfazer à mão, por roteador:
+```
+/routing bgp connection remove [find comment~"bgp-2d"]; /routing bgp instance remove [find comment~"bgp-2d"]
+/routing filter rule remove [find comment~"bgp-2d"]; /ip firewall address-list remove [find comment~"bgp-2d"]; /ip route remove [find comment~"bgp-2d"]
+```
+Na VPS: `systemctl disable --now frr`.
+
+**Latência:** Barretos → escritório pela VPS ~68 ms (duas pernas de ~34 ms: site → VPS → escritório); pelo túnel
+direto ~34 ms. Ver "preferência" abaixo.

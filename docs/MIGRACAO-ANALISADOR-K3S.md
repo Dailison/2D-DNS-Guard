@@ -26,7 +26,15 @@ Os manifestos estão em `k3s/analyzer.yaml`, a imagem em `analyzer/Dockerfile` e
   - os SearXNG: `http://10.100.10.4:8888`, `http://searxng:8080` (o do próprio k3s) e `http://10.100.10.4:8889`;
   - os reforços, como antes.
 - O k3s sai para a rede da 2D pelo `wg0` do VPN-Hostinger (10.100.50.202, AllowedIPs 10.0.0.0/8, via escritório).
-- **Túnel direto k3s ↔ VPS (05/11):** interface `wg-vps` no k3s (`/etc/wireguard/wg-vps.conf`, `wg-quick@wg-vps`) com a
+- **DESFEITO em 05/11 às 14:20 (o que está abaixo é só histórico):** o túnel direto quebrou o k3s → sites que vão
+  pela VPS (21 hosts fora do monitoramento). Com o `10.100.50.202/32` no peer do k3s, a VPS passou a descartar esse IP
+  vindo pelo peer do escritório (no WireGuard, cada IP de origem pertence a um peer só). O k3s → sites passa pelo
+  escritório, e a VPS é a reserva desse caminho, então a mesma identidade nos dois caminhos não funciona.
+  - Removidos: o `wg-quick@wg-vps` no k3s (desabilitado; o `.conf` ficou), o peer `site 250` do `wg0.conf` e a regra
+    `K3S_PUBLICO` do `vpn.nft`. Backups `*.antes-tirar-k3s`.
+  - Para refazer: o k3s precisa de um IP próprio no túnel (ex.: `10.250.100.250`), sem tomar o `10.100.50.202`.
+    Também precisa de roteamento por origem para as respostas do hostPort `:8088` voltarem pelo `wg0`.
+- **Túnel direto k3s ↔ VPS (05/11, desfeito):** interface `wg-vps` no k3s (`/etc/wireguard/wg-vps.conf`, `wg-quick@wg-vps`) com a
   MESMA identidade `10.100.50.202`, roteando só `10.250.100.1/32`; na VPS é o peer `# site 250` do `wg0.conf`
   (`AllowedIPs = 10.100.50.202/32`, mais específico que o `10.100.0.0/16` do escritório) e o firewall aceita o UDP 13231
   só do `46.202.150.204` (`K3S_PUBLICO`). Console → Technitium Cloud e Cloud → listas (`:8088`) não passam mais pelo

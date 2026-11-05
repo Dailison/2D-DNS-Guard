@@ -267,6 +267,14 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 - Exportar a configuração final do cliente e a do 2DRTR001 para `Documents\mikrotik-backups\`.
 - Manter o túnel antigo alguns dias como reserva (`distance=2`). Depois, remover o peer do site em
   `wireguard_2D` e as rotas antigas dos dois lados.
+- **05/11/2026 (pedido do usuário):** removidas do 2DRTR001 as 46 rotas antigas (`gateway=10.100.100.N`, `distance=2`)
+  de todo destino que já tinha a rota pela VPS ativa (backup `2DRTR001-antes-limpeza-rotas-*.rsc`). Com isso:
+  - **acabou o failover automático do escritório** para o túnel antigo: se a VPS cair, os sites migrados ficam
+    sem acesso a partir do escritório até a VPS voltar ou a rota antiga ser recriada (está no backup);
+  - ficaram as 14 rotas dos sites ainda no túnel antigo (Moura, Map Elite, Atacadão Peba, Ponto, Sup Vitória,
+    Bonança, Sicampo, 2D Fazenda, 2D Condomínio, Economize galpão 10.22, Boiadeiro 10.20) e dos pendentes
+    (Fazenda Casa Nova, Haras GV, Centro Cardio);
+  - ainda sobram os peers em `wireguard_2D` e, nos sites, a `ROTA 2D` com `distance=2` (inofensiva sem a volta).
 
 ## Armadilhas que já encontramos
 

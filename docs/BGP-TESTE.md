@@ -65,4 +65,23 @@ Para desfazer à mão, por roteador:
 Na VPS: `systemctl disable --now frr`.
 
 **Latência:** Barretos → escritório pela VPS ~68 ms (duas pernas de ~34 ms: site → VPS → escritório); pelo túnel
-direto ~34 ms. Pendente: decidir se o tráfego escritório ↔ site passa a preferir o túnel direto (`local-pref`).
+direto ~34 ms.
+
+**Preferência invertida (05/11, 13:45, pedido do usuário):** o tráfego escritório ↔ site agora prefere o túnel direto
+(`local-pref 150` nas sessões diretas, no escritório `bgp-in-9/33/34` e nos sites `bgp-in-direto`), e a VPS vira a
+reserva. O DNS do Cloud, o k3s e o par Economize ↔ Ice Beer continuam pela VPS.
+
+| Site → `10.100.20.1` | Pela VPS | Direto |
+|---|---|---|
+| Barretos | 68 ms | 34 ms |
+| Economize | ~65 ms | 3 ms |
+| Ice Beer | ~65 ms | 3 ms |
+
+- Failover no sentido novo (sessão direta da Economize bloqueada no escritório): os dois lados para a VPS em ~8 s,
+  volta em ~1 s, **0/60 perdidos**.
+- **Cuidado ao mudar a preferência:** troque os dois lados juntos. Ao inverter só o escritório, o acesso pela rede local
+  dos sites caiu (ida direta, volta pela VPS = assimétrico; a VPS descarta) até os sites serem trocados pelo IP de túnel.
+- **Efeito colateral:** o IP de túnel desses sites (`10.250.100.N`) não responde mais a partir do escritório (ida pela
+  VPS, volta direta). Use o IP da rede local para gerenciar. Os scripts `migra-tunel.sh`/`levanta.sh` usam o túnel só
+  na migração.
+- No RouterOS 7.23/7.25, `/routing bgp session refresh` exige `afi=ip`; trocar a regra do filtro já reaplica sozinho.

@@ -352,8 +352,13 @@ CATEGORIAS_MANUAIS = {"infra_bloqueio", "outros_bloqueios", "para_revisar"}   # 
 _LISTA_RE = re.compile(r"/listas/([a-z_]+)\.txt$")
 
 
+def _listas_base():
+    """Base das URLs de listas gravadas no Technitium (ANALYZER_LISTAS_URL; vazio = ANALYZER_URL)."""
+    return (current_app.config.get("ANALYZER_LISTAS_URL") or current_app.config.get("ANALYZER_URL") or "").rstrip("/")
+
+
 def url_whitelist(cat):
-    return f"{current_app.config['ANALYZER_URL'].rstrip('/')}/whitelist/{cat}.txt"
+    return _listas_base() + f"/whitelist/{cat}.txt"
 
 
 def dominios_whitelist() -> set[str]:
@@ -365,7 +370,7 @@ def dominios_whitelist() -> set[str]:
 
 
 def url_lista(cat):
-    return (current_app.config.get("ANALYZER_URL") or "").rstrip("/") + f"/listas/{cat}.txt"
+    return _listas_base() + f"/listas/{cat}.txt"
 
 
 def listas_assinadas(g):
@@ -742,7 +747,7 @@ _LIB_RE = re.compile(r"/(?:liberacao|servico)/([a-z0-9-]+)\.txt$")
 
 def url_liberacao(slug):
     """URL de um serviço / lista de liberação (a mesma serve p/ bloquear ou liberar)."""
-    return (current_app.config.get("ANALYZER_URL") or "").rstrip("/") + f"/servico/{slug}.txt"
+    return _listas_base() + f"/servico/{slug}.txt"
 
 
 _AJ_RE = re.compile(r"/ajustes/(liberar|bloquear)/([A-Za-z0-9_-]+)\.txt$")
@@ -752,7 +757,7 @@ def url_ajuste(escopo: str, acao: str) -> str:
     """Lista de ajustes do escopo (empresa/unidade) publicada pelo analisador (ver analyzer: ajustes.py)."""
     import base64
     tok = base64.urlsafe_b64encode(escopo.encode()).decode().rstrip("=")
-    return (current_app.config.get("ANALYZER_URL") or "").rstrip("/") + f"/ajustes/{acao}/{tok}.txt"
+    return _listas_base() + f"/ajustes/{acao}/{tok}.txt"
 
 
 def escopo_do_grupo(g) -> str | None:

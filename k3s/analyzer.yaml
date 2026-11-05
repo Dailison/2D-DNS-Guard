@@ -1,0 +1,252 @@
+# 2D DNS Analyzer no k3s (04/11, pedido do usuário: a infraestrutura local não é confiável p/ guardar o banco).
+# Aqui: PostgreSQL 17 (banco do analisador) + api + coletor + classificador (uma imagem, analyzer/Dockerfile).
+# Fica na VM 10.100.10.4 só o que precisa dela: Ollama (gemma4:26b, CPU) e os SearXNG das portas 8888/8889, que
+# escutam em 10.100.10.4 e só aceitam o k3s (10.100.50.202) — ver docs/MIGRACAO-ANALISADOR-K3S.md.
+#
+# Aplicado por admin (o SA do CI só faz `set image`):  kubectl apply -f k3s/analyzer.yaml
+# Secrets (fora do git), uma vez:
+#   analyzer-db:     POSTGRES_PASSWORD (superusuário postgres do banco)
+#   dnsanalyzer-env: o analyzer.env inteiro (--from-env-file), com DATABASE_URL apontando p/ analyzer-db:5432.
+#                    Diferenças em relação à VM: OLLAMA_URL=http://10.100.10.4:11434, LLM_NUM_THREAD=22 (a VM tem 24
+#                    vCPUs; o padrão "CPUs - 2" contaria as do k3s), WEB_SEARCH_URL com 10.100.10.4:8888/8889 +
+#                    http://searxng:8080, LOG_DIR vazio (stdout), DATA_DIR=/data.
+# A api escuta também em 10.100.50.202:8088 (hostPort só na VPN, não no IP público): os Technitium baixam as listas
+# dali (LISTS_ALLOWED_IPS confere o IP de origem, que o hostPort preserva).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: analyzer-db-data
+  namespace: dns-guard
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests: {storage: 100Gi}
+# depois de criado: kubectl patch pv <volume> -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+# (o local-path apaga os dados junto com o PVC por padrão)
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: analyzer-db
+  namespace: dns-guard
+  labels: {app: analyzer-db}
+spec:
+  replicas: 1
+  serviceName: analyzer-db
+  selector:
+    matchLabels: {app: analyzer-db}
+  template:
+    metadata:
+      labels: {app: analyzer-db}
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:17
+          args:
+            # mesma configuração da VM (postgresql.conf de 10.100.10.4)
+            - -c
+            - shared_buffers=2GB
+            - -c
+            - effective_cache_size=6GB
+            - -c
+            - work_mem=32MB
+            - -c
+            - maintenance_work_mem=512MB
+            - -c
+            - max_connections=40
+            - -c
+            - max_wal_size=2GB
+            - -c
+            - checkpoint_timeout=15min
+            - -c
+            - random_page_cost=1.1
+            - -c
+            - wal_compression=pglz
+            - -c
+            - shared_preload_libraries=pg_stat_statements
+            - -c
+            - pg_stat_statements.track=all
+            - -c
+            - log_min_duration_statement=500ms
+            - -c
+            - timezone=America/Sao_Paulo
+            - -c
+            - log_timezone=America/Sao_Paulo
+            - -c
+            - datestyle=ISO, DMY
+            - -c
+            - default_text_search_config=pg_catalog.portuguese
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: analyzer-db, key: POSTGRES_PASSWORD}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # a VM usa pt_BR.UTF-8; a imagem não tem esse locale do glibc, então a ordenação vem do ICU (pt-BR)
+            - name: POSTGRES_INITDB_ARGS
+              value: "--locale-provider=icu --icu-locale=pt-BR --locale=C.UTF-8"
+            - name: TZ
+              value: America/Sao_Paulo
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "postgres"]}
+            periodSeconds: 10
+          livenessProbe:
+            exec: {command: ["pg_isready", "-U", "postgres"]}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: shm, mountPath: /dev/shm}
+          resources:
+            requests: {cpu: 250m, memory: 3Gi}
+            limits: {memory: 8Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: analyzer-db-data}
+        - name: shm   # consultas paralelas usam /dev/shm (64 MB por padrão no container)
+          emptyDir: {medium: Memory, sizeLimit: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analyzer-db
+  namespace: dns-guard
+spec:
+  selector: {app: analyzer-db}
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnsanalyzer-api
+  namespace: dns-guard
+  labels: {app: dnsanalyzer-api}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # hostPort: a nova só sobe depois que a antiga solta a porta
+  selector:
+    matchLabels: {app: dnsanalyzer-api}
+  template:
+    metadata:
+      labels: {app: dnsanalyzer-api}
+    spec:
+      imagePullSecrets:
+        - name: registry-2d
+      initContainers:
+        - name: migrate   # aplica migrations/ novas a cada imagem nova (o install.sh da VM fazia isso)
+          image: registry.2dtecnologia.com/dailison/2d-dnsanalyzer:latest
+          args: ["migrate"]
+          envFrom:
+            - secretRef: {name: dnsanalyzer-env}
+      containers:
+        - name: api
+          image: registry.2dtecnologia.com/dailison/2d-dnsanalyzer:latest
+          imagePullPolicy: Always
+          args: ["api"]
+          envFrom:
+            - secretRef: {name: dnsanalyzer-env}
+          ports:
+            - containerPort: 8088
+              hostPort: 8088
+              hostIP: 10.100.50.202   # listas p/ os Technitium (só a rede interna da 2D)
+          readinessProbe:
+            httpGet: {path: /health, port: 8088}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8088}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dnsanalyzer-api
+  namespace: dns-guard
+spec:
+  selector: {app: dnsanalyzer-api}
+  ports:
+    - port: 8088
+      targetPort: 8088
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnsanalyzer-collector
+  namespace: dns-guard
+  labels: {app: dnsanalyzer-collector}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # nunca dois coletores ao mesmo tempo
+  selector:
+    matchLabels: {app: dnsanalyzer-collector}
+  template:
+    metadata:
+      labels: {app: dnsanalyzer-collector}
+    spec:
+      imagePullSecrets:
+        - name: registry-2d
+      containers:
+        - name: collector
+          image: registry.2dtecnologia.com/dailison/2d-dnsanalyzer:latest
+          imagePullPolicy: Always
+          args: ["run-collector"]
+          envFrom:
+            - secretRef: {name: dnsanalyzer-env}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnsanalyzer-classifier
+  namespace: dns-guard
+  labels: {app: dnsanalyzer-classifier}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # nunca dois classificadores ao mesmo tempo
+  selector:
+    matchLabels: {app: dnsanalyzer-classifier}
+  template:
+    metadata:
+      labels: {app: dnsanalyzer-classifier}
+    spec:
+      terminationGracePeriodSeconds: 660   # termina a análise em andamento (TimeoutStopSec da VM)
+      imagePullSecrets:
+        - name: registry-2d
+      containers:
+        - name: classifier
+          image: registry.2dtecnologia.com/dailison/2d-dnsanalyzer:latest
+          imagePullPolicy: Always
+          args: ["run-classifier"]
+          envFrom:
+            - secretRef: {name: dnsanalyzer-env}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 2Gi}
+      volumes:
+        - name: data
+          emptyDir: {}

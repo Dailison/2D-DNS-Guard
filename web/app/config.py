@@ -22,11 +22,16 @@ class Config:
     TECHNITIUM_REPLICAS = [u.strip().rstrip("/") for u in os.environ.get("TECHNITIUM_REPLICAS", "").split(",") if u.strip()]
     TECHNITIUM_REPLICA_TOKEN = os.environ.get("TECHNITIUM_REPLICA_TOKEN", "")   # vazio = o mesmo TECHNITIUM_TOKEN
 
-    # Analisador (IA local na VM 10.100.10.4, pasta analyzer/ deste repo). Também guarda
+    # Analisador (pasta analyzer/ deste repo; desde 04/11 no k3s, ns dns-guard). Também guarda
     # os operadores do console e os metadados dos liberados.
-    ANALYZER_URL = os.environ.get("ANALYZER_URL", "")  # ex: http://10.100.10.4:8088
+    ANALYZER_URL = os.environ.get("ANALYZER_URL", "")  # ex: http://dnsanalyzer-api:8088 (o console fala por aqui)
     ANALYZER_TOKEN = os.environ.get("ANALYZER_TOKEN", "")
     ANALYZER_ENABLED = bool(ANALYZER_URL and ANALYZER_TOKEN)
+    # Endereço das listas que vai nas URLs gravadas no Technitium (ele baixa as listas daqui): o Technitium não
+    # resolve o nome interno do k3s, então usa o IP da VPN (http://10.100.50.202:8088). Vazio = ANALYZER_URL.
+    ANALYZER_LISTAS_URL = os.environ.get("ANALYZER_LISTAS_URL", "") or ANALYZER_URL
+    # IP da VM do Ollama local, só p/ o rótulo "VM" da coluna Analisador do IA ao vivo. Vazio = host do ANALYZER_URL.
+    ANALYZER_VM_IP = os.environ.get("ANALYZER_VM_IP", "")
 
     # Operador inicial (criado no 1º acesso se ainda não houver nenhum super-admin).
     SUPERADMIN_EMAIL = os.environ.get("SUPERADMIN_EMAIL", "")

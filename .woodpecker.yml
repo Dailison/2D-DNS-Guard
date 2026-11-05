@@ -1,16 +1,21 @@
-# Pipeline Woodpecker do 2D DNS Guard.
-# Builda o console web (web/) e faz deploy no k3s (namespace `dns-guard`).
-# O analisador (analyzer/) roda na VM 10.100.10.4 e é publicado à parte (ver README).
+# Pipeline Woodpecker do 2D DNS Guard (k3s, namespace `dns-guard`).
+#   web/      -> console (registry .../2d-dns-guard)      -> deployment web
+#   analyzer/ -> analisador (registry .../2d-dnsanalyzer) -> deployments dnsanalyzer-api/collector/classifier
+#                (04/11: saiu da VM 10.100.10.4 para o k3s; a migração do banco roda no initContainer da api)
+# Cada lado só builda quando os arquivos dele mudam (when.path por step).
 # Secrets globais já existentes: registry_user, registry_pass, deploy_kubeconfig.
 when:
   - event: [push, manual]
     branch: main
     path:
-      exclude: ["analyzer/**", "*.md", "docs/**"]
+      exclude: ["*.md", "docs/**"]
 
 steps:
-  build-and-push:
+  web-build:
     image: docker:27-cli
+    when:
+      - path: ["web/**", ".woodpecker.yml"]
+      - event: manual
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -26,8 +31,32 @@ steps:
       - docker push $REGISTRY/dailison/2d-dns-guard:$TAG
       - docker push $REGISTRY/dailison/2d-dns-guard:latest
 
-  deploy:
+  analyzer-build:
+    image: docker:27-cli
+    when:
+      - path: ["analyzer/**", ".woodpecker.yml"]
+      - event: manual
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      REGISTRY: registry.2dtecnologia.com
+      REG_USER:
+        from_secret: registry_user
+      REG_PASS:
+        from_secret: registry_pass
+    commands:
+      - export TAG=${CI_COMMIT_SHA:0:12}
+      - echo "$REG_PASS" | docker login "$REGISTRY" -u "$REG_USER" --password-stdin
+      - docker build -t $REGISTRY/dailison/2d-dnsanalyzer:$TAG -t $REGISTRY/dailison/2d-dnsanalyzer:latest ./analyzer
+      - docker push $REGISTRY/dailison/2d-dnsanalyzer:$TAG
+      - docker push $REGISTRY/dailison/2d-dnsanalyzer:latest
+
+  web-deploy:
     image: alpine/k8s:1.34.1
+    depends_on: [web-build]
+    when:
+      - path: ["web/**", ".woodpecker.yml"]
+      - event: manual
     environment:
       REG: registry.2dtecnologia.com/dailison
       KC:
@@ -38,3 +67,25 @@ steps:
       # O SA de deploy só faz patch de imagem; ns/svc/ingress são aplicados por admin (k3s/deploy.yaml).
       - kubectl -n dns-guard set image deployment/web web="$REG/2d-dns-guard:$TAG"
       - kubectl -n dns-guard rollout status deployment/web --timeout=150s
+
+  analyzer-deploy:
+    image: alpine/k8s:1.34.1
+    depends_on: [analyzer-build]
+    when:
+      - path: ["analyzer/**", ".woodpecker.yml"]
+      - event: manual
+    environment:
+      REG: registry.2dtecnologia.com/dailison
+      KC:
+        from_secret: deploy_kubeconfig
+    commands:
+      - export TAG=${CI_COMMIT_SHA:0:12}
+      - mkdir -p $HOME/.kube && printf '%s' "$KC" > $HOME/.kube/config
+      # api primeiro: o initContainer `migrate` atualiza o banco antes do coletor e do classificador subirem
+      - kubectl -n dns-guard set image deployment/dnsanalyzer-api migrate="$REG/2d-dnsanalyzer:$TAG" api="$REG/2d-dnsanalyzer:$TAG"
+      - kubectl -n dns-guard rollout status deployment/dnsanalyzer-api --timeout=300s
+      - kubectl -n dns-guard set image deployment/dnsanalyzer-collector collector="$REG/2d-dnsanalyzer:$TAG"
+      - kubectl -n dns-guard set image deployment/dnsanalyzer-classifier classifier="$REG/2d-dnsanalyzer:$TAG"
+      - kubectl -n dns-guard rollout status deployment/dnsanalyzer-collector --timeout=150s
+      # o classificador espera a análise em andamento terminar (até 11 min)
+      - kubectl -n dns-guard rollout status deployment/dnsanalyzer-classifier --timeout=900s

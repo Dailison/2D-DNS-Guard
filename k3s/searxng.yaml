@@ -1,6 +1,6 @@
 # SearXNG no k3s do VPS (30/09, pedido do usuário): 3ª instância da busca na web do analisador, com o IP público do
 # VPS (cota própria nos buscadores — as da VM e do PC saem pelo mesmo IP da 2D). Só escuta no IP interno da rede da
-# 2D (10.100.50.202:8888, hostPort com hostIP): NÃO fica exposta no IP público. O analisador (VM 10.100.10.4) a usa
+# 2D (10.100.50.202:8888, hostPort com hostIP): NÃO fica exposta no IP público. O analisador (k3s desde 04/11) a usa
 # em WEB_SEARCH_URL.
 #
 # Aplicar (admin): sudo k3s kubectl apply -f k3s/searxng.yaml
@@ -79,3 +79,16 @@ spec:
       volumes:
         - name: settings
           configMap: {name: searxng-settings}
+---
+# 04/11: o analisador passou para o k3s (k3s/analyzer.yaml) e usa esta instância por dentro do cluster
+# (http://searxng:8080); o hostPort 10.100.50.202:8888 continua p/ quem está fora.
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng
+  namespace: dns-guard
+spec:
+  selector: {app: searxng}
+  ports:
+    - port: 8080
+      targetPort: 8080

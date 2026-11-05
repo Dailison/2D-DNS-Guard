@@ -104,6 +104,45 @@ Para só acrescentar uma rede num site que já tem BGP:
 **Tudo:** na VPS, `systemctl disable --now frr`. Isso tira as rotas da VPS dos dois lados; o direto continua até
 remover também as sessões diretas. Sem BGP, o tráfego volta às estáticas `hub novo`, pela VPS.
 
-## Situação por site
+## Rollout (05/11/2026, ~16:45–17:25)
 
-Veja a seção "Rollout" abaixo. As exceções são registradas lá.
+**Antes:**
+- 2DRTR001 atualizado para o RouterOS 7.25.1.
+- VPS: `frr.conf` gerado com os 39 sites. Backup: `/etc/frr/frr.conf.antes-producao-*`.
+- VPS: porta 179 aberta para `10.250.100.0/24`.
+- Escritório: `escritorio-prep` e a nota.
+
+**Por site** (`bgp-lote.sh` no rascunho da sessão, um site por vez):
+1. Lado do escritório.
+2. Esperar o handshake do túnel antigo.
+3. Export de backup (`~/Documents/mikrotik-backups/<site>-antes-bgp-*.rsc`).
+4. Script do site, pelo IP da LAN.
+5. Conferir: as duas sessões estabelecidas, rotas diretas no escritório, ping do PC do escritório e ping do k3s.
+6. Cancelar a reversão.
+
+**Resultado:**
+- **39 sites no BGP:** os 3 do teste mais 36 novos.
+  - 7, 8, 11, 12, 14, 16, 17, 19, 23–29, 35, 36, 38, 39, 41, 43, 47, 48, 51, 52, 54, 56–58, 61, 62, 65, 70–73.
+  - Todos com as duas sessões e conferidos. Nenhuma reversão disparou.
+- **Escritório:** 39 sessões diretas + a VPS, com 171 rotas /24 pelo túnel direto.
+- **VPS:** todos os vizinhos estabelecidos.
+- **Acesso:** o k3s alcança os 39 sites.
+- **Latência do escritório até o roteador do site:** caiu de ~65 ms para 2–4 ms na maioria. Nos sites de outros
+  provedores ficou em 30–35 ms, e nos sites Starlink (G&D 71–73), ~110 ms.
+- **Failover testado na Semetra** (sessão direta desligada no escritório, ping do PC para o DC 10.7.10.5): **60/60, sem
+  perda**. Foi de 2–4 ms para ~66 ms pela VPS e voltou ao direto sozinho ao religar.
+- **Par Dom Bosco ↔ Estácio:** pela VPS com BGP (~65 ms, como antes). Um túnel direto, como o da Economize ↔ Ice Beer,
+  baixaria a latência, se for o caso.
+- **Sem reversão automática:** 62, 70, 72 e 73 (`device-mode` sem scheduler) foram feitos por último.
+
+**Fora do BGP:**
+
+| Site | Motivo |
+|---|---|
+| Centro Cardio (55) | Banida na Hostinger (informado pelo usuário): fica **só no túnel antigo com o escritório**, com a rota estática de sempre. O túnel novo dela continua criado e parado. |
+| Fazenda Casa Nova (21) | Sem SSH. |
+| Haras GV (45) | Provedor sem internet; só pelo túnel antigo. |
+
+**Quedas durante o dia, sem relação com o BGP:**
+- Boiadeiro (19) ficou fora das ~09:20 às ~17:00. Ao voltar, foi atualizado para o 7.25.1 e entrou no BGP.
+- Imperio (16) ficou fora ~15 min por volta das 16:45, até no IP público. Entrou no BGP depois.

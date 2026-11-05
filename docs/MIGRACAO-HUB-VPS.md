@@ -335,6 +335,25 @@ Todos os sites migrados foram para a 7.25.1 (stable), em lotes de 5, com export 
 Barretos foi feito pelo usuário, e a AgenciaCanaa já estava nela. Os de canal long-term (G&D Matriz, Posto ISO) foram
 para o stable. Ficou de fora o Boiadeiro (19), fora do ar desde ~09:20 de 05/11 (nenhum dos dois túneis recebe nada
 dele). O escritório (2DRTR001, 7.25) fica para uma janela separada.
+- **Depois (05/11):**
+  - o Boiadeiro voltou ~17:00 e foi atualizado;
+  - o escritório foi atualizado às ~16:40, em 157 s fora do ar.
+
+## Roteamento dinâmico (BGP) — desde 05/11/2026
+
+Todos os sites migrados (menos Centro Cardio, Fazenda Casa Nova e Haras GV) rodam BGP com dois caminhos até o
+escritório:
+- **principal:** o túnel antigo direto, cujo peer no escritório foi **reativado**;
+- **reserva:** a VPS.
+
+A troca é automática em ~10 s e sem perda. Isso **substitui o failover que acabou com a remoção das rotas antigas
+(Fase 6)**. Não desative os peers do `wireguard_2D` marcados `bgp-2d`.
+
+Detalhes, gerador e como incluir um site: [BGP-PRODUCAO.md](BGP-PRODUCAO.md). Para um site novo, depois da migração,
+acrescente a linha em `docs/scripts/bgp-sites.txt` e siga o passo a passo de lá.
+
+A **Centro Cardio (55)** está banida na Hostinger (informado pelo usuário em 05/11) e fica só no túnel antigo com o
+escritório.
 
 ## Sites migrados
 
@@ -382,4 +401,4 @@ dele). O escritório (2DRTR001, 7.25) fica para uma janela separada.
 | Cotrel (COTREL-CARAJAS-PA) | 12 | 05/11/2026 | AS264512 | quatro redes extras via `EXTRAS=`: `192.168.21.0/24` (Matriz, ~70 equipamentos), `.30` (clientes, ~47), `.40` (câmeras, ~28, sem DNS) e `.50` (funcionários, vazia), todas cadastradas na empresa 81 (menos a `.50`); a `10.12` quase não tem máquinas; `FORCE_*` existentes adaptadas; filtro com "REJEITA" só para saída aos provedores e bloqueio de portas de VPN que libera destinos internos: o túnel novo passa sem mudança |
 | **Casa Nova - Fazenda** | 21 | **pendente** | AS264525 Coelho (138.0.54.224) | sem SSH pelo túnel antigo (peer com comentário "SEM ACESSO"): precisa liberar a porta 22 e importar a chave do `claude` |
 | **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
-| **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |
+| **Centro Cardio (CTORTR001)** | 55 | **fica no túnel antigo** (banida na Hostinger, 05/11) | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

@@ -1,5 +1,8 @@
 # Teste de BGP em estrela (hubs VPS + escritório) — 05/11/2026
 
+> **Em produção desde 05/11/2026 em todos os sites migrados:** ver [BGP-PRODUCAO.md](BGP-PRODUCAO.md). O que está
+> abaixo é o registro do teste.
+
 Sucessor do [teste de OSPF](OSPF-TESTE-BARRETOS.md). **Por que BGP:** o escritório fala com todos, os clientes ficam
 isolados e só alguns pares (matriz ↔ filial) conversam. No BGP a política fica nos dois hubs: cada site recebe só o
 que o hub manda e só consegue anunciar a própria rede. Os sites têm configuração igual (dois vizinhos, "anuncio a

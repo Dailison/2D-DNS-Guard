@@ -3,11 +3,12 @@
 #
 # N | nome | interface do túnel antigo no site | redes anunciadas (10.N.x conectadas + extras fora da 10.N) | par | obs
 #   - par: N do outro site com quem conversa (pela VPS, ou por túnel direto próprio com BGP)
-#   - obs: "feito" = já configurado à mão (teste de 05/11); "sem-scheduler" = device-mode sem reversão automática
+#   - obs: "feito" = já configurado à mão (teste de 05/11); "sem-scheduler" = device-mode sem reversão automática;
+#     "par-direto" = o par tem túnel WireGuard direto próprio com BGP (local-pref 200), VPS = reserva
 #
 9  | Barretos               | wireguard_2D | 10.9.10.0/24,10.9.20.0/24,10.9.30.0/24,10.9.60.0/24,10.9.200.0/24 | | feito
-33 | Economize              | wireguard_2D | - | 34 | feito
-34 | Ice Beer               | wg_2D        | - | 33 | feito
+33 | Economize              | wireguard_2D | - | 34 | feito par-direto
+34 | Ice Beer               | wg_2D        | - | 33 | feito par-direto
 7  | Semetra                | wireguard_2D | 10.7.10.0/24,10.7.20.0/24,10.7.30.0/24,10.7.50.0/24,10.7.60.0/24,10.7.70.0/24,10.7.200.0/24,192.168.10.0/24 | |
 8  | Talisma                | wireguard_2D | 10.8.20.0/24,10.8.60.0/24,10.8.200.0/24 | |
 11 | Tropical               | wireguard_2D | 10.11.10.0/24,10.11.20.0/24,10.11.30.0/24,10.11.50.0/24,10.11.60.0/24,10.11.200.0/24 | |

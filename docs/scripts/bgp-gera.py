@@ -133,7 +133,9 @@ def nota_site(s, sites):
     par = ""
     if s["par"]:
         p = sites[s["par"]]
-        par = f"\\n - par {p['nome']} ({p['n']}, 10.{p['n']}.0.0/16): pela VPS (o par so conversa com o par)"
+        via = ("tunel direto proprio wg-par-* (BGP bgp-par-*, local-pref 200, principal); VPS = reserva"
+               if "par-direto" in s["obs"] else "pela VPS (o par so conversa com o par)")
+        par = f"\\n - par {p['nome']} ({p['n']}, 10.{p['n']}.0.0/16): {via}"
     return (f"2D Tecnologia - roteamento dinamico BGP (desde {DATA})\\n"
             f"Site {n} {s['nome']}: AS{65000 + n}, router-id 10.250.100.{n}.\\n"
             f"Caminhos ate o escritorio da 2D (10.100.0.0/16):\\n"

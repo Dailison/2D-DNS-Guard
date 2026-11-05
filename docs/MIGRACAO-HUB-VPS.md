@@ -358,7 +358,6 @@ acrescente a linha em `docs/scripts/bgp-sites.txt` e siga o passo a passo de lá
 
 | Site | N | Situação |
 |---|---|---|
-| Ponto | 37 | Online. Só o Winbox aberto, SSH recusado. |
 | Fazenda Casa Nova | 21 | Online, sem SSH (porta 22 fechada). |
 | Haras GV | 45 | Provedor sem internet. |
 | Map Elite | 15 | Peer sem handshake ("DEU RUIM"). |
@@ -368,11 +367,50 @@ acrescente a linha em `docs/scripts/bgp-sites.txt` e siga o passo a passo de lá
 | Centro Cardio | 55 | Banida na Hostinger: fica. |
 
 Galpão da Economize (10.22) e Sicampo (69) foram **removidos** do escritório em 05/11; o galpão também saiu da
-Economize (backups `*-antes-limpeza-galpao*`). Para migrar Ponto e Fazenda Casa Nova, é preciso habilitar o SSH (`/ip service`) e importar a chave do
+Economize (backups `*-antes-limpeza-galpao*`). Para migrar a Fazenda Casa Nova, é preciso habilitar o SSH (`/ip service`) e importar a chave do
 usuário `claude`.
 
 A **Centro Cardio (55)** está banida na Hostinger (informado pelo usuário em 05/11) e fica só no túnel antigo com o
 escritório.
+
+## Bloqueio de VPN nos clientes (05/11/2026, pedido do usuário)
+
+**Objetivo:** ninguém burla o DNS Guard com uma VPN. O modelo é o do escritório e do Dom Bosco, aplicado com
+[`docs/scripts/vpn-bloqueio.sh`](scripts/vpn-bloqueio.sh) IP...:
+- o script pula o roteador que já tem a chain;
+- dá para rodar de novo: refaz só a regra de entrada se ela faltar.
+
+**Como funciona:**
+- **Entrada:** `forward`, `connection-state=new`, `in-interface-list=!WAN`, desviando para a chain `bloqueio-vpn`.
+  - A regra fica no **topo** do forward.
+  - Com a lista `WAN` vazia (12 sites), vai sem a condição de interface. O efeito é o mesmo: só pega destino público,
+    e o que vem da internet chega com destino interno depois do dst-nat. Por isso a lista `WAN` não foi mexida.
+- **Passam:**
+  - o tráfego que vem dos túneis do roteador (lista `VPN_TUNEIS` = todos os WireGuard);
+  - os destinos da lista `VPN_DESTINOS_LIBERADOS`: 10/8, 172.16/12, 192.168/16, 100.64/10, o escritório
+    (132.255.228.131/.107) e a VPS.
+  - São listas próprias, para não mudar o sentido das `REDES_PRIVADAS` / `2D Tecnologia` dos sites.
+- **Caem:**
+  - UDP 51820/1194/500/4500/1701;
+  - TCP 1194/1723/8080;
+  - GRE e ESP.
+  - O destino fica 1 semana em `VPN_BLOQUEADA`, para auditar.
+- **Onde foi aplicado:** em 39 roteadores, todos os migrados mais a Centro Cardio pelo túnel antigo. A Cotrel e o Dom
+  Bosco já tinham as regras.
+
+**Efeito colateral encontrado na 1ª hora:** a chamada por Wi-Fi dos celulares (IKE UDP 500 para o ePDG das
+operadoras) fica bloqueada.
+- Vivo: `epdg.epc.mnc006/010/011.mcc724.pub.3gppnetwork.org` = 152.255.2.16 / 152.255.14.0.
+- Claro: `mnc005` = 200.169.116.51.
+- Apareceu em Barretos, Dom Bosco, Lebom, Ponto, Norte e Sul II, Economize, Inclua Mais e Cotrel. Já acontecia no
+  escritório e no Dom Bosco.
+- O celular volta para a rede móvel; não é burla do DNS (o ePDG só dá voz/IMS).
+- Para liberar: incluir os nomes acima (FQDN) em `VPN_DESTINOS_LIBERADOS`. Aguarda decisão do usuário.
+
+**Desfazer:**
+```
+/ip firewall filter remove [find chain=bloqueio-vpn]; /ip firewall filter remove [find jump-target=bloqueio-vpn]
+```
 
 ## Sites migrados
 
@@ -419,7 +457,8 @@ escritório.
 | Construcenter (CTCRTR001) | 14 | 05/11/2026 | AS264512 Gigabyte (principal) + Coelho (reserva, 192.168.1.1) | DNS antes 8.8.8.8 com `allow-remote` ligado e SEM `FORCE_*` (sem filtro); empresa 74 no DNS Guard; padrão criado do zero; **filtro aceita `new` do WAN no input e no forward (regras 0/1): com o `allow-remote` ligado o roteador era um resolvedor aberto na internet (desligado pelo padrão); regras não mexidas** |
 | Cotrel (COTREL-CARAJAS-PA) | 12 | 05/11/2026 | AS264512 | quatro redes extras via `EXTRAS=`: `192.168.21.0/24` (Matriz, ~70 equipamentos), `.30` (clientes, ~47), `.40` (câmeras, ~28, sem DNS) e `.50` (funcionários, vazia), todas cadastradas na empresa 81 (menos a `.50`); a `10.12` quase não tem máquinas; `FORCE_*` existentes adaptadas; filtro com "REJEITA" só para saída aos provedores e bloqueio de portas de VPN que libera destinos internos: o túnel novo passa sem mudança |
 | Moura (MORRTR001) | 6 | 05/11/2026 | AS264525 Coelho | SSH liberado pelo usuário; atualizado 7.18.2 → 7.25.1 antes; `moura.local` no DHCP é só sufixo (não existe AD); DHCP da 10.6.20 entregava 8.8.8.8; masquerade sem interface de saída; BGP no mesmo dia |
-| Atacadão Peba (MikroTik) | 31 | 05/11/2026 | AS266568 MBG | **a rede real é a `192.168.2.0/24`** (DHCP, 29 leases, servidor AMPSRV 192.168.2.5 com redirecionamentos); a `10.31.20.1` está DESATIVADA → `EXTRAS=192.168.2.0/24` e testes pela 192.168.2.1; 7.20 → 7.25.1; firewall sem nenhum drop (atrás do modem 192.168.1.1); `allow-remote` ligado; **DNS padrão NÃO aplicado**: os nomes `AMPSRV`/`AMPSRV.2d.local` só existem no roteador (aguarda decisão do usuário); 192.168.2.0/24 fora da empresa 75 no DNS Guard; o k3s não alcança (AllowedIPs 10.0.0.0/8); BGP no mesmo dia |
+| Atacadão Peba (MikroTik) | 31 | 05/11/2026 | AS266568 MBG | **a rede real é a `192.168.2.0/24`** (DHCP, 29 leases, servidor AMPSRV 192.168.2.5 com redirecionamentos); a `10.31.20.1` está DESATIVADA → `EXTRAS=192.168.2.0/24` e testes pela 192.168.2.1; 7.20 → 7.25.1; firewall sem nenhum drop (atrás do modem 192.168.1.1); `allow-remote` ligado; **DNS padrão NÃO aplicado (decisão do usuário, 05/11: fica como está, resolvendo no 8.8.8.8 sem filtro)**: os nomes `AMPSRV`/`AMPSRV.2d.local` só existem no roteador; 192.168.2.0/24 fora da empresa 75 no DNS Guard; o k3s não alcança (AllowedIPs 10.0.0.0/8); BGP no mesmo dia |
+| Ponto (PCVRTR001) | 37 | 05/11/2026 | AS264525 Coelho (reserva, em uso) + principal CGNAT (ether2, fora do ar na migração, ASN não cadastrado) | SSH liberado pelo usuário; 7.20.2 → 7.25.1; `FORCE_*` antigas apontavam para 10.100.50.202 com exceção de destino `INTERNAL_DNS`: adaptadas (Cloud); `LIBERADOS` mantidos; `192.168.1.0/24` (1 lease; o `SERVIDOR` 192.168.1.5 do DNS do roteador nem aparece no ARP) fica FORA da VPS — o escritório já usa essa rede para a Goiás; BGP no mesmo dia |
 | **Casa Nova - Fazenda** | 21 | **pendente** | AS264525 Coelho (138.0.54.224) | sem SSH pelo túnel antigo (peer com comentário "SEM ACESSO"): precisa liberar a porta 22 e importar a chave do `claude` |
 | **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
 | **Centro Cardio (CTORTR001)** | 55 | **fica no túnel antigo** (banida na Hostinger, 05/11) | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

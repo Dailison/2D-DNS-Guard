@@ -304,8 +304,8 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 
 ## Pendências antes dos próximos clientes
 
-1. **Redes extras:** feito (`wg-site ... REDE_EXTRA`, `EXTRAS=` no `migra-tunel.sh`; Moral PBS). Falta Cotrel (Semetra e
-   Thibruma feitas em 05/11).
+1. **Redes extras:** feito (`wg-site ... REDE_EXTRA`, `EXTRAS=` no `migra-tunel.sh`; Moral PBS). Feito para todos (Semetra,
+   Thibruma e Cotrel em 05/11).
 2. **Logs do Cloud no DNS Guard:** o analisador coleta logs só do Technitium local, então os clientes migrados
    somem do DNS Guard.
 3. **Cadastro da AgenciaCanaa:** a rede `10.39.0.0/16` ainda não está numa empresa no console (cai no grupo
@@ -356,6 +356,7 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Casa Nova (CNRTR001) | 23 | 05/11/2026 | AS264512 | AD próprio `casanova.local` (DC cnad002 10.23.10.5, `DNS_AD` + FWD); `192.168.2.0/23` e `10.0.x` configuradas mas sem nenhum lease (fora da VPS); Chiquinho (10.23.101) e Apartamentos (10.23.102) seguem sem filtro (exceção de origem em `INTERNAL_DNS`) |
 | Thibruma (TKLRTR001) | 36 | 05/11/2026 | AS264525 Coelho | empresa "TKL" no DNS Guard; rede extra `192.168.11.0/24` (servidores/DVR com redirecionamento de portas; rota `ROTA TESTE` no escritório) via `EXTRAS=`; mesmo bloco 138.0.54.x da Centro Cardio, mas alcança a Hostinger normalmente |
 | Construcenter (CTCRTR001) | 14 | 05/11/2026 | AS264512 Gigabyte (principal) + Coelho (reserva, 192.168.1.1) | DNS antes 8.8.8.8 com `allow-remote` ligado e SEM `FORCE_*` (sem filtro); empresa 74 no DNS Guard; padrão criado do zero; **filtro aceita `new` do WAN no input e no forward (regras 0/1): com o `allow-remote` ligado o roteador era um resolvedor aberto na internet (desligado pelo padrão); regras não mexidas** |
+| Cotrel (COTREL-CARAJAS-PA) | 12 | 05/11/2026 | AS264512 | quatro redes extras via `EXTRAS=`: `192.168.21.0/24` (Matriz, ~70 equipamentos), `.30` (clientes, ~47), `.40` (câmeras, ~28, sem DNS) e `.50` (funcionários, vazia), todas cadastradas na empresa 81 (menos a `.50`); a `10.12` quase não tem máquinas; `FORCE_*` existentes adaptadas; filtro com "REJEITA" só para saída aos provedores e bloqueio de portas de VPN que libera destinos internos: o túnel novo passa sem mudança |
 | **Casa Nova - Fazenda** | 21 | **pendente** | AS264525 Coelho (138.0.54.224) | sem SSH pelo túnel antigo (peer com comentário "SEM ACESSO"): precisa liberar a porta 22 e importar a chave do `claude` |
 | **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
 | **Centro Cardio (CTORTR001)** | 55 | **pendente** | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

@@ -25,6 +25,8 @@ Na VPS:
   redes, endpoint, último handshake, tráfego e status (ATIVO = handshake nos últimos 3 min). `wg-status -w 5`
   atualiza a cada 5 s. O `wg show` puro mostra o mesmo, mas só com as chaves públicas.
 - Firewall: `/etc/nftables/vpn.nft`.
+  - Exceção (05/11): UDP 13231 do k3s `46.202.150.204` (peer `site 250`, túnel direto k3s ↔ VPS; ver
+    `MIGRACAO-ANALISADOR-K3S.md`). Não usar `wg-site` no 250.
   - Da internet entram só o escritório (`132.255.228.131`), o WireGuard dos ASNs e o ping deles.
   - Pela VPN: DNS (53, DoH 443, DoT 853) de todos; o resto só do escritório.
   - Clientes isolados entre si.

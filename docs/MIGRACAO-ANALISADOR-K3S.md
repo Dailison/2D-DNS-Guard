@@ -26,6 +26,14 @@ Os manifestos estão em `k3s/analyzer.yaml`, a imagem em `analyzer/Dockerfile` e
   - os SearXNG: `http://10.100.10.4:8888`, `http://searxng:8080` (o do próprio k3s) e `http://10.100.10.4:8889`;
   - os reforços, como antes.
 - O k3s sai para a rede da 2D pelo `wg0` do VPN-Hostinger (10.100.50.202, AllowedIPs 10.0.0.0/8, via escritório).
+- **Túnel direto k3s ↔ VPS (05/11):** interface `wg-vps` no k3s (`/etc/wireguard/wg-vps.conf`, `wg-quick@wg-vps`) com a
+  MESMA identidade `10.100.50.202`, roteando só `10.250.100.1/32`; na VPS é o peer `# site 250` do `wg0.conf`
+  (`AllowedIPs = 10.100.50.202/32`, mais específico que o `10.100.0.0/16` do escritório) e o firewall aceita o UDP 13231
+  só do `46.202.150.204` (`K3S_PUBLICO`). Console → Technitium Cloud e Cloud → listas (`:8088`) não passam mais pelo
+  escritório (65 ms → 5 ms). A rede da 2D, os Technitium local e os sites continuam pelo `wg0`.
+  - Sem failover automático: com o `wg-vps` parado (`systemctl stop wg-quick@wg-vps`), o k3s volta a alcançar a VPS pelo
+    escritório, mas a VPS continua mandando `10.100.50.202` para o peer direto — para voltar de vez, tirar também o peer
+    `site 250` (`wg set wg0 peer <chave> remove`).
 
 ## VM 10.100.10.4 depois da troca
 

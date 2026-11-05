@@ -316,6 +316,8 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Rota antiga numa tabela de política (Tropical `to_wan2`) aparece ativa no teste | Conferir `routing-table`; a do `main` é a que vale |
 | Backup `/export terse` pelo SSH volta vazio ou cortado (roteador lento) | `/export file=` + `scp` (o script já faz quando sai vazio) |
 | Depois de atualizar para o RouterOS 7.25.1 o SSH dá `Host key verification failed` | O roteador passa a oferecer só chave ed25519 (antes RSA): `ssh-keygen -R <ip>` e conectar de novo (conferir identidade/uptime) |
+| Depois de reiniciar na 7.25.1, o netwatch espera `startup-delay=5m` antes do 1º teste: o `dns-padrao.sh` rodado logo depois da atualização mostra `unknown` e deixa as `FORCE_` no 1.1.1.1 | Normal: depois de 5 min o netwatch assume sozinho (Moura). Ou atualizar, esperar 5 min e então rodar o `dns-padrao.sh` |
+| Endereço da LAN desativado (Peba: `10.31.20.1` com `X`, a rede real é `192.168.2.0/24`): o teste da Fase 4 falha e parece que a troca quebrou | No levantamento, conferir a flag `X` em `/ip address` e de onde vem o DHCP; usar o IP real nos testes e a rede real em `EXTRAS=` |
 | `check-for-updates` com `ERROR: IPv4: bad HTTP response` (Posto ISO) mesmo com o `/tool fetch` funcionando | Baixar os `.npk` da versão (todos os pacotes ativos) de `download.mikrotik.com/routeros/<versão>/` para o roteador e reiniciar |
 
 ## Pendências antes dos próximos clientes
@@ -356,20 +358,17 @@ acrescente a linha em `docs/scripts/bgp-sites.txt` e siga o passo a passo de lá
 
 | Site | N | Situação |
 |---|---|---|
-| Moura | 6 | Online (handshake ok; o comentário "OFFLINE" do peer está velho). **Só o Winbox (8291) aberto, SSH recusado.** |
-| Atacadão Peba | 31 | Online. Só o Winbox aberto, SSH recusado. |
 | Ponto | 37 | Online. Só o Winbox aberto, SSH recusado. |
 | Fazenda Casa Nova | 21 | Online, sem SSH (porta 22 fechada). |
 | Haras GV | 45 | Provedor sem internet. |
 | Map Elite | 15 | Peer sem handshake ("DEU RUIM"). |
 | Bonança | 20 / 53 | Peer sem handshake; o peer é `10.20`, a rota é `10.53`. |
 | Sup Vitória | 46 | Rota sem peer. |
-| Sicampo | 69 | Peer desativado. |
-| Economize galpão | 22 | Rota sem peer. |
 | 2D Fazenda / 2D Condomínio | 4 / 5 | **Não migram:** falam só com o escritório (decisão do usuário). |
 | Centro Cardio | 55 | Banida na Hostinger: fica. |
 
-Para migrar Moura, Peba, Ponto e Fazenda Casa Nova, é preciso habilitar o SSH (`/ip service`) e importar a chave do
+Galpão da Economize (10.22) e Sicampo (69) foram **removidos** do escritório em 05/11; o galpão também saiu da
+Economize (backups `*-antes-limpeza-galpao*`). Para migrar Ponto e Fazenda Casa Nova, é preciso habilitar o SSH (`/ip service`) e importar a chave do
 usuário `claude`.
 
 A **Centro Cardio (55)** está banida na Hostinger (informado pelo usuário em 05/11) e fica só no túnel antigo com o
@@ -419,6 +418,8 @@ escritório.
 | Thibruma (TKLRTR001) | 36 | 05/11/2026 | AS264525 Coelho | empresa "TKL" no DNS Guard; rede extra `192.168.11.0/24` (servidores/DVR com redirecionamento de portas; rota `ROTA TESTE` no escritório) via `EXTRAS=`; mesmo bloco 138.0.54.x da Centro Cardio, mas alcança a Hostinger normalmente |
 | Construcenter (CTCRTR001) | 14 | 05/11/2026 | AS264512 Gigabyte (principal) + Coelho (reserva, 192.168.1.1) | DNS antes 8.8.8.8 com `allow-remote` ligado e SEM `FORCE_*` (sem filtro); empresa 74 no DNS Guard; padrão criado do zero; **filtro aceita `new` do WAN no input e no forward (regras 0/1): com o `allow-remote` ligado o roteador era um resolvedor aberto na internet (desligado pelo padrão); regras não mexidas** |
 | Cotrel (COTREL-CARAJAS-PA) | 12 | 05/11/2026 | AS264512 | quatro redes extras via `EXTRAS=`: `192.168.21.0/24` (Matriz, ~70 equipamentos), `.30` (clientes, ~47), `.40` (câmeras, ~28, sem DNS) e `.50` (funcionários, vazia), todas cadastradas na empresa 81 (menos a `.50`); a `10.12` quase não tem máquinas; `FORCE_*` existentes adaptadas; filtro com "REJEITA" só para saída aos provedores e bloqueio de portas de VPN que libera destinos internos: o túnel novo passa sem mudança |
+| Moura (MORRTR001) | 6 | 05/11/2026 | AS264525 Coelho | SSH liberado pelo usuário; atualizado 7.18.2 → 7.25.1 antes; `moura.local` no DHCP é só sufixo (não existe AD); DHCP da 10.6.20 entregava 8.8.8.8; masquerade sem interface de saída; BGP no mesmo dia |
+| Atacadão Peba (MikroTik) | 31 | 05/11/2026 | AS266568 MBG | **a rede real é a `192.168.2.0/24`** (DHCP, 29 leases, servidor AMPSRV 192.168.2.5 com redirecionamentos); a `10.31.20.1` está DESATIVADA → `EXTRAS=192.168.2.0/24` e testes pela 192.168.2.1; 7.20 → 7.25.1; firewall sem nenhum drop (atrás do modem 192.168.1.1); `allow-remote` ligado; **DNS padrão NÃO aplicado**: os nomes `AMPSRV`/`AMPSRV.2d.local` só existem no roteador (aguarda decisão do usuário); 192.168.2.0/24 fora da empresa 75 no DNS Guard; o k3s não alcança (AllowedIPs 10.0.0.0/8); BGP no mesmo dia |
 | **Casa Nova - Fazenda** | 21 | **pendente** | AS264525 Coelho (138.0.54.224) | sem SSH pelo túnel antigo (peer com comentário "SEM ACESSO"): precisa liberar a porta 22 e importar a chave do `claude` |
 | **Haras GV (RTR001-GILVA01)** | 45 | **pendente** | ? (provedor com rede privada 10.24.x) | o provedor só dá acesso ao escritório (o escritório o vê como 10.24.3.170), não à internet: ping/HTTPS falham, DNS funciona (interceptado), nenhum handshake chega à VPS. `wg-vps-2d` criada e DESLIGADA; segue no túnel antigo. Túnel direto `wg-Locan` com a Locan (10.17), fora do hub |
 | **Centro Cardio (CTORTR001)** | 55 | **fica no túnel antigo** (banida na Hostinger, 05/11) | AS264525 Coelho Tecnologia | `138.0.54.128` não alcança a Hostinger (nenhum pacote chega à VPS, em nenhuma porta); túnel novo criado e parado, rotas e DNS intactos; aguarda liberação Hostinger/Coelho. Rota do site ganhou o comentário `ROTA 2D` |

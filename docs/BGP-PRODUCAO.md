@@ -147,6 +147,12 @@ remover também as sessões diretas. Sem BGP, o tráfego volta às estáticas `h
   baixaria a latência, se for o caso.
 - **Sem reversão automática:** 62, 70, 72 e 73 (`device-mode` sem scheduler) foram feitos por último.
 
+- **Mais tarde (05/11, depois da migração para a VPS):**
+  - Moura (6) e Atacadão Peba (31) entraram no BGP.
+  - No Peba só se anuncia a `192.168.2.0/24`, a rede real; a `10.31.20.1` está desativada.
+  - `escritorio N` agora também acrescenta as redes extras ao `allowed-address` do peer antigo. Sem isso, o
+    WireGuard do escritório descarta o caminho direto.
+
 **Fora do BGP:**
 
 | Site | Motivo |

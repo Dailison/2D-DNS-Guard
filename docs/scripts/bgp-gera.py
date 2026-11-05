@@ -115,7 +115,12 @@ def escritorio(s):
          f':if ([:typeof [:find [:tostr [/interface wireguard peers get $p allowed-address]] "10.100.100.{n}/32"]] != "nil") do={{ '
          f':local c [/interface wireguard peers get $p comment]; '
          f':if ([:typeof [:find $c "bgp-2d"]] = "nil") do={{ /interface wireguard peers set $p comment=($c . " | bgp-2d: tunel direto = caminho principal (nao desativar)") }}; '
-         f'/interface wireguard peers set $p disabled=no }} }}',
+         f'/interface wireguard peers set $p disabled=no; '
+         # rede extra fora do allowed-address do peer antigo: o WireGuard descartaria o caminho direto
+         + "".join(f':if ([:typeof [:find [:tostr [/interface wireguard peers get $p allowed-address]] "{e}"]] = "nil") do={{ '
+                   f'/interface wireguard peers set $p allowed-address=([/interface wireguard peers get $p allowed-address], {e}) }}; '
+                   for e in s["extras"])
+         + '} }',
          f'/routing filter rule add chain=bgp-in-{n} comment="bgp-2d: {nome} direto (PRINCIPAL para escritorio<->site)" '
          f'rule="if (({cond_site(s)}) && dst-len <= 24) {{ set bgp-local-pref 150; accept }} else {{ reject }}"',
          regra_vps_escritorio(s),

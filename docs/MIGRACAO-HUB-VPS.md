@@ -315,6 +315,8 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
 | Rede `192.168.x` do site sem rota no escritório (Barretos, Goiás, Moral CAN): fora da VPS | Só funciona porque está em `LIBERADOS` (vai direto ao 8.8.8.8); se sair da lista, precisa de `EXTRAS` |
 | Rota antiga numa tabela de política (Tropical `to_wan2`) aparece ativa no teste | Conferir `routing-table`; a do `main` é a que vale |
 | Backup `/export terse` pelo SSH volta vazio ou cortado (roteador lento) | `/export file=` + `scp` (o script já faz quando sai vazio) |
+| Depois de atualizar para o RouterOS 7.25.1 o SSH dá `Host key verification failed` | O roteador passa a oferecer só chave ed25519 (antes RSA): `ssh-keygen -R <ip>` e conectar de novo (conferir identidade/uptime) |
+| `check-for-updates` com `ERROR: IPv4: bad HTTP response` (Posto ISO) mesmo com o `/tool fetch` funcionando | Baixar os `.npk` da versão (todos os pacotes ativos) de `download.mikrotik.com/routeros/<versão>/` para o roteador e reiniciar |
 
 ## Pendências antes dos próximos clientes
 
@@ -326,6 +328,13 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
    `default`).
 4. **Domínio no DHCP:** o DHCP da AgenciaCanaa entrega `domain=2d.local`. Revisar esse padrão nos próximos sites.
 5. **DNS-over-QUIC no Cloud:** não sobe, porque falta a biblioteca `libmsquic` no AlmaLinux.
+
+## Atualização para o RouterOS 7.25.1 (05/11/2026)
+
+Todos os sites migrados foram para a 7.25.1 (stable), em lotes de 5, com export antes (`*-antes-7.25.1-*.rsc`).
+Barretos foi feito pelo usuário, e a AgenciaCanaa já estava nela. Os de canal long-term (G&D Matriz, Posto ISO) foram
+para o stable. Ficou de fora o Boiadeiro (19), fora do ar desde ~09:20 de 05/11 (nenhum dos dois túneis recebe nada
+dele). O escritório (2DRTR001, 7.25) fica para uma janela separada.
 
 ## Sites migrados
 

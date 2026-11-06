@@ -176,6 +176,10 @@
   .pz-err{margin:4px 8px;color:var(--rd);font-size:.78rem}
 
   /* modal da fila */
+  .topo .ghost.alerta{border-color:var(--twod-danger,#dc2626);color:var(--twod-danger-text,#b91c1c)}
+  .topo .trvn{background:var(--twod-danger,#dc2626);color:var(--twod-on-danger,#fff);border-radius:999px;padding:0 6px;font-size:.72rem;margin-left:4px}
+  dialog.dlg.fila.trv{max-width:900px}
+  .trv .trv-ac{white-space:nowrap;text-align:right}.trv .trv-ac .ghost{margin-left:4px}
   dialog.dlg.fila{max-width:780px;padding:0;background:var(--card);color:var(--tx);border:1px solid var(--ln);display:none;flex-direction:column}
   dialog.dlg.fila[open]{display:flex;max-height:min(82vh,760px)}
   .fila .fh{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
@@ -219,6 +223,9 @@
     <span class="sp"></span>
     <small x-text="upd"></small>
     <button type="button" class="ghost" @click="abrirFila()"><i class="bi bi-list-ul"></i>Fila</button>
+    <button type="button" class="ghost" :class="{alerta: trv.n}" @click="abrirTrv()"
+            :title="'computadores com mais de ' + (trv.limite || 50) + ' domínios inéditos por hora: os domínios só deles não vão para a IA até a avaliação'"><i
+            class="bi bi-shield-lock"></i>Travados<b class="trvn" x-show="trv.n" x-text="trv.n"></b></button>
     <div class="pz" @click.outside="pz.aberto = false" @keydown.escape="pz.aberto = false">
       <button type="button" class="ghost" :class="{off: pausados().length}" @click="pz.aberto = !pz.aberto"
               :aria-expanded="pz.aberto" aria-haspopup="menu"><i class="bi bi-pause-fill"></i><span
@@ -280,6 +287,47 @@
                x-text="'+ ' + (fila.d[fila.aba].total - fila.d[fila.aba].itens.length).toLocaleString('pt-BR') + ' na fila'"></small>
       </div>
     </template>
+  </dialog>
+
+  <dialog class="dlg fila trv" x-ref="trv" @close="trv.aberto = false" @click.self="$refs.trv.close()">
+    <div class="fh">
+      <h3 :title="'mais de ' + (trv.limite || 50) + ' domínios inéditos (que nenhum outro computador acessou) em 1 hora'">Computadores travados</h3>
+      <small x-text="trv.upd"></small>
+      <button type="button" class="ghost" @click="carregaTrv()" :disabled="trv.carregando" title="Atualizar" aria-label="Atualizar"><i class="bi bi-arrow-clockwise"></i></button>
+      <button type="button" class="ghost" @click="$refs.trv.close()" title="Fechar" aria-label="Fechar"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <p class="ferr" x-show="trv.erro" x-text="trv.erro"></p>
+    <div class="fwrap">
+      <p class="fvazia" x-show="!trv.itens.length && !trv.erro">Nenhum computador travado.</p>
+      <table class="ftb" x-show="trv.itens.length">
+        <thead><tr><th>Empresa</th><th>Computador</th><th class="num" title="maior número de domínios inéditos numa hora">Pior hora</th>
+          <th class="num" title="domínios que só ele acessou e que a IA não está analisando">Retidos</th><th>Detectado</th><th>Situação</th><th></th></tr></thead>
+        <tbody>
+          <template x-for="r in trv.itens" :key="r.tenant_id + '-' + r.client_id">
+            <tr>
+              <td x-text="r.empresa"></td>
+              <td class="dm" :title="'exemplos: ' + (r.exemplos || []).join(', ')"><b x-text="r.ip"></b></td>
+              <td class="num" x-text="(r.pior_hora || 0).toLocaleString('pt-BR')"></td>
+              <td class="num" x-text="(r.retidos || 0).toLocaleString('pt-BR')"></td>
+              <td x-text="quando(r.detectado_em)"></td>
+              <td><span class="pill" :class="{SUSPEITO: r.estado === 'travado', MALICIOSO: r.estado === 'confirmado', TRABALHO: r.estado === 'liberado'}"
+                        :title="r.decidido_por ? 'por ' + r.decidido_por + ' em ' + quando(r.decidido_em) : ''"
+                        x-text="{travado: 'Aguardando avaliação', confirmado: 'Varredura confirmada', liberado: 'Liberado'}[r.estado]"></span></td>
+              <td class="trv-ac">
+                <template x-if="r.estado !== 'liberado'">
+                  <button type="button" class="ghost" :disabled="!SUPER || trv.enviando" @click="decideTrv(r, 'liberar')"
+                          title="falso positivo: os domínios dele voltam para a fila da IA e ele não é mais travado"><i class="bi bi-unlock"></i>Liberar</button>
+                </template>
+                <template x-if="r.estado === 'travado'">
+                  <button type="button" class="ghost" :disabled="!SUPER || trv.enviando" @click="decideTrv(r, 'confirmar')"
+                          title="é varredura: segue travado e os domínios só dele seguem fora da IA"><i class="bi bi-shield-x"></i>Confirmar</button>
+                </template>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </dialog>
 
   {% for et, ico, tit, dsc in [("e1", "cpu", "Etapa 1 · IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
@@ -366,6 +414,8 @@
 document.addEventListener('alpine:init', function () {
   var URL_EV = "{{ url_for('analise.ia_eventos') }}";
   var URL_FILA = "{{ url_for('analise.ia_fila') }}";
+  var URL_TRV = "{{ url_for('analise.ia_varredura') }}";
+  var URL_TRV_DEC = "{{ url_for('analise.ia_varredura_decidir', tid=0, cid=0) }}".replace(/\/0\/0$/, '/__T__/__C__');
   var URL_CTRL = "{{ url_for('analise.ia_controle', chave='__K__') }}";
   var SUPER = {{ 'true' if adm and adm.is_super else 'false' }};
   var URL_DOM = "{{ url_for('analise.dominio', nome='__N__', t=tid) }}";
@@ -458,6 +508,7 @@ document.addEventListener('alpine:init', function () {
              lista: 'Lista', verificacao: 'Verificação',
              infra: 'Infraestrutura', decisoes: 'Decisões', duvida: 'Dúvida de lista'},
       fila: {aberta: false, aba: 'e1', d: {}, upd: '', erro: '', carregando: false},
+      trv: {aberto: false, itens: [], n: 0, limite: 0, upd: '', erro: '', carregando: false, enviando: false},
       SUPER: SUPER, DIC: DIC, ctrl: {}, pz: {aberto: false, enviando: false, erro: ''},
       PAUSAS: [{k: 'local', l: 'Fila local', c: 'local', dica: 'IA local: fase 1, WHOIS, busca na web, listas e investigação (as regras seguem)'},
                {k: 'online', l: 'Fila online', c: 'online', dica: 'IA online (fase 4)'},
@@ -468,6 +519,7 @@ document.addEventListener('alpine:init', function () {
         var topo = () => this.$root.style.setProperty('--topo', (this.$root.getBoundingClientRect().top + window.scrollY) + 'px');
         topo(); window.addEventListener('resize', topo);
         this.poll(); setInterval(this.poll.bind(this), 3000);
+        this.carregaTrv(); setInterval(() => { if (!this.trv.aberto) this.carregaTrv(); }, 60000);
         setInterval(() => { this.agora = Date.now(); }, 1000);
       },
 
@@ -676,6 +728,28 @@ document.addEventListener('alpine:init', function () {
           .catch((e) => { this.pz.erro = e.message; })
           .finally(() => { this.pz.enviando = false; });
       },
+      abrirTrv() { this.trv.aberto = true; this.$refs.trv.showModal(); this.carregaTrv(); },
+      carregaTrv() {
+        if (this.trv.carregando) return;
+        this.trv.carregando = true;
+        fetch(URL_TRV, {credentials: 'same-origin'})
+          .then(function (r) { return r.json().then(function (j) { if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status); return j; }); })
+          .then((d) => { this.trv.itens = d.itens || []; this.trv.n = d.travados || 0; this.trv.limite = d.limite_hora;
+                         this.trv.erro = ''; this.trv.upd = 'atualizado ' + new Date().toLocaleTimeString('pt-BR'); })
+          .catch((e) => { this.trv.erro = 'Falha ao carregar (' + e.message + ')'; })
+          .finally(() => { this.trv.carregando = false; });
+      },
+      decideTrv(r, acao) {
+        this.trv.enviando = true; this.trv.erro = '';
+        fetch(URL_TRV_DEC.replace('__T__', r.tenant_id).replace('__C__', r.client_id),
+              {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+               body: JSON.stringify({acao: acao})})
+          .then(function (x) { return x.json().then(function (j) { if (!x.ok || j.error) throw new Error(j.error || 'HTTP ' + x.status); return j; }); })
+          .then(() => { this.trv.carregando = false; this.carregaTrv(); })
+          .catch((e) => { this.trv.erro = e.message; })
+          .finally(() => { this.trv.enviando = false; });
+      },
+      quando(ts) { return ts ? new Date(ts).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'; },
       abrirFila() {
         this.fila.aberta = true; this.$refs.fila.showModal(); this.carregaFila();
         var auto = setInterval(() => { if (!this.fila.aberta) return clearInterval(auto); this.carregaFila(); }, 15000);

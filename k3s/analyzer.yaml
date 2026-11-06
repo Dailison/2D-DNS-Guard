@@ -67,7 +67,7 @@ spec:
             - -c
             - maintenance_work_mem=512MB
             - -c
-            - max_connections=40
+            - max_connections=80          # (06/11) 3 análises por analisador: o classificador chega a ~41 conexões
             - -c
             - max_wal_size=2GB
             - -c

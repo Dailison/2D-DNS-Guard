@@ -825,6 +825,30 @@ def ia_fila():
         return jsonify({"error": str(e)}), 502
 
 
+@analise_bp.get("/ia/varredura")
+def ia_varredura():
+    """Botão "Travados": computadores em varredura (muitos domínios inéditos por hora) aguardando avaliação."""
+    try:
+        return jsonify(api.get("/varredura"))
+    except AnalyzerError as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@analise_bp.post("/ia/varredura/<int:tid>/<int:cid>")
+def ia_varredura_decidir(tid, cid):
+    """Liberar (falso positivo: os domínios voltam à fila) ou confirmar (segue travado) — só super."""
+    adm = admin_atual()
+    if not adm or not adm.is_super:
+        return jsonify({"error": "Só usuários super podem avaliar computadores travados."}), 403
+    acao = (request.get_json(silent=True) or {}).get("acao", "")
+    try:
+        r = api.post(f"/varredura/{tid}/{cid}", {"acao": acao, "by": _quem()})
+    except AnalyzerError as e:
+        return jsonify({"error": str(e)}), 502
+    current_app.logger.info("IA ao vivo: %s %s computador %s (empresa %s)", _quem(), acao, r.get("ip"), tid)
+    return jsonify(r)
+
+
 # ------------------------------------------------------------------ gráficos de análise (IA)
 _DIAS_SEMANA = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 

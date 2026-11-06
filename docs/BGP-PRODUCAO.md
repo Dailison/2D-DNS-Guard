@@ -124,7 +124,7 @@ remover também as sessões diretas. Sem BGP, o tráfego volta às estáticas `h
 - VPS: porta 179 aberta para `10.250.100.0/24`.
 - Escritório: `escritorio-prep` e a nota.
 
-**Por site** (`bgp-lote.sh` no rascunho da sessão, um site por vez):
+**Por site** (`docs/scripts/bgp-lote.sh N[:IP_LAN]`, um site por vez):
 1. Lado do escritório.
 2. Esperar o handshake do túnel antigo.
 3. Export de backup (`~/Documents/mikrotik-backups/<site>-antes-bgp-*.rsc`).

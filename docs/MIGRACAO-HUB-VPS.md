@@ -50,6 +50,12 @@ Em [`docs/scripts/`](scripts/), rodados do PC do escritório (chaves `id_ed25519
 - `levanta.sh N "trecho do nome do peer"`: Fase 0 (só leitura) — peer, ASN, rotas, NAT, DNS, DHCP, netwatch, empresa no DNS Guard; avisa quando o escritório vê o peer com IP privado.
 - `wg-site.sh`: cópia do `/usr/local/sbin/wg-site` da VPS.
 - `wg-status.py`: cópia do `/usr/local/sbin/wg-status` da VPS.
+- `ros.sh IP ARQUIVO|-|"comandos" [timeout]`: roda um script RouterOS por SSH (usuário `claude`); refaz a host key
+  quando ela muda (a 7.25.1 troca para ed25519).
+- `upg.sh IP N NOME`: backup, confere que o canal stable oferece a 7.25.1, instala, espera voltar e testa a VPS.
+- `bgp-lote.sh N[:IP_LAN]...`: BGP de um ou mais sites (ver [BGP-PRODUCAO.md](BGP-PRODUCAO.md)).
+- `vpn-bloqueio.sh IP...`: bloqueio de VPN dos clientes (idempotente).
+- `bgp-gera.py` + `bgp-sites.txt`: gerador e tabela do BGP.
 
 ## Fase 0: Levantamento (antes de mexer)
 

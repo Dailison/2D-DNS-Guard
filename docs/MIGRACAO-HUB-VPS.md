@@ -293,6 +293,22 @@ a ordem invertida, para manter o local (políticas por grupo) como principal:
   `10.100.10.15`, os PCs do domínio ficam sem DNS externo enquanto o local estiver fora.
 - Backup: `2DRTR001-antes-dns-failover-*.rsc`.
 
+### Sites na Gigabyte: local na frente (06/11/2026)
+
+Os sites no mesmo provedor do escritório (Gigabyte, AS264512) chegam ao Technitium local pelo túnel direto do BGP em
+3–9 ms, contra ~33 ms até o Cloud. A pedido do usuário, a ordem deles foi invertida para **local `10.100.10.15` >
+Cloud `10.250.100.1` > 8.8.8.8 > 1.1.1.1**, com `docs/scripts/dns-ordem.sh IP_LAN NOME local` (para voltar ao padrão:
+`... cloud`). O script só reescreve o `dns-failover` (e o comentário dele) e salva o backup
+`<NOME>-antes-dns-ordem-*.rsc`. Netwatch e `FORCE_*` não mudam.
+
+- **Sites (21):** 7, 8, 11, 12, 14, 17, 23, 24, 26, 28, 29, 33, 34, 35, 38, 41, 47, 51, 52, 56 e 70. Todos
+  conferidos: as 5 `FORCE_*` no `10.100.10.15`, `/ip dns` = `10.100.10.15,10.250.100.1` e consulta ao local OK.
+- **Filtragem igual:** o DNS Guard grava no local e espelha no Cloud (`TECHNITIUM_REPLICAS`).
+- **Cuidados:** o local (VM de ~880 MB) passa a atender esses sites além do escritório. Numa parada do local (por
+  exemplo, ao atualizá-lo) eles sentem a queda até o netwatch trocar para o Cloud (~15 s). Os sites de outros
+  provedores seguem com o Cloud na frente: lá o local fica a 30–110 ms.
+- **Site novo na Gigabyte:** depois do `dns-padrao.sh`, rodar o `dns-ordem.sh ... local`.
+
 ## Fase 6: Encerramento
 
 - Exportar a configuração final do cliente e a do 2DRTR001 para `Documents\mikrotik-backups\`.

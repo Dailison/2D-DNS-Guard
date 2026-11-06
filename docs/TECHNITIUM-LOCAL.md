@@ -1,7 +1,8 @@
 # Technitium local (10.100.10.15)
 
 VM `2dadguard001` (Debian 13, ~880 MB de RAM, disco de 57 GB). É o resolvedor/filtro do escritório e a 2ª opção de DNS
-dos clientes (a 1ª é o Technitium Cloud, `10.250.100.1`, na VPS).
+dos clientes (a 1ª é o Technitium Cloud, `10.250.100.1`, na VPS), menos nos 21 sites na Gigabyte, onde ele é a 1ª opção
+(ver [MIGRACAO-HUB-VPS.md](MIGRACAO-HUB-VPS.md#sites-na-gigabyte-local-na-frente-06112026)).
 
 | Item | Onde |
 |---|---|
@@ -32,8 +33,8 @@ Conferir depois: `systemctl is-active dns`, a linha `DNS Server (vX) was started
 Advanced Blocking relendo as listas de `http://10.100.50.202:8088/listas/` e uma consulta (`nslookup google.com
 10.100.10.15`).
 
-Durante o reinício, os clientes migrados não sentem (usam o Cloud). O escritório troca sozinho para o Cloud se a
-queda passar de ~15 s (failover em [MIGRACAO-HUB-VPS.md](MIGRACAO-HUB-VPS.md#escritório-2drtr001-failover-com-o-local-na-frente-06112026)).
+Durante o reinício, os sites de outros provedores não sentem (usam o Cloud). Os 21 sites na Gigabyte e o escritório
+usam o local primeiro: trocam sozinhos para o Cloud se a queda passar de ~15 s. Failover do escritório em [MIGRACAO-HUB-VPS.md](MIGRACAO-HUB-VPS.md#escritório-2drtr001-failover-com-o-local-na-frente-06112026).
 
 ## Histórico
 

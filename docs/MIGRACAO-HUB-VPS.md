@@ -394,7 +394,8 @@ escritório.
   - São listas próprias, para não mudar o sentido das `REDES_PRIVADAS` / `2D Tecnologia` dos sites.
 - **Caem:**
   - UDP 51820/1194/500/4500/1701;
-  - TCP 1194/1723/8080;
+  - TCP 1194/1723 (a 8080 saiu em 06/11, nos 41 roteadores: é porta HTTP comum e barrava sistemas legítimos, ex. o ISS
+    da prefeitura de Canaã `tributario.canaadoscarajas.pa.gov.br:8080` = 38.188.104.80);
   - GRE e ESP.
   - O destino fica 1 semana em `VPN_BLOQUEADA`, para auditar.
 - **Onde foi aplicado:** em 39 roteadores, todos os migrados mais a Centro Cardio pelo túnel antigo. A Cotrel e o Dom

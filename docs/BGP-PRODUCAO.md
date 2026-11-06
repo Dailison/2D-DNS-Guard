@@ -156,6 +156,7 @@ remover também as sessões diretas. Sem BGP, o tráfego volta às estáticas `h
     barrando o caminho até a VPS (o traceroute morre depois de `10.250.0.74`; houve um único handshake às 13:30 de 06/11).
     A sessão `bgp-vps` fica `Idle` e sobe sozinha se o caminho abrir; o vizinho já está no `frr.conf`. A rede de
     segurança dela é a estática `ROTA 2D` pelo túnel antigo, não a `hub novo`. Na tabela: obs `vps-bloqueada`.
+  - Map Elite (15) entrou em 06/11, logo depois da migração para a VPS e da atualização para o 7.25.1.
 
 **Fora do BGP:**
 

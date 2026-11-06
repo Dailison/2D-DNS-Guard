@@ -267,6 +267,26 @@ Depois, siga a partir do passo 3 (script, netwatch, `/ip dns` e DHCP).
    `ipconfig /renew`. Os Logs do console do DNS Guard ainda não mostram essas consultas, porque leem só o
    Technitium local.
 
+### Escritório (2DRTR001): failover com o local na frente (06/11/2026)
+
+Até 06/11 o escritório dependia só do `10.100.10.15` (`/ip dns` e as 5 `FORCE_*` fixas nele, sem netwatch): na
+atualização do Technitium (15.6 → 15.6.2) o escritório ficou ~16 s sem DNS. Agora tem o mesmo mecanismo dos sites, com
+a ordem invertida, para manter o local (políticas por grupo) como principal:
+
+- **Ordem:** Technitium local `10.100.10.15` > Technitium Cloud `10.250.100.1` (pelo `wg-vps-2d`, sem NAT: o Cloud vê
+  o IP real do PC) > 8.8.8.8 > 1.1.1.1.
+- **Peças:** script `dns-failover` (comentário "DNS escritorio: ..."), netwatch `dns-local` / `dns-cloud` / `dns-publico`
+  (`type=dns`, 15 s), `/ip dns` = `10.100.10.15,10.250.100.1` (público: `8.8.8.8,1.1.1.1`).
+- **`FORCE_*`:** as regras antigas foram mantidas e só ganharam o sufixo `(dns-failover)` no comentário. Ficam as
+  exceções de origem e de destino `INTERNAL_DNS` (os DCs do AD continuam sendo consultados direto), e a
+  `10.250.100.1` entrou nessa lista.
+- **Teste (netwatch apontado para IPs inexistentes):** local fora → Cloud; local e Cloud fora → 8.8.8.8; de volta ao
+  local sozinho.
+- **Cuidado:** durante uma falha do local, a filtragem passa a ser a do Cloud (as regras por grupo do escritório
+  precisam existir lá também). Os DCs (`10.100.10.5/.6`) não passam pelo failover: se eles encaminham só para o
+  `10.100.10.15`, os PCs do domínio ficam sem DNS externo enquanto o local estiver fora.
+- Backup: `2DRTR001-antes-dns-failover-*.rsc`.
+
 ## Fase 6: Encerramento
 
 - Exportar a configuração final do cliente e a do 2DRTR001 para `Documents\mikrotik-backups\`.

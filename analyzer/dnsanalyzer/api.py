@@ -793,7 +793,7 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
     (mesmos filtros e ordenação das reservas). Etapa 1 = IA local (fase 1), investigação (fase 6) e etapa 2 = IA online."""
     from . import investigacao, online
     with db.conn() as c:
-        f1 = ("llm_pending AND NOT locked AND (NOT dominio_decidido(id) OR reanalise_pedida)")
+        f1 = ("llm_pending AND NOT locked AND NOT varredura AND (NOT dominio_decidido(id) OR reanalise_pedida)")
         ja_ia = "EXISTS (SELECT 1 FROM classification_history h WHERE h.domain_id = d.id AND h.source IN ('llm', 'online'))"
         e1 = c.execute(
             "SELECT name, total_queries, classification, aguarda_recorrencia AS pouco_acesso, "
@@ -2300,6 +2300,33 @@ def ai_precisao(days: int = Query(7, ge=1, le=90)):
             " AND NOT (por LIKE 'IA%%' OR por LIKE 'inexistente%%' OR por = '?')", (days,)).fetchone()
     return {"dias": days, "fontes": [{**f, "pct_corrigidas": round(100 * f["corrigidas"] / f["aplicadas"], 1) if f["aplicadas"] else 0}
                                      for f in fontes], "decisoes": dec}
+
+
+@app.get("/varredura", dependencies=[Depends(auth)])
+def varredura_lista():
+    """(06/11) Computadores em varredura (travados e já decididos) e o limite em vigor."""
+    from . import varredura
+    with db.conn() as c:
+        itens = varredura.listar(c)
+    return {"limite_hora": settings().varredura_limite_hora, "travados": sum(1 for i in itens if i["estado"] == "travado"),
+            "itens": itens}
+
+
+class VarreduraDecisaoIn(BaseModel):
+    acao: str            # liberar | confirmar
+    by: str = ""
+
+
+@app.post("/varredura/{tenant_id}/{client_id}", dependencies=[Depends(auth)])
+def varredura_decidir(tenant_id: int, client_id: int, body: VarreduraDecisaoIn):
+    from . import varredura
+    try:
+        with db.conn() as c:
+            return varredura.decidir(c, tenant_id, client_id, body.acao, body.by)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LookupError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.get("/listas-dominio/{name}", dependencies=[Depends(auth)])

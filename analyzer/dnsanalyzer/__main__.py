@@ -101,9 +101,17 @@ def _tarefas_coletor() -> None:
     e o comportamento ~20 s — no laço da coleta, atrasavam a cópia dos logs (que é de 1 em 1 minuto)."""
     from . import adlists, behavior, collector, enrich, ti
     cfg = settings()
-    last_behavior = last_purge = last_ti = 0.0
+    last_behavior = last_purge = last_ti = last_varredura = 0.0
     while not _STOP:
         now = time.monotonic()
+        # (06/11) computadores em varredura: trava, alerta e retém os domínios só deles (a cada minuto, ~0,1 s)
+        if now - last_varredura > 60:
+            try:
+                from . import varredura
+                varredura.ciclo()
+            except Exception:  # noqa: BLE001 — não pode parar as outras tarefas
+                log.exception("varredura falhou")
+            last_varredura = now
         # feeds de TI e Tranco (cada fonte tem seu intervalo)
         if now - last_ti > 900:
             _run_step("ti_refresh", ti.refresh_due)

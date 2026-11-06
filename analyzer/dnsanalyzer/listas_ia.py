@@ -618,7 +618,7 @@ def classe_da_lista(c, ids: list[int] | None = None) -> int:
         "       d.online_resp->>'classificacao' AS cls_online, "
         "       (SELECT l.category FROM category_lists l WHERE l.domain = d.name AND l.category <> ALL(%(sem)s) "
         "         ORDER BY l.added_at LIMIT 1) AS lista "
-        "FROM domains d WHERE d.kind = 'public' AND d.classification = 'DESCONHECIDO' AND NOT d.locked "
+        "FROM domains d WHERE d.kind = 'public' AND d.classification = 'DESCONHECIDO' AND NOT d.locked AND NOT d.varredura "
         + ("AND d.id = ANY(%(ids)s) " if ids is not None else "")
         + "AND EXISTS (SELECT 1 FROM category_lists l WHERE l.domain = d.name AND l.category <> ALL(%(sem)s))",
         {"sem": sorted(_SEM_CLASSE), "ids": ids}).fetchall()

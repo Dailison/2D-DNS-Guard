@@ -377,7 +377,7 @@ def _fora_das_filas_sql() -> str:
     fase23 = ("(NOT d.llm_pending AND ((d.classification = 'DESCONHECIDO' AND d.classified_by IN ('llm', 'web')) OR "
               + listas_ia.incerta_sql("d") + ") AND (d.whois_at IS NULL OR d.web_search_at IS NULL) "
               "AND (NOT dominio_decidido(d.id) OR d.reanalise_pedida))")
-    pergunta = ("(NOT d.locked AND d.classification <> 'DESCONHECIDO' AND (d.lista_at IS NULL OR d.lista_at < d.analyzed_at))"
+    pergunta = ("(NOT d.locked AND NOT d.varredura AND d.classification <> 'DESCONHECIDO' AND (d.lista_at IS NULL OR d.lista_at < d.analyzed_at))"
                 if settings().lista_ia_enabled else "false")
     return f"NOT coalesce(({fila4}), false) AND NOT coalesce({fase23}, false) AND NOT coalesce({pergunta}, false)"   # (NULL não exclui)
 

@@ -489,7 +489,7 @@ def perguntar(d: dict, categorias: list[str], buscar: bool, modelo: str | None =
 _NAS_LISTAS_REVISAO = "d.name IN (SELECT domain FROM category_lists WHERE category IN ('para_revisar', 'outros_bloqueios'))"
 _EM_DECISOES = "EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'para_revisar' AND l.domain = d.name)"
 # llm_pending só segura quem a fase 1 ainda vai pegar: decidido sem revisão pedida a fase 1 nunca pega (ficava preso)
-_FILA = ("d.kind = 'public' AND NOT " + paises.sql("d.name") + " "   # (22/10) China/Rússia: só a regra
+_FILA = ("d.kind = 'public' AND NOT d.varredura AND NOT " + paises.sql("d.name") + " "   # (22/10) China/Rússia: só a regra
          "AND (NOT d.llm_pending OR (dominio_decidido(d.id) AND NOT d.reanalise_pedida)) AND (d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') "
          "AND ((d.lista_duvida AND (d.online_at IS NULL OR d.online_at < d.lista_at)) "
          " OR (d.classification = 'DESCONHECIDO' AND (d.online_at IS NULL OR d.online_at < d.analyzed_at) "

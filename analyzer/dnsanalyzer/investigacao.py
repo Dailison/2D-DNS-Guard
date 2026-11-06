@@ -1002,7 +1002,7 @@ def revisar_ameacas(aplicar: bool = False, limite: int = 500, reserva: int = 60,
 
 
 # infraestrutura de terceiros que o catálogo pôs na whitelist (etapa 1) e ainda não foi verificada (ou há 30 dias)
-VERIF_FILA = ("kind = 'public' AND lista_fonte = 'catalogo' AND lista_wl IS NOT NULL AND NOT locked "
+VERIF_FILA = ("kind = 'public' AND lista_fonte = 'catalogo' AND lista_wl IS NOT NULL AND NOT locked AND NOT varredura "
               "AND NOT EXISTS (SELECT 1 FROM lookup_cache l WHERE l.kind = 'verif_infra' AND l.key = domains.name "
               "                AND l.fetched_at > now() - interval '30 days')")
 
@@ -1564,7 +1564,7 @@ def _ab_regras(client, texto: str, cats: list[dict], scats: list[dict]) -> dict 
 # a etapa 1 inteira, inclusive os de pouco acesso (aguarda_recorrencia: a etapa 1 também os pega, por último) — 21/10,
 # pedido do usuário: a fila local zera antes da etapa 2; sem eles a investigação rodava com ~650 na etapa 1 e tomava a
 # vaga da VM
-_FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "
+_FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND NOT varredura "
                "AND (NOT dominio_decidido(id) OR reanalise_pedida) LIMIT 1")
 
 
@@ -1587,7 +1587,7 @@ def fase1_ocupa_todos(c) -> bool:
 # quem a fase 6 investiga: DESCONHECIDOS/SUSPEITOS sem decisão — e (30/09, pedido do usuário) TODO DESCONHECIDO já
 # decidido (pela IA ou por pessoa), menos os liberados: na whitelist ou com decisão "liberado" (global ou de empresa).
 # A lista posta por pessoa continua valendo (listas_ia.aplicar: a IA não desfaz a correção humana).
-FILA_SQL = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') AND NOT locked AND NOT llm_pending "
+FILA_SQL = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') AND NOT locked AND NOT varredura AND NOT llm_pending "
             "AND NOT " + paises.sql("name") + " "   # (22/10) China/Rússia: só a regra
             "AND (NOT dominio_decidido(id) OR (classification = 'DESCONHECIDO' "
             "     AND NOT EXISTS (SELECT 1 FROM whitelist_domains w WHERE w.domain = domains.name) "

@@ -152,6 +152,8 @@ class Settings:
     log_retencao_dias: int             # query_log (cópia linha a linha dos logs): dias guardados
     classify_batch: int
     behavior_interval: int
+    varredura_enabled: bool         # (06/11) computador com muitos domínios inéditos por hora: trava e retém os domínios
+    varredura_limite_hora: int      # (06/11) domínios inéditos por hora acima dos quais o computador é travado
 
     api_host: str
     api_port: int
@@ -326,6 +328,9 @@ def load_settings() -> Settings:
         log_retencao_dias=_int("LOG_RETENCAO_DIAS", 7),   # (07/10, pedido do usuário)
         classify_batch=_int("CLASSIFY_BATCH", 10),
         behavior_interval=_int("BEHAVIOR_INTERVAL_SECONDS", 300),
+        # (06/11, pedido do usuário) computador comum: ~1 domínio inédito/h (mediana), 99% das horas até 34
+        varredura_enabled=_bool(os.environ.get("VARREDURA_ENABLED"), True),
+        varredura_limite_hora=_int("VARREDURA_LIMITE_HORA", 50),
         api_host=os.environ.get("API_HOST", "127.0.0.1"),
         api_port=_int("API_PORT", 8088),
         api_token=os.environ.get("API_TOKEN", ""),

@@ -175,7 +175,7 @@ def phase_a(limit: int = 2000) -> int:
     alerts: list[tuple] = []
     with db.conn() as c:
         rows = c.execute(
-            "SELECT * FROM domains WHERE needs_analysis AND NOT locked "
+            "SELECT * FROM domains WHERE needs_analysis AND NOT locked AND NOT varredura "
             "ORDER BY total_queries DESC LIMIT %s FOR UPDATE SKIP LOCKED", (limit,)).fetchall()
         # (01/10) quem não resolve não sai mais aqui só pelos logs: o teste ativo de DNS roda na etapa 1 (dnsativo.etapa1,
         # antes da IA e FORA desta transação — testar aqui prendia as linhas dos domínios por minutos) e no ciclo de
@@ -269,7 +269,7 @@ def entrada(drow: dict) -> str:
 def _claim_llm(c) -> dict | None:
     return c.execute(
         """UPDATE domains SET claimed_at=now() WHERE id = (
-             SELECT id FROM domains WHERE llm_pending AND NOT locked
+             SELECT id FROM domains WHERE llm_pending AND NOT locked AND NOT varredura
                AND NOT name ~ '\\.(cn|xn--fiqs8s|xn--fiqz9s|ru|su|xn--p1ai)$'   -- (22/10) China/Rússia: só a regra (paises.py)
                AND (NOT dominio_decidido(id) OR reanalise_pedida)   -- decidido: só com revisão pedida
                AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
@@ -532,7 +532,7 @@ def _claim_etapa2(c) -> dict | None:
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE ((classification = 'DESCONHECIDO' AND classified_by = 'llm') OR """
         + listas_ia.incerta_sql() + """)
-               AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
+               AND web_search_at IS NULL AND NOT llm_pending AND NOT locked AND NOT varredura AND kind = 'public'
                AND (whois_at IS NOT NULL OR NOT %(whois)s)
                AND (NOT dominio_decidido(id) OR reanalise_pedida)
                AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
@@ -559,7 +559,7 @@ def _claim_etapa3(c) -> dict | None:
         """UPDATE domains SET claimed_at=now() WHERE id = (
              SELECT id FROM domains WHERE ((classification = 'DESCONHECIDO' AND classified_by IN ('llm', 'web')) OR """
         + listas_ia.incerta_sql() + """)
-               AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND kind = 'public'
+               AND whois_at IS NULL AND NOT llm_pending AND NOT locked AND NOT varredura AND kind = 'public'
                AND (NOT dominio_decidido(id) OR reanalise_pedida)""" + sem_br + """
                AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
              ORDER BY (name LIKE '%.br') DESC, total_queries DESC LIMIT 1 FOR UPDATE SKIP LOCKED)

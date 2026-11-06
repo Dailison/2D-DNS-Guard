@@ -191,3 +191,20 @@ def test_pagina_do_site_basta_para_nao_trabalho_fora_do_top_1m():
     assert f.classification == "DESCONHECIDO", "liberar pela página sozinha continua exigindo confirmação"
     f = combine(r, llm("NAO_TRABALHO", work=10, recognized=True), evid)   # cita só o nome (E0)
     assert f.classification == "DESCONHECIDO", "sem se apoiar na página é chute"
+
+
+def test_threads_do_reforco_so_com_cpu(monkeypatch):
+    """06/11: o reforço só com CPU (10.9.10.10, mesmo processador da VM) sem num_thread usava só os núcleos físicos e
+    lia a pergunta ~3x mais devagar. LLM_NUM_THREAD_URL dá as threads por reforço; sem ele, o Ollama de lá decide."""
+    from dnsanalyzer import config
+    from dnsanalyzer.llm import OllamaClient
+    monkeypatch.setenv("OLLAMA_CPU_URLS", "http://10.9.10.10:11434")
+    monkeypatch.setenv("LLM_NUM_THREAD_URL", "http://10.9.10.10:11434=20")
+    monkeypatch.setenv("LLM_NUM_THREAD", "22")
+    monkeypatch.setattr(config, "_settings", None)
+    try:
+        assert OllamaClient("http://10.9.10.10:11434/").num_thread == 20
+        assert OllamaClient("http://10.100.50.201:11434").num_thread is None   # GPU: o Ollama de lá decide
+        assert OllamaClient().num_thread == 22                                 # VM
+    finally:
+        config._settings = None

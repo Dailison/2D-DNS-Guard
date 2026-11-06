@@ -75,6 +75,7 @@ class Settings:
     llm_timeout: int
     llm_num_ctx: int
     llm_num_thread: int
+    llm_num_thread_url: dict   # (06/11) url do reforço só com CPU -> threads (senão o Ollama de lá decide)
     llm_keep_alive: str
     llm_workers: int
     ollama_extra_urls: list[str]
@@ -204,6 +205,10 @@ def load_settings() -> Settings:
         # (29/09) a pergunta da etapa única tem ~5,2 mil tokens: 4096 cortava o começo (kwai.com saía MALICIOSO)
         llm_num_ctx=_int("LLM_NUM_CTX", 8192),
         llm_num_thread=_int("LLM_NUM_THREAD", 0),
+        # (06/11) "http://10.9.10.10:11434=20": sem isto o Ollama do PC (Windows) usava só os núcleos físicos e lia a
+        # pergunta ~3x mais devagar que a VM (22 threads) no mesmo processador
+        llm_num_thread_url={u.rsplit("=", 1)[0].rstrip("/"): int(u.rsplit("=", 1)[1])
+                            for u in _list("LLM_NUM_THREAD_URL") if "=" in u and u.rsplit("=", 1)[1].strip().isdigit()},
         llm_keep_alive=os.environ.get("LLM_KEEP_ALIVE", "60m"),
         # análises simultâneas (combine com OLLAMA_NUM_PARALLEL). Em CPU sem GPU não ganhou nada
         # (medido 2026-09-24: banda de memória é o gargalo) — padrão 1

@@ -213,8 +213,9 @@ class OllamaClient:
         self.model = (cfg.ollama_extra_modelos.get(self.url) or cfg.ollama_extra_model) if url else cfg.ollama_model
         self.timeout = cfg.llm_extra_timeout if self.gpu else cfg.llm_timeout
         self.num_ctx = cfg.llm_num_ctx
-        # threads de CPU só fazem sentido no Ollama da VM; no reforço (GPU) o Ollama de lá decide
-        self.num_thread = None if self.extra else (cfg.llm_num_thread or max((os.cpu_count() or 4) - 2, 1))
+        # threads de CPU: a VM sempre; reforço só com CPU quando LLM_NUM_THREAD_URL diz (06/11); GPU: o Ollama de lá decide
+        self.num_thread = (cfg.llm_num_thread_url.get(self.url.rstrip("/")) or None) if self.extra else (
+            cfg.llm_num_thread or max((os.cpu_count() or 4) - 2, 1))
         self.keep_alive = cfg.llm_keep_alive
 
     def available(self) -> tuple[bool, str]:

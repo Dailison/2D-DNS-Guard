@@ -145,12 +145,14 @@ def test_web_search_available_but_not_used_is_not_enough():
     assert f.classification == "DESCONHECIDO"
 
 
-def test_vaga_da_vm_uma_chamada_por_vez():
-    """29/09: Ollama da VM com 2 vagas — a análise usa no máximo 1 (a outra é do atendente virtual). Reforço (GPU)
-    não espera."""
+def test_vagas_por_analisador():
+    """29/09: a análise deixa uma vaga do Ollama da VM para o atendente virtual. 06/11 (pedido do usuário): até
+    LLM_VM_VAGAS (padrão 3) chamadas na VM e, no reforço só com CPU, até as análises simultâneas dele (padrão 3);
+    reforço com GPU não espera."""
     import threading
     import time
     from types import SimpleNamespace
+    from dnsanalyzer.config import settings
     from dnsanalyzer.llm import vaga
 
     def pico(client):
@@ -164,12 +166,14 @@ def test_vaga_da_vm_uma_chamada_por_vez():
                 time.sleep(0.05)
                 with lock:
                     dentro[0] -= 1
-        ts = [threading.Thread(target=chamada) for _ in range(4)]
+        ts = [threading.Thread(target=chamada) for _ in range(6)]
         [t.start() for t in ts]
         [t.join() for t in ts]
         return maior[0]
-    assert pico(SimpleNamespace(extra=False)) == 1
-    assert pico(SimpleNamespace(extra=True)) > 1
+    cfg = settings()
+    assert pico(SimpleNamespace(extra=False)) == cfg.llm_vm_vagas == 3
+    assert pico(SimpleNamespace(extra=True, gpu=False, url="http://cpu-teste:11434")) == cfg.llm_extra_workers == 3
+    assert pico(SimpleNamespace(extra=True, gpu=True, url="http://gpu-teste:11434")) > 3
 
 
 def test_pagina_do_site_basta_para_nao_trabalho_fora_do_top_1m():

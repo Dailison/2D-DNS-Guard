@@ -173,9 +173,10 @@ def build_messages(dossier_name: str, evidence: list[dict], categories: list[dic
 # Ollama da VM: a análise (todos os workers deste processo) usa no máximo LLM_VM_VAGAS chamadas ao mesmo tempo; o
 # OLLAMA_NUM_PARALLEL da VM deve ser LLM_VM_VAGAS + 1, para sobrar sempre uma vaga ao atendente virtual do 2D-Suporte
 # (/ia/chat, no processo da API) — 29/09: as GPUs não ficam ligadas 24 h e o chat esperava a fila das análises.
-# 06/11: VM com 42 GB, pedido do usuário: 4 análises (LLM_VM_VAGAS=4, OLLAMA_NUM_PARALLEL=5).
+# 06/11, pedido do usuário: 3 análises por analisador (VM, CPU ou GPU): LLM_VM_VAGAS=3, OLLAMA_NUM_PARALLEL=4 na VM.
 _VAGA_VM = threading.BoundedSemaphore(max(settings().llm_vm_vagas, 1))
-_VAGAS_CPU: dict[str, threading.Lock] = {}
+_VAGAS_CPU: dict[str, threading.BoundedSemaphore] = {}
+_VAGAS_CPU_LOCK = threading.Lock()
 
 
 def maquina(client) -> str:
@@ -188,12 +189,18 @@ def maquina(client) -> str:
 
 def vaga(client) -> contextlib.AbstractContextManager:
     """Até LLM_VM_VAGAS chamadas ao Ollama da VM entre os workers da análise; reforço com GPU não espera. Reforço só com CPU
-    (OLLAMA_CPU_URLS, 21/10): uma por vez nele também — em paralelo as duas ficariam lentas e estourariam o prazo."""
+    (OLLAMA_CPU_URLS): até as análises simultâneas dele (LLM_EXTRA_WORKERS_URL / LLM_EXTRA_WORKERS) — 21/10 era uma por
+    vez; 06/11, pedido do usuário: 3 por analisador (VM, CPU ou GPU) deixa a máquina menos ociosa."""
     if not getattr(client, "extra", False):
         return _VAGA_VM
     if getattr(client, "gpu", True):
         return contextlib.nullcontext()
-    return _VAGAS_CPU.setdefault(client.url, threading.Lock())
+    with _VAGAS_CPU_LOCK:
+        if client.url not in _VAGAS_CPU:
+            cfg = settings()
+            n = cfg.llm_extra_workers_url.get(client.url.rstrip("/"), cfg.llm_extra_workers)
+            _VAGAS_CPU[client.url] = threading.BoundedSemaphore(max(n, 1))
+        return _VAGAS_CPU[client.url]
 
 
 class OllamaClient:

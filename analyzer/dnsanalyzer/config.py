@@ -197,7 +197,7 @@ def load_settings() -> Settings:
         # 26b, MoE ~4B ativos, rápido também na CPU); qwen3:8b 5/9, qwen3:14b 6/10 — esses não decidem sozinhos
         local_decide_models=_list("LOCAL_DECIDE_MODELS", "gemma4:26b,gemma4:31b"),
         llm_vm_reserva=_bool(os.environ.get("LLM_VM_RESERVA"), True),
-        llm_vm_vagas=_int("LLM_VM_VAGAS", 1),
+        llm_vm_vagas=_int("LLM_VM_VAGAS", 3),   # (06/11) 3 por analisador
         llm_timeout=_int("LLM_TIMEOUT_SECONDS", 600),
         # (29/09) a pergunta da etapa única tem ~5,2 mil tokens: 4096 cortava o começo (kwai.com saía MALICIOSO)
         llm_num_ctx=_int("LLM_NUM_CTX", 8192),
@@ -212,7 +212,7 @@ def load_settings() -> Settings:
         ollama_extra_urls=[u.split("=", 1)[0].rstrip("/") for u in _list("OLLAMA_EXTRA_URLS")],
         ollama_extra_modelos={u.split("=", 1)[0].rstrip("/"): u.split("=", 1)[1].strip()
                               for u in _list("OLLAMA_EXTRA_URLS") if "=" in u and u.split("=", 1)[1].strip()},
-        llm_extra_workers=max(_int("LLM_EXTRA_WORKERS", 2), 1),
+        llm_extra_workers=max(_int("LLM_EXTRA_WORKERS", 3), 1),   # (06/11) 3 por analisador
         # "http://pc1:11434=2,http://pc2:11434=4": GPU mais lenta recebe menos análises ao mesmo tempo (27/09: o PC
         # enfileirava ~30 s por pedido e as fases 2/3 presas nele pararam)
         llm_extra_workers_url={u.rsplit("=", 1)[0].rstrip("/"): max(int(u.rsplit("=", 1)[1]), 0)

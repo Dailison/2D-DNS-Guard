@@ -1568,6 +1568,22 @@ _FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked "
                "AND (NOT dominio_decidido(id) OR reanalise_pedida) LIMIT 1")
 
 
+def vagas_fase1() -> int:
+    """Análises simultâneas da fase 1 somando as máquinas: a VM e cada reforço (06/11: 3 por analisador)."""
+    cfg = settings()
+    return max(cfg.llm_vm_vagas, 1) + sum(max(cfg.llm_extra_workers_url.get(u, cfg.llm_extra_workers), 0)
+                                          for u in cfg.ollama_extra_urls)
+
+
+def fase1_ocupa_todos(c) -> bool:
+    """A fase 1 tem prioridade, mas só segura a investigação quando tem domínio para todas as vagas dela. Até 06/11
+    bastava UM domínio na fila para nenhuma máquina investigar: como sempre chega domínio novo, a VM e as GPUs ficavam
+    paradas com 1-2 domínios na fila (pedido do usuário: vaga que sobra na fase 1 investiga)."""
+    n = vagas_fase1()
+    return c.execute("SELECT count(*) AS n FROM (" + _FILA_FASE1.replace("LIMIT 1", "LIMIT %s") + ") s",
+                     (n,)).fetchone()["n"] >= n
+
+
 # quem a fase 6 investiga: DESCONHECIDOS/SUSPEITOS sem decisão — e (30/09, pedido do usuário) TODO DESCONHECIDO já
 # decidido (pela IA ou por pessoa), menos os liberados: na whitelist ou com decisão "liberado" (global ou de empresa).
 # A lista posta por pessoa continua valendo (listas_ia.aplicar: a IA não desfaz a correção humana).
@@ -1611,8 +1627,8 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
     """Investiga UM domínio. 'idle' | 'done' | 'unavailable'."""
     from .classifier import build_dossier, event
     with db.conn() as c:
-        # a fila local zera primeiro, com todos os workers da IA (VM e GPUs); só então a investigação (21/10, pedido do usuário)
-        if c.execute(_FILA_FASE1).fetchone():
+        # a fila local vem primeiro (21/10, pedido do usuário); com menos domínios que vagas, a vaga que sobra investiga (06/11)
+        if fase1_ocupa_todos(c):
             return "idle"
         d = _reservar(c)
         if not d:

@@ -1927,25 +1927,26 @@ def test_pergunta_livre_ao_gemini(env, monkeypatch):
     assert online.responder_json("sistema", "pergunta") is None
 
 
-def test_etapa_2_so_com_a_fila_local_zerada(env, monkeypatch):
-    """21/10 (pedido do usuário): a fila local zera primeiro, com todos os workers (VM e GPUs); só então a investigação,
-    na VM e na GPU."""
+def test_etapa_2_com_vagas_sobrando_na_fila_local(env, monkeypatch):
+    """21/10 (pedido do usuário): a fila local vem primeiro. 06/11: ela só segura a investigação quando tem domínio
+    para todas as vagas da fase 1 (VM + reforços, 3 por analisador); com menos, a vaga que sobra investiga."""
     from types import SimpleNamespace
 
     from dnsanalyzer import classifier, db, dnsativo, investigacao
+    vagas = investigacao.vagas_fase1()
     with db.conn() as c:
         c.execute("UPDATE domains SET llm_pending = false")
-        c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES ('fila1-gpu.com', 'public', 'DESCONHECIDO', true)")
+        for i in range(vagas):
+            c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES (%s, 'public', 'DESCONHECIDO', true)",
+                      (f"fila1-{i}.com",))
         c.execute("INSERT INTO domains (name, kind, classification, total_queries, analyzed_at) VALUES ('investigar-gpu.com', 'public', 'DESCONHECIDO', 99, now())")
     vistos = []
     monkeypatch.setattr(investigacao, "_investigar", lambda client, cats, scats, d, dossie: vistos.append(client.extra) or "done")
     monkeypatch.setattr(classifier, "build_dossier", lambda c, d, **k: {"name": d["name"]})
     monkeypatch.setattr(dnsativo, "etapa1", lambda d: False)
     vm, gpu = SimpleNamespace(extra=False), SimpleNamespace(extra=True)
+    # fila local com um domínio para cada vaga: ninguém investiga
     assert investigacao.fase(vm, [], []) == "idle" and investigacao.fase(gpu, [], []) == "idle" and not vistos
-    with db.conn() as c:   # pouco acesso (aguarda_recorrencia) também é fila local
-        c.execute("UPDATE domains SET aguarda_recorrencia = true WHERE name = 'fila1-gpu.com'")
-    assert investigacao.fase(gpu, [], []) == "idle"
-    with db.conn() as c:
-        c.execute("UPDATE domains SET llm_pending = false WHERE name = 'fila1-gpu.com'")
+    with db.conn() as c:   # uma vaga sobrando: investiga
+        c.execute("UPDATE domains SET llm_pending = false WHERE name = 'fila1-0.com'")
     assert investigacao.fase(gpu, [], []) == "done" and vistos == [True]

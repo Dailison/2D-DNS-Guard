@@ -535,7 +535,7 @@ def test_erro_inesperado_nao_prende_a_reserva(monkeypatch):
             return self
 
         def fetchone(self):
-            return None if "llm_pending" in feitos[-1] else {"id": 1, "name": "x.com", "total_queries": 1}
+            return {"n": 0} if "llm_pending" in feitos[-1] else {"id": 1, "name": "x.com", "total_queries": 1}
     monkeypatch.setattr(db, "conn", lambda: Conn())
     monkeypatch.setattr(classifier, "build_dossier", lambda c, d: {})
     monkeypatch.setattr(classifier, "event", lambda *a, **k: None)

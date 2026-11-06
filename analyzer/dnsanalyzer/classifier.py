@@ -618,10 +618,10 @@ def _busca_worker(stop, cats: list[dict], reforco: "_Reforco") -> None:
 
 
 def _investigacao_worker(stop, cats: list[dict], cliente: OllamaClient) -> None:
-    """Fase 6 (29/09): investigação profunda de DESCONHECIDOS/SUSPEITOS, só com a fila da fase 1 vazia — um worker por
-    máquina, ao mesmo tempo (30/09, pedido do usuário): a VM e cada reforço com GPU (este só no ar e sem o reforço
-    pausado). Na VM usa a única vaga da análise (o atendente virtual tem a dele) e não olha imagens. Começada, vai até
-    o fim mesmo que a fase 1 volte a ter fila; só então a fase 1 retoma a vaga."""
+    """Fase 6 (29/09): investigação profunda de DESCONHECIDOS/SUSPEITOS quando a fase 1 não ocupa todas as vagas
+    (06/11) — tantos workers por máquina quantas análises simultâneas ela tem (VM, CPU ou GPU; o reforço só no ar e sem
+    pausa). Na VM divide as vagas da análise com a fase 1 (o atendente virtual tem a dele) e não olha imagens.
+    Começada, vai até o fim mesmo que a fase 1 volte a ter fila."""
     from . import investigacao
 
     def passo():
@@ -801,7 +801,8 @@ def run_forever(stop=lambda: False) -> None:
     cfg = settings()
     db.set_max_size(8 + cfg.online_workers + cfg.llm_workers + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)
                     + cfg.whois_workers
-                    + ((1 + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls)) if cfg.investigacao_enabled else 0))
+                    + ((max(cfg.llm_vm_vagas, 1) + sum(_workers_reforco(cfg, u) for u in cfg.ollama_extra_urls))
+                       if cfg.investigacao_enabled else 0))
     liberar_reservas_orfas()
     threading.Thread(target=_manutencao_worker, args=(stop,), daemon=True, name="manutencao").start()
     client = OllamaClient()
@@ -835,9 +836,9 @@ def run_forever(stop=lambda: False) -> None:
     for i in range(cfg.online_workers):
         threading.Thread(target=_online_worker, args=(stop,), daemon=True, name=f"online-{i}").start()
     if cfg.llm_enabled and cfg.investigacao_enabled:
-        # VM (1 worker: a vaga da análise é uma só) + cada reforço com GPU, com tantos workers quantas análises
-        # simultâneas ele aguenta (01/10: na GPU uma investigação leva ~1m45 e usava ~40% dela; na VM, 10-15 min)
-        for url, n in [(None, 1)] + [(u, _workers_reforco(cfg, u)) for u in cfg.ollama_extra_urls]:
+        # cada máquina com tantos workers quantas análises simultâneas ela tem (06/11, pedido do usuário: 3 por
+        # analisador, VM, CPU ou GPU); na VM e no reforço só com CPU a vaga é dividida com a fase 1 (llm.vaga)
+        for url, n in [(None, max(cfg.llm_vm_vagas, 1))] + [(u, _workers_reforco(cfg, u)) for u in cfg.ollama_extra_urls]:
             for j in range(n):
                 threading.Thread(target=_investigacao_worker, args=(stop, cats, OllamaClient(url)), daemon=True,
                                  name=f"investigacao-{url or 'vm'}-{j}").start()

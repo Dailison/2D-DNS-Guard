@@ -843,7 +843,7 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
         ev = c.execute("SELECT name, total_queries, classification, 'verificacao' AS entrada, false AS analisando "
                        "FROM domains WHERE " + investigacao.VERIF_FILA + " ORDER BY total_queries DESC, id LIMIT %s",
                        (limit,)).fetchall()
-        fila1_vazia = not c.execute(investigacao._FILA_FASE1).fetchone()
+        fila1_vazia = not investigacao.fase1_ocupa_todos(c)   # (06/11) "espera a etapa 1" só se ela ocupa todas as vagas
     return {"e1": {"total": n1, "itens": e1}, "e2": {"total": n2, "itens": e2, "habilitado": online.habilitado()},
             "investigacao": {"total": n6 + nv, "itens": (e6 + ev)[:limit], "habilitado": settings().investigacao_enabled,
                              "espera_etapa1": not fila1_vazia, "investigar": n6, "verificar": nv,

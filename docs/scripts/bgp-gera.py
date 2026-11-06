@@ -141,13 +141,17 @@ def nota_site(s, sites):
         via = ("tunel direto proprio wg-par-* (BGP bgp-par-*, local-pref 200, principal); VPS = reserva"
                if "par-direto" in s["obs"] else "pela VPS (o par so conversa com o par)")
         par = f"\\n - par {p['nome']} ({p['n']}, 10.{p['n']}.0.0/16): {via}"
+    seg = ("As rotas estaticas 'hub novo' (/16 pela VPS) ficam como rede de seguranca."
+           if "vps-bloqueada" not in s["obs"] else
+           "VPS: o provedor barra o caminho ate ela (sessao bgp-vps fica Idle; sobe sozinha se liberar). "
+           "Rede de seguranca = rota estatica ROTA 2D pelo tunel antigo.")
     return (f"2D Tecnologia - roteamento dinamico BGP (desde {DATA})\\n"
             f"Site {n} {s['nome']}: AS{65000 + n}, router-id 10.250.100.{n}.\\n"
             f"Caminhos ate o escritorio da 2D (10.100.0.0/16):\\n"
             f" - principal: tunel antigo {s['ifantigo']} (vizinho 10.100.100.1, AS65100, local-pref 150)\\n"
             f" - reserva: tunel novo wg-vps-2d (vizinho VPS 10.250.100.1, AS65250); troca sozinha em ~10 s{par}\\n"
             f"Anuncia so as proprias redes (address-list BGP_REDES). Recebe so o escritorio (e o par).\\n"
-            f"As rotas estaticas 'hub novo' (/16 pela VPS) ficam como rede de seguranca.\\n"
+            f"{seg}\\n"
             f"Tudo do BGP tem comentario bgp-2d. NAO desativar o peer do tunel antigo: e o caminho principal.\\n"
             f"Para incluir/remover rede: address-list BGP_REDES aqui E a tabela docs/scripts/bgp-sites.txt.\\n"
             f"Desfazer: remover tudo com comentario bgp-2d (bgp connection, bgp instance, filter rule, address-list, nat).\\n"

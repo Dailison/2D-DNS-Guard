@@ -345,7 +345,7 @@ dele). O escritório (2DRTR001, 7.25) fica para uma janela separada.
 
 ## Roteamento dinâmico (BGP) — desde 05/11/2026
 
-Todos os sites migrados (menos Centro Cardio, Fazenda Casa Nova e Haras GV) rodam BGP com dois caminhos até o
+Todos os sites migrados (menos Fazenda Casa Nova e Haras GV) rodam BGP com dois caminhos até o
 escritório:
 - **principal:** o túnel antigo direto, cujo peer no escritório foi **reativado**;
 - **reserva:** a VPS.
@@ -366,7 +366,7 @@ acrescente a linha em `docs/scripts/bgp-sites.txt` e siga o passo a passo de lá
 | Bonança | 20 / 53 | Peer sem handshake; o peer é `10.20`, a rota é `10.53`. |
 | Sup Vitória | 46 | Rota sem peer. |
 | 2D Fazenda / 2D Condomínio | 4 / 5 | **Não migram:** falam só com o escritório (decisão do usuário). |
-| Centro Cardio | 55 | Banida na Hostinger: fica. |
+| Centro Cardio | 55 | Banida na Hostinger: **no BGP desde 06/11 só com a sessão direta** (a da VPS fica `Idle`). |
 
 Galpão da Economize (10.22) e Sicampo (69) foram **removidos** do escritório em 05/11; o galpão também saiu da
 Economize (backups `*-antes-limpeza-galpao*`). Para migrar a Fazenda Casa Nova, é preciso habilitar o SSH (`/ip service`) e importar a chave do

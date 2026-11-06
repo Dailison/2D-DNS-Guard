@@ -152,12 +152,15 @@ remover também as sessões diretas. Sem BGP, o tráfego volta às estáticas `h
   - No Peba só se anuncia a `192.168.2.0/24`, a rede real; a `10.31.20.1` está desativada.
   - `escritorio N` agora também acrescenta as redes extras ao `allowed-address` do peer antigo. Sem isso, o
     WireGuard do escritório descarta o caminho direto.
+  - Centro Cardio (55) entrou no BGP em 06/11, a pedido do usuário, **só com a sessão direta**: a Coelho segue
+    barrando o caminho até a VPS (o traceroute morre depois de `10.250.0.74`; houve um único handshake às 13:30 de 06/11).
+    A sessão `bgp-vps` fica `Idle` e sobe sozinha se o caminho abrir; o vizinho já está no `frr.conf`. A rede de
+    segurança dela é a estática `ROTA 2D` pelo túnel antigo, não a `hub novo`. Na tabela: obs `vps-bloqueada`.
 
 **Fora do BGP:**
 
 | Site | Motivo |
 |---|---|
-| Centro Cardio (55) | Banida na Hostinger (informado pelo usuário): fica **só no túnel antigo com o escritório**, com a rota estática de sempre. O túnel novo dela continua criado e parado. |
 | Fazenda Casa Nova (21) | Sem SSH. |
 | Haras GV (45) | Provedor sem internet; só pelo túnel antigo. |
 

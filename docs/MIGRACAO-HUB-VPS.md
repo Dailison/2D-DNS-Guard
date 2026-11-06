@@ -362,7 +362,7 @@ acrescente a linha em `docs/scripts/bgp-sites.txt` e siga o passo a passo de lá
 |---|---|---|
 | Fazenda Casa Nova | 21 | Online, sem SSH (porta 22 fechada). |
 | Haras GV | 45 | Provedor sem internet. |
-| Bonança | 20 / 53 | Peer sem handshake; o peer é `10.20`, a rota é `10.53`. |
+| Bonança | 20 / 53 | Peer sem handshake (nunca conectou, sem endpoint); o peer é `10.20`, a rota é `10.53`. A rota antiga "ROTA BOIADEIRO" (`10.20.0.0/16` → `10.100.100.20`, sobra) foi removida em 06/11 (backup `2DRTR001-rota-boiadeiro-10.20-removida-*`). |
 | Sup Vitória | 46 | Rota sem peer. |
 | 2D Fazenda / 2D Condomínio | 4 / 5 | **Não migram:** falam só com o escritório (decisão do usuário). |
 | Centro Cardio | 55 | Banida na Hostinger: **no BGP desde 06/11 só com a sessão direta** (a da VPS fica `Idle`). |

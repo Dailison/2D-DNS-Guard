@@ -170,10 +170,11 @@ def build_messages(dossier_name: str, evidence: list[dict], categories: list[dic
     return [{"role": "system", "content": sistema}, {"role": "user", "content": user}]
 
 
-# Ollama da VM com 2 vagas (OLLAMA_NUM_PARALLEL=2): a análise (todos os workers deste processo) usa no máximo UMA;
-# a outra fica sempre livre p/ o atendente virtual do 2D-Suporte (/ia/chat, no processo da API) — 29/09: as GPUs
-# não ficam ligadas 24 h e o chat esperava a fila das análises
-_VAGA_VM = threading.Lock()
+# Ollama da VM: a análise (todos os workers deste processo) usa no máximo LLM_VM_VAGAS chamadas ao mesmo tempo; o
+# OLLAMA_NUM_PARALLEL da VM deve ser LLM_VM_VAGAS + 1, para sobrar sempre uma vaga ao atendente virtual do 2D-Suporte
+# (/ia/chat, no processo da API) — 29/09: as GPUs não ficam ligadas 24 h e o chat esperava a fila das análises.
+# 06/11: VM com 42 GB, pedido do usuário: 4 análises (LLM_VM_VAGAS=4, OLLAMA_NUM_PARALLEL=5).
+_VAGA_VM = threading.BoundedSemaphore(max(settings().llm_vm_vagas, 1))
 _VAGAS_CPU: dict[str, threading.Lock] = {}
 
 
@@ -186,7 +187,7 @@ def maquina(client) -> str:
 
 
 def vaga(client) -> contextlib.AbstractContextManager:
-    """Uma chamada por vez ao Ollama da VM entre os workers da análise; reforço com GPU não espera. Reforço só com CPU
+    """Até LLM_VM_VAGAS chamadas ao Ollama da VM entre os workers da análise; reforço com GPU não espera. Reforço só com CPU
     (OLLAMA_CPU_URLS, 21/10): uma por vez nele também — em paralelo as duas ficariam lentas e estourariam o prazo."""
     if not getattr(client, "extra", False):
         return _VAGA_VM

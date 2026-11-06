@@ -71,6 +71,7 @@ class Settings:
     ollama_extra_model: str   # modelo dos Ollamas de reforço (GPU); vazio = o mesmo da VM
     local_decide_models: list  # modelos locais que decidem sozinhos com confiança alta (os outros passam pela IA online)
     llm_vm_reserva: bool       # IA da VM só trabalha com o reforço (GPU) fora do ar
+    llm_vm_vagas: int          # (06/11) chamadas simultâneas da análise ao Ollama da VM (OLLAMA_NUM_PARALLEL da VM = isto + 1)
     llm_timeout: int
     llm_num_ctx: int
     llm_num_thread: int
@@ -196,6 +197,7 @@ def load_settings() -> Settings:
         # 26b, MoE ~4B ativos, rápido também na CPU); qwen3:8b 5/9, qwen3:14b 6/10 — esses não decidem sozinhos
         local_decide_models=_list("LOCAL_DECIDE_MODELS", "gemma4:26b,gemma4:31b"),
         llm_vm_reserva=_bool(os.environ.get("LLM_VM_RESERVA"), True),
+        llm_vm_vagas=_int("LLM_VM_VAGAS", 1),
         llm_timeout=_int("LLM_TIMEOUT_SECONDS", 600),
         # (29/09) a pergunta da etapa única tem ~5,2 mil tokens: 4096 cortava o começo (kwai.com saía MALICIOSO)
         llm_num_ctx=_int("LLM_NUM_CTX", 8192),

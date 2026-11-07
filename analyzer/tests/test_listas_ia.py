@@ -1374,6 +1374,48 @@ def test_ia_chat_repassa_ao_ollama_proprio(env, monkeypatch):
     assert env.post("/ia/chat", json={"messages": msgs}, headers=H).status_code == 504
 
 
+def test_ia_analisadores_lista_vm_e_reforcos(env, monkeypatch):
+    """06/11 (pedido do usuário): IA ao vivo → botão "IA local" com todos os analisadores, no ar ou não, o que cada um
+    tem em andamento e quantos fechou na última hora."""
+    import httpx
+    from dnsanalyzer import api, config, db
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "ollama_url", "http://10.100.10.4:11434")
+    monkeypatch.setattr(cfg, "ollama_extra_urls", ["http://10.9.10.4:11434", "http://10.100.50.201:11434"])
+    monkeypatch.setattr(cfg, "ollama_cpu_urls", ["http://10.9.10.4:11434"])
+    monkeypatch.setattr(cfg, "llm_extra_workers_url", {})
+    monkeypatch.setattr(api, "_analisadores_cache", [0.0, None])
+
+    class R:
+        def __init__(self, url):
+            self.url = url
+
+        def raise_for_status(self):
+            if "10.100.50.201" in self.url:
+                raise httpx.ConnectError("fora")
+
+        def json(self):
+            return {"models": [{"name": "gemma4:26b"}]}
+    monkeypatch.setattr(httpx, "get", lambda url, timeout=None: R(url))
+    with db.conn() as c:
+        ids = [c.execute("INSERT INTO domains (name, kind) VALUES (%s, 'public') ON CONFLICT (name) DO UPDATE SET kind = 'public' "
+                         "RETURNING id", (f"an{i}.example",)).fetchone()["id"] for i in range(4)]
+        ev = lambda k, d, m: c.execute("INSERT INTO ai_events (kind, domain_id, name, maquina) VALUES (%s, %s, 'x', %s)", (k, d, m))  # noqa: E731
+        ev("llm_start", ids[0], "vm"); ev("llm_done", ids[0], "vm")                       # fechou: 1/h, nada em andamento
+        ev("llm_start", ids[1], "vm")                                                      # em andamento na VM
+        ev("investigacao_start", ids[2], "10.9.10.4"); ev("investigacao_done", ids[2], "10.9.10.4")
+        ev("investigacao_start", ids[3], "10.9.10.4"); ev("investigacao_erro", ids[3], None)   # falhou: não está em andamento
+    r = env.get("/ia/analisadores", headers=H)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    por = {i["ip"]: i for i in j["itens"]}
+    assert [i["tipo"] for i in j["itens"]] == ["VM", "CPU", "GPU"]
+    assert por["10.100.10.4"]["no_ar"] and por["10.100.10.4"]["em_andamento"] == 1 and por["10.100.10.4"]["etapa1_h"] >= 1
+    assert por["10.9.10.4"]["em_andamento"] == 0 and por["10.9.10.4"]["etapa2_h"] >= 1 and not por["10.9.10.4"]["trabalhando"]
+    assert not por["10.100.50.201"]["no_ar"] and por["10.100.50.201"]["modelo"] is None
+    assert j["no_ar"] == 2 and j["trabalhando"] == 1 and j["total"] == 3
+
+
 def test_infra_de_terceiros_entra_na_whitelist_e_e_verificada_na_etapa_2(env, monkeypatch):
     """01/10: a infraestrutura de terceiros do catálogo (Cloud Run, Azure, S3…) entra na whitelist na etapa 1, sem
     esperar; a etapa 2 verifica (listas de ameaça, VirusTotal, URLScan) os mais acessados primeiro: limpo fica,

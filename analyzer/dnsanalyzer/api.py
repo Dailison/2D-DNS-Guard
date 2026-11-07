@@ -943,6 +943,69 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
             "llm": {"ok": ok, "detail": msg, "model": settings().ollama_model}, "controle": controle.estado()}
 
 
+# (06/11, pedido do usuário) IA ao vivo → botão "IA local": todos os analisadores (VM e reforços), no ar ou não,
+# o que cada um tem em andamento e quantos domínios fechou na última hora (etapa 1 e etapa 2)
+_ANALISADORES_SQL = """
+WITH ev AS (SELECT id, kind, domain_id, maquina, created_at FROM ai_events WHERE created_at > now() - interval '60 minutes'),
+abertos AS (
+  SELECT s.maquina, count(*) AS n FROM ev s
+  WHERE s.maquina IS NOT NULL AND (s.kind = 'llm_start' AND s.created_at > now() - interval '15 minutes'
+                                    OR s.kind = 'investigacao_start' AND s.created_at > now() - interval '30 minutes')
+    -- terminou, falhou ou foi pego de novo (reinício do classificador/Ollama deixa o início sem fim)
+    AND NOT EXISTS (SELECT 1 FROM ev d WHERE d.domain_id = s.domain_id AND d.id > s.id
+                    AND d.kind IN ('llm_done', 'llm_error', 'llm_unavailable', 'investigacao_done', 'investigacao_erro',
+                                   'llm_start', 'investigacao_start'))
+  GROUP BY 1)
+SELECT m.maquina, coalesce(a.n, 0) AS em_andamento,
+       count(*) FILTER (WHERE ev.kind = 'llm_done') AS etapa1_h,
+       count(*) FILTER (WHERE ev.kind = 'investigacao_done') AS etapa2_h,
+       max(ev.created_at) AS ultima
+FROM (SELECT DISTINCT maquina FROM ev WHERE maquina IS NOT NULL) m
+LEFT JOIN ev ON ev.maquina = m.maquina LEFT JOIN abertos a ON a.maquina = m.maquina
+GROUP BY m.maquina, a.n
+"""
+_analisadores_cache: list = [0.0, None]
+
+
+@app.get("/ia/analisadores", dependencies=[Depends(auth)])
+def ia_analisadores():
+    if _analisadores_cache[1] is not None and time.monotonic() - _analisadores_cache[0] < 10:
+        return _analisadores_cache[1]
+    import httpx
+    from concurrent.futures import ThreadPoolExecutor
+    from urllib.parse import urlsplit
+    cfg = settings()
+    host = lambda u: urlsplit(u).hostname or u   # noqa: E731
+    maquinas = [{"maquina": "vm", "url": cfg.ollama_url, "tipo": "VM", "vagas": max(cfg.llm_vm_vagas, 1)}] + [
+        {"maquina": host(u), "url": u, "tipo": "CPU" if u in cfg.ollama_cpu_urls else "GPU",
+         "vagas": cfg.llm_extra_workers_url.get(u, cfg.llm_extra_workers)} for u in cfg.ollama_extra_urls]
+
+    def ping(u: str) -> tuple[bool, str | None]:
+        try:
+            r = httpx.get(f"{u}/api/ps", timeout=3)
+            r.raise_for_status()
+            ms = r.json().get("models") or []
+            return True, (ms[0].get("name") if ms else None)
+        except (httpx.HTTPError, ValueError):
+            return False, None
+    with ThreadPoolExecutor(max_workers=len(maquinas)) as ex:
+        estados = list(ex.map(lambda m: ping(m["url"]), maquinas))
+    with db.conn() as c:
+        uso = {r["maquina"]: r for r in c.execute(_ANALISADORES_SQL).fetchall()}
+    itens = []
+    for m, (no_ar, modelo) in zip(maquinas, estados):
+        u = uso.get(m["maquina"]) or {}
+        andamento = int(u.get("em_andamento") or 0) if no_ar else 0
+        itens.append({"ip": host(m["url"]), "tipo": m["tipo"], "vagas": m["vagas"], "no_ar": no_ar, "modelo": modelo,
+                      "em_andamento": andamento, "trabalhando": no_ar and andamento > 0,
+                      "etapa1_h": int(u.get("etapa1_h") or 0), "etapa2_h": int(u.get("etapa2_h") or 0),
+                      "ultima": u.get("ultima")})
+    out = {"itens": itens, "no_ar": sum(i["no_ar"] for i in itens), "trabalhando": sum(i["trabalhando"] for i in itens),
+           "total": len(itens)}
+    _analisadores_cache[:] = [time.monotonic(), out]
+    return out
+
+
 @app.get("/runs", dependencies=[Depends(auth)])
 def runs(kind: Optional[str] = None, limit: int = Query(50, le=500)):
     with db.conn() as c:

@@ -68,10 +68,12 @@ class Settings:
     llm_enabled: bool
     ollama_url: str
     ollama_model: str
+    ia_chat_ollama_url: str    # (06/11) Ollama do atendente do 2D-Suporte; vazio = atendente desligado (fora das VMs da análise)
+    ia_chat_model: str
     ollama_extra_model: str   # modelo dos Ollamas de reforço (GPU); vazio = o mesmo da VM
     local_decide_models: list  # modelos locais que decidem sozinhos com confiança alta (os outros passam pela IA online)
     llm_vm_reserva: bool       # IA da VM só trabalha com o reforço (GPU) fora do ar
-    llm_vm_vagas: int          # (06/11) chamadas simultâneas da análise ao Ollama da VM (OLLAMA_NUM_PARALLEL da VM = isto + 1)
+    llm_vm_vagas: int          # (06/11) chamadas simultâneas da análise ao Ollama da VM (OLLAMA_NUM_PARALLEL da VM = isto; o chat do 2D-Suporte saiu da VM em 06/11)
     llm_timeout: int
     llm_num_ctx: int
     llm_num_thread: int
@@ -194,6 +196,10 @@ def load_settings() -> Settings:
         llm_enabled=_bool(os.environ.get("LLM_ENABLED"), True),
         ollama_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/"),
         ollama_model=os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
+        # (06/11, pedido do usuário) as conversas do 2D-Suporte saem das VMs da análise: vão p/ uma máquina própria.
+        # Vazio = /ia/chat responde 503 e o 2D-Suporte transfere o cliente para um atendente humano.
+        ia_chat_ollama_url=os.environ.get("IA_CHAT_OLLAMA_URL", "").strip().rstrip("/"),
+        ia_chat_model=os.environ.get("IA_CHAT_MODEL", "").strip(),
         # o reforço com GPU (PC 10.100.50.201) roda um modelo maior que a VM (só CPU)
         ollama_extra_model=os.environ.get("OLLAMA_EXTRA_MODEL") or os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
         # prova de 27/09 (10 domínios difíceis, fases 1-3 x IA online): gemma4:31b 9/9, gemma4:26b 7/8 (usuário escolheu o

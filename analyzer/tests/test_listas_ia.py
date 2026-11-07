@@ -1333,9 +1333,10 @@ def test_aws_e_cloudfront_vao_p_infraestrutura_sem_ia(env, monkeypatch):
     assert (f["lista_fonte"], f["lista_wl"], f["lista_conf"]) == ("catalogo", "infraestrutura", 1.0)
 
 
-def test_ia_chat_repassa_ao_ollama_local(env, monkeypatch):
-    """Atendente virtual (2D-Suporte -> ERP API -> /ia/chat): repassa ao Ollama local com o num_ctx/keep_alive do
-    classificador (senão recarrega o modelo), sem raciocínio; valida a conversa; exige token."""
+def test_ia_chat_repassa_ao_ollama_proprio(env, monkeypatch):
+    """Atendente virtual (2D-Suporte -> ERP API -> /ia/chat). 06/11 (pedido do usuário): fora das VMs da análise —
+    vai para IA_CHAT_OLLAMA_URL; sem ela o atendente fica desligado (503) e o 2D-Suporte transfere p/ um humano.
+    Sem raciocínio; valida a conversa; exige token."""
     import httpx
     from dnsanalyzer import config
     enviado = {}
@@ -1351,18 +1352,20 @@ def test_ia_chat_repassa_ao_ollama_local(env, monkeypatch):
         enviado.update(url=url, json=json)
         return R()
     monkeypatch.setattr(httpx, "post", post)
-    cfg = config.settings()
     msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "oi"}]
     assert env.post("/ia/chat", json={"messages": msgs}).status_code == 401
+    cfg = config.settings()
+    monkeypatch.setattr(cfg, "ia_chat_ollama_url", "")
+    assert env.post("/ia/chat", json={"messages": msgs}, headers=H).status_code == 503 and not enviado
+    monkeypatch.setattr(cfg, "ia_chat_ollama_url", "http://chat-2d:11434")
+    monkeypatch.setattr(cfg, "ia_chat_model", "gemma4:e4b")
     r = env.post("/ia/chat", json={"messages": msgs, "max_tokens": 9999}, headers=H)
     assert r.status_code == 200, r.text
-    assert r.json()["content"] == "Olá!" and r.json()["completion_tokens"] == 3
+    assert r.json()["content"] == "Olá!" and r.json()["completion_tokens"] == 3 and r.json()["model"] == "gemma4:e4b"
     j = enviado["json"]
-    assert enviado["url"] == f"{cfg.ollama_url}/api/chat" and j["think"] is False and j["keep_alive"] == cfg.llm_keep_alive
-    from dnsanalyzer.llm import OllamaClient
-    cli = OllamaClient()
-    esperado = {"num_ctx": cli.num_ctx, "num_predict": 600, **({"num_thread": cli.num_thread} if cli.num_thread else {})}
-    assert j["options"] == esperado and j["model"] == cli.model, j["options"]   # mesmas opções de carga do classificador
+    assert enviado["url"] == "http://chat-2d:11434/api/chat" and enviado["url"] != f"{cfg.ollama_url}/api/chat"
+    assert j["think"] is False and j["model"] == "gemma4:e4b" and j["options"]["num_predict"] == 600
+    assert "num_thread" not in j["options"]
     assert env.post("/ia/chat", json={"messages": [{"role": "x", "content": "a"}]}, headers=H).status_code == 400
 
     def lento(*a, **k):

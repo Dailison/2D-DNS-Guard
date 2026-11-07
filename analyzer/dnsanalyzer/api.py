@@ -2765,9 +2765,9 @@ _IA_PAPEIS = {"system", "user", "assistant"}
 
 @app.post("/ia/chat", dependencies=[Depends(auth)])
 def ia_chat(body: IaChatIn):
-    """Conversa do atendente virtual do 2D-Suporte. Quem chama é a 2D ERP API (o app do cliente nunca fala com a
-    VM); o Ollama continua só em 127.0.0.1. Mesmo modelo, num_ctx e keep_alive do classificador: opção diferente
-    recarregaria o modelo a cada troca entre chat e análise (1-2 min na CPU)."""
+    """Conversa do atendente virtual do 2D-Suporte. Quem chama é a 2D ERP API (o app do cliente nunca fala com o
+    Ollama). (06/11, pedido do usuário) não usa mais as VMs da análise: vai para o Ollama de IA_CHAT_OLLAMA_URL
+    (máquina própria); vazio = atendente desligado (503) e o 2D-Suporte transfere para um atendente humano."""
     import httpx
     msgs = body.messages
     if not msgs or len(msgs) > 40:
@@ -2779,19 +2779,18 @@ def ia_chat(body: IaChatIn):
         total += len(m["content"])
     if total > 20000:
         raise HTTPException(400, "conversa longa demais (máximo 20000 caracteres)")
-    # mesmas opções de CARGA do cliente do classificador (num_ctx, num_thread): qualquer diferença faz o Ollama
-    # recarregar o modelo (29/09: sem num_thread cada troca chat<->análise recarregava; o chat estourava 150 s)
-    cli = OllamaClient()
-    opcoes: dict = {"num_ctx": cli.num_ctx, "num_predict": max(16, min(body.max_tokens, 600))}
-    if cli.num_thread:
-        opcoes["num_thread"] = cli.num_thread
+    cfg = settings()
+    if not cfg.ia_chat_ollama_url:
+        raise HTTPException(503, "atendente virtual desligado")
+    modelo = cfg.ia_chat_model or cfg.ollama_model
+    opcoes: dict = {"num_ctx": cfg.llm_num_ctx, "num_predict": max(16, min(body.max_tokens, 600))}
     if body.temperature is not None:
         opcoes["temperature"] = max(0.0, min(body.temperature, 1.5))
-    payload = {"model": cli.model, "stream": False, "think": False, "keep_alive": cli.keep_alive,
+    payload = {"model": modelo, "stream": False, "think": False, "keep_alive": cfg.llm_keep_alive,
                "messages": [{"role": m["role"], "content": m["content"]} for m in msgs], "options": opcoes}
     t0 = time.monotonic()
     try:
-        r = httpx.post(f"{cli.url}/api/chat", json=payload, timeout=httpx.Timeout(150, connect=5))
+        r = httpx.post(f"{cfg.ia_chat_ollama_url}/api/chat", json=payload, timeout=httpx.Timeout(150, connect=5))
     except httpx.TimeoutException:
         raise HTTPException(504, "a IA demorou demais para responder")
     except httpx.HTTPError as e:
@@ -2803,6 +2802,6 @@ def ia_chat(body: IaChatIn):
     j = r.json()
     seg = round(time.monotonic() - t0, 1)
     log.info("ia/chat: %d mensagem(ns) -> %d tokens em %.1fs", len(msgs), j.get("eval_count") or 0, seg)
-    return {"content": ((j.get("message") or {}).get("content") or "").strip(), "model": cli.model,
+    return {"content": ((j.get("message") or {}).get("content") or "").strip(), "model": modelo,
             "done_reason": j.get("done_reason"), "prompt_tokens": j.get("prompt_eval_count") or 0,
             "completion_tokens": j.get("eval_count") or 0, "seconds": seg}

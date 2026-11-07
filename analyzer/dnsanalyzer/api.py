@@ -977,7 +977,7 @@ def ia_analisadores():
     cfg = settings()
     host = lambda u: urlsplit(u).hostname or u   # noqa: E731
     maquinas = [{"maquina": "vm", "url": cfg.ollama_url, "tipo": "VM", "vagas": max(cfg.llm_vm_vagas, 1)}] + [
-        {"maquina": host(u), "url": u, "tipo": "CPU" if u in cfg.ollama_cpu_urls else "GPU",
+        {"maquina": host(u), "url": u, "tipo": "VM" if u in cfg.ollama_cpu_urls else "GPU",   # VM = só CPU, sem GPU
          "vagas": cfg.llm_extra_workers_url.get(u, cfg.llm_extra_workers)} for u in cfg.ollama_extra_urls]
 
     def ping(u: str) -> tuple[bool, str | None]:

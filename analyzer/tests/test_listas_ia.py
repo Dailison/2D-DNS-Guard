@@ -1409,7 +1409,7 @@ def test_ia_analisadores_lista_vm_e_reforcos(env, monkeypatch):
     assert r.status_code == 200, r.text
     j = r.json()
     por = {i["ip"]: i for i in j["itens"]}
-    assert [i["tipo"] for i in j["itens"]] == ["VM", "CPU", "GPU"]
+    assert [i["tipo"] for i in j["itens"]] == ["VM", "VM", "GPU"]   # reforço só com CPU é uma VM
     assert por["10.100.10.4"]["no_ar"] and por["10.100.10.4"]["em_andamento"] == 1 and por["10.100.10.4"]["etapa1_h"] >= 1
     assert por["10.9.10.4"]["em_andamento"] == 0 and por["10.9.10.4"]["etapa2_h"] >= 1 and not por["10.9.10.4"]["trabalhando"]
     assert not por["10.100.50.201"]["no_ar"] and por["10.100.50.201"]["modelo"] is None

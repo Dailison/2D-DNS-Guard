@@ -830,7 +830,7 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
             " d.lista_duvida DESC, d.total_queries DESC LIMIT %s", (limit,)).fetchall()
         n2 = c.execute("SELECT count(*) AS n FROM domains d WHERE " + fila_on).fetchone()["n"]
         f6 = investigacao.FILA_SQL
-        par = {"dias": settings().investigacao_dias, "n": limit}
+        par = {"dias": settings().investigacao_dias, "conf": settings().investigacao_confianca_min, "n": limit}
         e6 = c.execute(
             "SELECT name, total_queries, classification, "
             " CASE WHEN investigado_at IS NULL THEN 'novo' ELSE 'reavaliacao' END AS entrada, "
@@ -859,7 +859,7 @@ def _fila_investigacao(c) -> int:
     from . import investigacao
     if time.monotonic() - _FILA_INV[0] > 15 or not _FILA_INV[0]:
         _FILA_INV[1] = (c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.FILA_SQL,
-                                  {"dias": settings().investigacao_dias}).fetchone()["n"]
+                                  {"dias": settings().investigacao_dias, "conf": settings().investigacao_confianca_min}).fetchone()["n"]
                         + c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.VERIF_FILA).fetchone()["n"])
         _FILA_INV[0] = time.monotonic()
     return _FILA_INV[1]

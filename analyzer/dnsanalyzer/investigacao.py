@@ -1587,7 +1587,13 @@ def fase1_ocupa_todos(c) -> bool:
 # quem a fase 6 investiga: DESCONHECIDOS/SUSPEITOS sem decisão — e (30/09, pedido do usuário) TODO DESCONHECIDO já
 # decidido (pela IA ou por pessoa), menos os liberados: na whitelist ou com decisão "liberado" (global ou de empresa).
 # A lista posta por pessoa continua valendo (listas_ia.aplicar: a IA não desfaz a correção humana).
+# (07/11, pedido do usuário) fluxo: etapa 1 local -> sem certeza, IA online -> só o que a etapa 1 terminou SEM CERTEZA
+# (Não identificados, ou uma lista com confiança abaixo de INVESTIGACAO_CONFIANCA_MIN) vem para a etapa 2 local (e daí,
+# sem certeza, para a IA online com o dossiê). Antes: todo Desconhecido/Suspeito, mesmo antes da IA online ou já numa
+# lista com certeza — a fila chegava a 6,8 mil.
 FILA_SQL = ("kind = 'public' AND classification IN ('DESCONHECIDO', 'SUSPEITO') AND NOT locked AND NOT varredura AND NOT llm_pending "
+            "AND (lista_ia = 'nao_identificado' OR coalesce(lista_conf, 0) < %(conf)s) "
+            "AND online_at IS NOT NULL AND (analyzed_at IS NULL OR online_at >= analyzed_at) "
             "AND NOT " + paises.sql("name") + " "   # (22/10) China/Rússia: só a regra
             "AND (NOT dominio_decidido(id) OR (classification = 'DESCONHECIDO' "
             "     AND NOT EXISTS (SELECT 1 FROM whitelist_domains w WHERE w.domain = domains.name) "
@@ -1605,7 +1611,7 @@ def _reservar(c) -> dict | None:
         " SELECT id FROM domains WHERE " + FILA_SQL +
         "  AND (investigacao_claimed_at IS NULL OR investigacao_claimed_at < now() - interval '30 minutes') "
         " ORDER BY " + FILA_ORDEM + " LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *",
-        {"dias": settings().investigacao_dias}).fetchone()
+        {"dias": settings().investigacao_dias, "conf": settings().investigacao_confianca_min}).fetchone()
 
 
 def pode_aplicar(v: dict, ti_forte: bool, minimo: float) -> str | None:

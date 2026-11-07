@@ -571,8 +571,35 @@ def test_china_e_russia_direto_para_a_lista_sem_ia(api):
         assert not c.execute("SELECT 1 FROM category_lists WHERE domain = 'servico-velho.ru' AND category = 'compras'").fetchone()
         c.execute("UPDATE domains SET classification = 'DESCONHECIDO', web_search_at = now(), online_at = NULL WHERE id = %s", (velho,))
         assert not c.execute("SELECT 1 FROM domains d WHERE d.id = %s AND " + online._FILA, (velho,)).fetchone()
-        assert not c.execute("SELECT 1 FROM domains WHERE id = %(i)s AND " + investigacao.FILA_SQL, {"i": velho, "dias": 14}).fetchone()
+        assert not c.execute("SELECT 1 FROM domains WHERE id = %(i)s AND " + investigacao.FILA_SQL, {"i": velho, "dias": 14, "conf": 0.85}).fetchone()
         c.execute("DELETE FROM global_reviews WHERE domain_id = ANY(%s)", ([novo, velho, pessoa],))
         c.execute("DELETE FROM category_lists WHERE domain = ANY(%s)", (list(d) + ["sumiu.cn", "ruim.ru"],))
         c.execute("DELETE FROM whitelist_domains WHERE domain = ANY(%s)", (list(d),))
         c.execute("DELETE FROM domains WHERE id = ANY(%s)", ([novo, velho, pessoa],))
+
+
+def test_etapa_2_so_o_que_a_etapa_1_terminou_sem_certeza(api):
+    """07/11 (pedido do usuário): todos passam pela etapa 1 (IA local e, sem certeza, IA online). Só o que terminou SEM
+    CERTEZA (Não identificados, ou lista com confiança abaixo do mínimo) vai para a etapa 2 (investigação profunda)."""
+    from datetime import datetime, timezone
+    from dnsanalyzer import db, investigacao
+    casos = {   # nome: (lista_ia, lista_conf, passou pela IA online, entra na etapa 2)
+        "naoident.example": ("nao_identificado", 1.0, True, True),
+        "fraca.example": ("compras", 0.7, True, True),
+        "certa.example": ("ameaca", 0.95, True, False),
+        "antes-da-online.example": ("nao_identificado", 0.9, False, False),
+        "wl-fraca.example": (None, 0.7, True, True),
+    }
+    with db.conn() as c:
+        ids = {}
+        for nome, (lista, conf, online, _) in casos.items():
+            ids[nome] = c.execute(
+                "INSERT INTO domains (name, kind, classification, classified_by, total_queries, analyzed_at, lista_ia, lista_conf, "
+                "online_at, llm_pending) VALUES (%s, 'public', 'DESCONHECIDO', 'llm', 1, now() - interval '1 hour', %s, %s, %s, false) "
+                "RETURNING id", (nome, lista, conf, datetime.now(timezone.utc) if online else None)
+            ).fetchone()["id"]
+        par = {"dias": 14, "conf": 0.85}
+        dentro = {r["name"] for r in c.execute("SELECT name FROM domains WHERE id = ANY(%(ids)s) AND " + investigacao.FILA_SQL,
+                                                {**par, "ids": list(ids.values())})}
+        assert dentro == {n for n, v in casos.items() if v[3]}, dentro
+        c.execute("DELETE FROM domains WHERE id = ANY(%s)", (list(ids.values()),))

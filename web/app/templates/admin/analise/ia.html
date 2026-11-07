@@ -51,7 +51,6 @@
   .topo .sp{flex:1}
   .kq{display:grid;gap:2px}
   .kqr{display:flex;align-items:baseline;gap:4px}
-  .kql{font-size:.72rem;font-weight:700;color:var(--tx2);min-width:62px}
   .kqe{display:inline-flex;align-items:baseline;gap:5px;background:none;border:0;padding:0 6px;cursor:pointer;color:inherit;font:inherit;border-radius:6px}
   .kqe:hover{background:var(--soft)}
   .kqe span{font-size:.72rem;color:var(--tx2)}
@@ -232,8 +231,8 @@
             :class="(anl.total ? anl.no_ar : ia.ok) ? 'ok' : ((anl.total || ia.ok === false) ? 'x' : '')"></span>
       <b>IA local</b><b class="anln" x-text="anl.total ? anl.trabalhando : '…'"></b></button>
     <div class="kq">
-      <template x-for="g in filas4" :key="g.l">
-        <div class="kqr"><span class="kql" x-text="g.l"></span>
+      <template x-for="g in filas4.slice(0, 1)" :key="g.l">
+        <div class="kqr">
           <template x-for="e in g.e" :key="e.k">
             <button type="button" class="kqe" @click="abrirFila(e.k)" :title="e.s"><span x-text="e.l"></span><b x-text="e.v"></b></button>
           </template>
@@ -391,7 +390,9 @@
     <div class="eh">
       <span class="ico"><i class="bi bi-{{ ico }}"></i></span>
       <h2 title="{{ dsc }}">{{ tit }} <span class="cnt" x-text="feitos('{{ et }}')"></span></h2>
-      {% if et == "e2" %}<span class="fq" x-show="onlineFila !== null" title="domínios esperando a IA online"><b x-text="onlineFila"></b> na fila</span>
+      {% if et == "e2" %}<template x-for="e in filas4[1].e" :key="e.k">
+        <button type="button" class="kqe" @click="abrirFila(e.k)" :title="e.s"><span x-text="e.l"></span><b x-text="e.v"></b></button>
+      </template>
       <span class="tag" :class="onlineOn && !onlineEspera ? 'on' : 'off'" x-show="onlineOn !== null"
             :title="onlineEspera || ''" x-text="!onlineOn ? 'sem chave' : onlineEspera ? 'aguardando busca na web' : 'ativa'"></span>{% endif %}
       <div class="lane">
@@ -553,7 +554,7 @@ document.addEventListener('alpine:init', function () {
       filas4: [{l: 'IA local', e: [{k: 'e1', l: 'Etapa 1', v: '–', s: ''}, {k: 'investigacao', l: 'Etapa 2', v: '–', s: ''}]},
                {l: 'IA online', e: [{k: 'e2', l: 'Etapa 1', v: '–', s: ''}, {k: 'online2', l: 'Etapa 2', v: '–', s: ''}]}],
       anl: {aberto: false, carregando: false, itens: [], total: 0, no_ar: 0, trabalhando: 0, erro: '', upd: ''},
-      ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null, onlineEspera: '', onlineFila: null,
+      ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null, onlineEspera: '',
       kpis: [{v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
       rows: {e1: [], e2: []}, lane: {e1: [], e2: []},
       ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: 'Investigação'},
@@ -743,7 +744,6 @@ document.addEventListener('alpine:init', function () {
         this.ia = {ok: d.llm ? !!llm.ok : null, model: llm.model || '?', txt: llm.ok ? 'no ar' : 'fora' + (llm.detail ? ' · ' + llm.detail : '')};
         this.onlineOn = q.online != null ? !!q.online_on : null;
         this.onlineEspera = q.online_espera || '';
-        this.onlineFila = q.online != null ? q.online + (q.online2 || 0) : null;
         var antigo = (q.whois || 0) + (q.busca || 0), m = d.eta_seconds ? Math.round(d.eta_seconds / 60) : 0;
         var n = function (x) { return x != null ? Number(x).toLocaleString('pt-BR') : '–'; };
         var verif = q.investigacao != null && q.investigar != null ? q.investigacao - q.investigar : 0;

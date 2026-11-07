@@ -49,6 +49,13 @@
   .kp b{font-size:1.15rem;font-weight:800;font-variant-numeric:tabular-nums;color:var(--kp)}
   .kp span{font-size:.76rem;color:var(--tx2)}
   .topo .sp{flex:1}
+  .kq{display:grid;gap:2px}
+  .kqr{display:flex;align-items:baseline;gap:4px}
+  .kql{font-size:.72rem;font-weight:700;color:var(--tx2);min-width:62px}
+  .kqe{display:inline-flex;align-items:baseline;gap:5px;background:none;border:0;padding:0 6px;cursor:pointer;color:inherit;font:inherit;border-radius:6px}
+  .kqe:hover{background:var(--soft)}
+  .kqe span{font-size:.72rem;color:var(--tx2)}
+  .kqe b{font-size:.98rem;font-weight:800;font-variant-numeric:tabular-nums;color:var(--kp)}
   .iav .ghost{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:.76rem;font-weight:600;color:var(--tx);
               background:var(--soft);border:1px solid var(--ln);border-radius:999px;padding:4px 12px;cursor:pointer}
   .iav .ghost:hover{border-color:var(--ac)}
@@ -224,6 +231,15 @@
             :title="anl.total ? anl.trabalhando + ' trabalhando · ' + anl.no_ar + ' de ' + anl.total + ' no ar' : ia.txt"><span class="pulse"
             :class="(anl.total ? anl.no_ar : ia.ok) ? 'ok' : ((anl.total || ia.ok === false) ? 'x' : '')"></span>
       <b>IA local</b><b class="anln" x-text="anl.total ? anl.trabalhando : '…'"></b></button>
+    <div class="kq">
+      <template x-for="g in filas4" :key="g.l">
+        <div class="kqr"><span class="kql" x-text="g.l"></span>
+          <template x-for="e in g.e" :key="e.k">
+            <button type="button" class="kqe" @click="abrirFila(e.k)" :title="e.s"><span x-text="e.l"></span><b x-text="e.v"></b></button>
+          </template>
+        </div>
+      </template>
+    </div>
     <template x-for="k in kpis" :key="k.l">
       <div class="kp" :title="k.s"><b x-text="k.v"></b><span x-text="k.l"></span></div>
     </template>
@@ -369,8 +385,8 @@
     </div>
   </dialog>
 
-  {% for et, ico, tit, dsc in [("e1", "cpu", "Etapa 1 · IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
-                               ("e2", "globe2", "Etapa 2 · IA online", "o que a IA local não decidiu com confiança")] %}
+  {% for et, ico, tit, dsc in [("e1", "cpu", "IA local", "site, busca na web e WHOIS numa pergunta ao modelo local"),
+                               ("e2", "globe2", "IA online", "o que a IA local não decidiu com confiança")] %}
   <section class="etapa glass {{ et }}" data-et="{{ et }}">
     <div class="eh">
       <span class="ico"><i class="bi bi-{{ ico }}"></i></span>
@@ -534,17 +550,19 @@ document.addEventListener('alpine:init', function () {
     var idx = {e1: {}, e2: {}}, lastId = 0, first = true;
     return {
       LBL: {TRABALHO: 'Trabalho', NAO_TRABALHO: 'Não trabalho', SUSPEITO: 'Suspeito', MALICIOSO: 'Malicioso', DESCONHECIDO: 'Desconhecido'},
+      filas4: [{l: 'IA local', e: [{k: 'e1', l: 'Etapa 1', v: '–', s: ''}, {k: 'investigacao', l: 'Etapa 2', v: '–', s: ''}]},
+               {l: 'IA online', e: [{k: 'e2', l: 'Etapa 1', v: '–', s: ''}, {k: 'online2', l: 'Etapa 2', v: '–', s: ''}]}],
       anl: {aberto: false, carregando: false, itens: [], total: 0, no_ar: 0, trabalhando: 0, erro: '', upd: ''},
       ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null, onlineEspera: '', onlineFila: null,
-      kpis: [{v: '–', l: 'fila local · etapa 1', s: ''}, {v: '–', l: 'fila local · etapa 2', s: ''},
-             {v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
+      kpis: [{v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
       rows: {e1: [], e2: []}, lane: {e1: [], e2: []},
       ENT: {e1: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: 'Investigação'},
             e2: {novo: '1ª vez', reavaliacao: 'Revalidação', pedida: 'Reanálise pedida'}},
       paused: false, upd: '', agora: Date.now(), carregado: false, sel: null,
-      FILAS: [{k: 'e1', l: 'Fila local · etapa 1', dica: 'IA local e listas a decidir, na ordem em que são pegos'},
-              {k: 'investigacao', l: 'Fila local · etapa 2', dica: 'desconhecidos/suspeitos (com a fila da etapa 1 vazia) e a verificação da infraestrutura do catálogo'},
-              {k: 'e2', l: 'Fila online', dica: 'na ordem em que a IA online pega'}],
+      FILAS: [{k: 'e1', l: 'IA local · etapa 1', dica: 'IA local e listas a decidir, na ordem em que são pegos'},
+              {k: 'investigacao', l: 'IA local · etapa 2', dica: 'investigação profunda do que a etapa 1 terminou sem certeza (começa com menos de 10 na etapa 1)'},
+              {k: 'e2', l: 'IA online · etapa 1', dica: 'o que a IA local não decidiu com confiança, na ordem em que a IA online pega'},
+              {k: 'online2', l: 'IA online · etapa 2', dica: '2ª opinião com o dossiê da investigação'}],
       FENT: {novo: 'Novo', reavaliacao: 'Reavaliação', pedida: 'Reanálise pedida', investigacao: '2ª opinião',
              lista: 'Lista', verificacao: 'Verificação',
              infra: 'Infraestrutura', decisoes: 'Decisões', duvida: 'Dúvida de lista'},
@@ -725,12 +743,20 @@ document.addEventListener('alpine:init', function () {
         this.ia = {ok: d.llm ? !!llm.ok : null, model: llm.model || '?', txt: llm.ok ? 'no ar' : 'fora' + (llm.detail ? ' · ' + llm.detail : '')};
         this.onlineOn = q.online != null ? !!q.online_on : null;
         this.onlineEspera = q.online_espera || '';
-        this.onlineFila = q.online != null ? q.online : null;
+        this.onlineFila = q.online != null ? q.online + (q.online2 || 0) : null;
         var antigo = (q.whois || 0) + (q.busca || 0), m = d.eta_seconds ? Math.round(d.eta_seconds / 60) : 0;
+        var n = function (x) { return x != null ? Number(x).toLocaleString('pt-BR') : '–'; };
+        var verif = q.investigacao != null && q.investigar != null ? q.investigacao - q.investigar : 0;
+        this.filas4 = [
+          {l: 'IA local', e: [
+            {k: 'e1', l: 'Etapa 1', v: d.queue ? n((q.ia || 0) + (q.lista || 0) + antigo) : '–',
+             s: ['na fila da IA local', q.aguarda ? n(q.aguarda) + ' de pouco acesso' : '', antigo ? n(antigo) + ' do fluxo antigo' : ''].filter(Boolean).join(' · ')},
+            {k: 'investigacao', l: 'Etapa 2', v: n(q.investigar),
+             s: 'investigação profunda' + (verif ? ' · + ' + n(verif) + ' verificações da infraestrutura do catálogo (sem IA)' : '')}]},
+          {l: 'IA online', e: [
+            {k: 'e2', l: 'Etapa 1', v: n(q.online), s: 'o que a IA local não decidiu com confiança'},
+            {k: 'online2', l: 'Etapa 2', v: n(q.online2), s: '2ª opinião com o dossiê da investigação'}]}];
         this.kpis = [
-          {v: d.queue ? (q.ia || 0) + (q.lista || 0) + antigo : '–', l: 'fila local · etapa 1',
-           s: ['IA local', q.aguarda ? q.aguarda + ' de pouco acesso' : '', antigo ? antigo + ' do fluxo antigo' : ''].filter(Boolean).join(' · ')},
-          {v: q.investigacao != null ? q.investigacao : '–', l: 'fila local · etapa 2', s: 'investigação + verificação da infraestrutura do catálogo'},
           {v: d.last_hour ? d.last_hour.done : '–', l: 'na última hora', s: 'domínios analisados na última hora'},
           {v: d.last_hour && d.last_hour.avg_seconds ? Math.round(d.last_hour.avg_seconds) + 's' : '–', l: 'por domínio', s: 'tempo médio da IA local'},
           {v: m ? '~' + (m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2)) : '–', l: 'p/ zerar a fila',
@@ -804,7 +830,8 @@ document.addEventListener('alpine:init', function () {
           .finally(() => { this.trv.enviando = false; });
       },
       quando(ts) { return ts ? new Date(ts).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'; },
-      abrirFila() {
+      abrirFila(aba) {
+        if (aba) this.fila.aba = aba;
         this.fila.aberta = true; this.$refs.fila.showModal(); this.carregaFila();
         var auto = setInterval(() => { if (!this.fila.aberta) return clearInterval(auto); this.carregaFila(); }, 15000);
       },

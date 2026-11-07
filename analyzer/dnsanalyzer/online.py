@@ -503,6 +503,8 @@ _EM_INFRA = ("EXISTS (SELECT 1 FROM category_lists l WHERE l.category = 'infra_b
 
 
 _RESERVA = "(d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') AND "
+# (07/11) etapa 2 da IA online: 2ª opinião pedida pela investigação (com o dossiê); o resto da fila é a etapa 1
+PEDIDO = "(d.online_pedido_at IS NOT NULL AND (d.online_at IS NULL OR d.online_at < d.online_pedido_at))"
 
 
 def na_fila(c, domain_id: int) -> bool:
@@ -694,7 +696,8 @@ def gravar(c, d: dict, obj: dict, meta: dict, categorias: list[str], fonte: str 
 
 def status(c) -> dict:
     r = c.execute("SELECT count(*) FILTER (WHERE " + _FILA.replace("(d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') AND ", "") +
-                  ") AS fila, count(*) FILTER (WHERE d.online_at > now() - interval '24 hours') AS ult_24h "
+                  ") AS fila, count(*) FILTER (WHERE " + _FILA.replace("(d.online_claimed_at IS NULL OR d.online_claimed_at < now() - interval '10 minutes') AND ", "") +
+                  " AND " + PEDIDO + ") AS fila_e2, count(*) FILTER (WHERE d.online_at > now() - interval '24 hours') AS ult_24h "
                   "FROM domains d").fetchone()
     cfg = settings()
     modelos = {}

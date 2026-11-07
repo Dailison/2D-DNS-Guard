@@ -1416,6 +1416,27 @@ def test_ia_analisadores_lista_vm_e_reforcos(env, monkeypatch):
     assert j["no_ar"] == 2 and j["trabalhando"] == 1 and j["total"] == 3
 
 
+def test_fila_online_em_etapa_1_e_etapa_2(env):
+    """07/11 (pedido do usuário): IA ao vivo mostra IA local (etapa 1 e 2) e IA online (etapa 1 e 2). Na IA online, a
+    etapa 2 é a 2ª opinião pedida pela investigação (com o dossiê); o resto é a etapa 1."""
+    from dnsanalyzer import api, db
+    with db.conn() as c:
+        c.execute("INSERT INTO domains (name, kind, classification, llm_pending, web_search_at, analyzed_at) VALUES "
+                  "('on-etapa1.example', 'public', 'DESCONHECIDO', false, now(), now()), "
+                  "('on-etapa2.example', 'public', 'DESCONHECIDO', false, now(), now())")
+        c.execute("UPDATE domains SET online_pedido_at = now(), online_at = now() - interval '1 hour' WHERE name = 'on-etapa2.example'")
+    api._FILA_INV[0] = 0
+    f = env.get("/ai/fila", headers=H).json()
+    nomes = lambda k: {r["name"] for r in f[k]["itens"]}   # noqa: E731
+    assert "on-etapa1.example" in nomes("e2") and "on-etapa1.example" not in nomes("online2")
+    assert "on-etapa2.example" in nomes("online2") and "on-etapa2.example" not in nomes("e2")
+    q = env.get("/ai/events", headers=H).json()["queue"]
+    assert q["online2"] == f["online2"]["total"] >= 1 and q["online"] == f["e2"]["total"] >= 1
+    assert q["investigar"] <= q["investigacao"]
+    with db.conn() as c:
+        c.execute("DELETE FROM domains WHERE name IN ('on-etapa1.example', 'on-etapa2.example')")
+
+
 def test_infra_de_terceiros_entra_na_whitelist_e_e_verificada_na_etapa_2(env, monkeypatch):
     """01/10: a infraestrutura de terceiros do catálogo (Cloud Run, Azure, S3…) entra na whitelist na etapa 1, sem
     esperar; a etapa 2 verifica (listas de ameaça, VirusTotal, URLScan) os mais acessados primeiro: limpo fica,
@@ -1972,26 +1993,29 @@ def test_pergunta_livre_ao_gemini(env, monkeypatch):
     assert online.responder_json("sistema", "pergunta") is None
 
 
-def test_etapa_2_com_vagas_sobrando_na_fila_local(env, monkeypatch):
-    """21/10 (pedido do usuário): a fila local vem primeiro. 06/11: ela só segura a investigação quando tem domínio
-    para todas as vagas da fase 1 (VM + reforços, 3 por analisador); com menos, a vaga que sobra investiga."""
+def test_etapa_2_so_com_a_fila_da_etapa_1_abaixo_de_10(env, monkeypatch):
+    """21/10 (pedido do usuário): a fila local vem primeiro. 07/11: o analisador só pega uma investigação (etapa 2) com a
+    fila da etapa 1 vazia ou quase vazia — abaixo de INVESTIGACAO_FASE1_MAX (10)."""
     from types import SimpleNamespace
 
     from dnsanalyzer import classifier, db, dnsativo, investigacao
-    vagas = investigacao.vagas_fase1()
+    limite = investigacao.settings().investigacao_fase1_max
+    assert limite == 10
     with db.conn() as c:
         c.execute("UPDATE domains SET llm_pending = false")
-        for i in range(vagas):
+        for i in range(limite):
             c.execute("INSERT INTO domains (name, kind, classification, llm_pending) VALUES (%s, 'public', 'DESCONHECIDO', true)",
                       (f"fila1-{i}.com",))
-        c.execute("INSERT INTO domains (name, kind, classification, total_queries, analyzed_at) VALUES ('investigar-gpu.com', 'public', 'DESCONHECIDO', 99, now())")
+        # etapa 1 terminou sem certeza (Não identificados, depois da IA online): é da etapa 2
+        c.execute("INSERT INTO domains (name, kind, classification, total_queries, analyzed_at, lista_ia, online_at) "
+                  "VALUES ('investigar-gpu.com', 'public', 'DESCONHECIDO', 99, now() - interval '1 hour', 'nao_identificado', now())")
     vistos = []
     monkeypatch.setattr(investigacao, "_investigar", lambda client, cats, scats, d, dossie: vistos.append(client.extra) or "done")
     monkeypatch.setattr(classifier, "build_dossier", lambda c, d, **k: {"name": d["name"]})
     monkeypatch.setattr(dnsativo, "etapa1", lambda d: False)
     vm, gpu = SimpleNamespace(extra=False), SimpleNamespace(extra=True)
-    # fila local com um domínio para cada vaga: ninguém investiga
+    # 10 na fila da etapa 1: ninguém investiga
     assert investigacao.fase(vm, [], []) == "idle" and investigacao.fase(gpu, [], []) == "idle" and not vistos
-    with db.conn() as c:   # uma vaga sobrando: investiga
+    with db.conn() as c:   # 9: investiga
         c.execute("UPDATE domains SET llm_pending = false WHERE name = 'fila1-0.com'")
     assert investigacao.fase(gpu, [], []) == "done" and vistos == [True]

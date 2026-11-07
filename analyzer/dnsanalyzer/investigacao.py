@@ -1568,18 +1568,11 @@ _FILA_FASE1 = ("SELECT 1 FROM domains WHERE llm_pending AND NOT locked AND NOT v
                "AND (NOT dominio_decidido(id) OR reanalise_pedida) LIMIT 1")
 
 
-def vagas_fase1() -> int:
-    """Análises simultâneas da fase 1 somando as máquinas: a VM e cada reforço (06/11: 3 por analisador)."""
-    cfg = settings()
-    return max(cfg.llm_vm_vagas, 1) + sum(max(cfg.llm_extra_workers_url.get(u, cfg.llm_extra_workers), 0)
-                                          for u in cfg.ollama_extra_urls)
-
-
-def fase1_ocupa_todos(c) -> bool:
-    """A fase 1 tem prioridade, mas só segura a investigação quando tem domínio para todas as vagas dela. Até 06/11
-    bastava UM domínio na fila para nenhuma máquina investigar: como sempre chega domínio novo, a VM e as GPUs ficavam
-    paradas com 1-2 domínios na fila (pedido do usuário: vaga que sobra na fase 1 investiga)."""
-    n = vagas_fase1()
+def fase1_cheia(c) -> bool:
+    """A etapa 1 tem prioridade: o analisador só pega uma investigação (etapa 2) com a fila da etapa 1 vazia ou quase
+    vazia — abaixo de INVESTIGACAO_FASE1_MAX (padrão 10; pedido do usuário 07/11). Até 06/11 bastava 1 domínio na fila
+    para ninguém investigar; 06/11 era "todas as vagas da fase 1 ocupadas"."""
+    n = settings().investigacao_fase1_max
     return c.execute("SELECT count(*) AS n FROM (" + _FILA_FASE1.replace("LIMIT 1", "LIMIT %s") + ") s",
                      (n,)).fetchone()["n"] >= n
 
@@ -1634,7 +1627,7 @@ def fase(client, cats: list[dict], scats: list[dict]) -> str:
     from .classifier import build_dossier, event
     with db.conn() as c:
         # a fila local vem primeiro (21/10, pedido do usuário); com menos domínios que vagas, a vaga que sobra investiga (06/11)
-        if fase1_ocupa_todos(c):
+        if fase1_cheia(c):
             return "idle"
         d = _reservar(c)
         if not d:

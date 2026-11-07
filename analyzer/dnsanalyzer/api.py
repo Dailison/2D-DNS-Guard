@@ -817,18 +817,21 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
         n1 += c.execute("SELECT count(*) AS n FROM domains WHERE " + _li._FILA).fetchone()["n"]
         e1 = e1[:limit]
         fila_on = online._FILA.replace(online._RESERVA, "")
-        pedido = "(d.online_pedido_at IS NOT NULL AND (d.online_at IS NULL OR d.online_at < d.online_pedido_at))"
-        e2 = c.execute(
-            "SELECT d.name, d.total_queries, d.classification, d.lista_ia, "
+        pedido = online.PEDIDO
+        # (07/11) IA online · etapa 1 (o que a etapa 1 local não decidiu) e · etapa 2 (2ª opinião com o dossiê)
+        sel_on = ("SELECT d.name, d.total_queries, d.classification, d.lista_ia, "
             " CASE WHEN " + pedido + " THEN 'investigacao' WHEN " + online._EM_INFRA.format(t="d") + " THEN 'infra' "
             "      WHEN " + online._EM_DECISOES + " THEN 'decisoes' WHEN d.lista_duvida THEN 'duvida' "
             "      WHEN d.online_resp IS NOT NULL THEN 'reavaliacao' ELSE 'novo' END AS entrada, "
             " COALESCE(d.online_claimed_at > now() - interval '10 minutes' AND d.online_falhas = 0, false) AS analisando, "
-            " COALESCE(d.online_claimed_at > now() - interval '10 minutes' AND d.online_falhas > 0, false) AS aguardando "
-            "FROM domains d WHERE " + fila_on + " ORDER BY (d.online_claimed_at > now() - interval '10 minutes' "
-            " AND d.online_falhas = 0) DESC, " + online._EM_INFRA.format(t="d") + " DESC, " + online._EM_DECISOES + " DESC, "
-            " d.lista_duvida DESC, d.total_queries DESC LIMIT %s", (limit,)).fetchall()
-        n2 = c.execute("SELECT count(*) AS n FROM domains d WHERE " + fila_on).fetchone()["n"]
+            " COALESCE(d.online_claimed_at > now() - interval '10 minutes' AND d.online_falhas > 0, false) AS aguardando ")
+        def online_etapa(filtro: str) -> tuple[list, int]:
+            onde = "FROM domains d WHERE " + fila_on + " AND " + filtro
+            itens = c.execute(sel_on + onde + " ORDER BY (d.online_claimed_at > now() - interval '10 minutes' AND d.online_falhas = 0) DESC, "
+                              + online._EM_INFRA.format(t="d") + " DESC, " + online._EM_DECISOES + " DESC, "
+                              " d.lista_duvida DESC, d.total_queries DESC LIMIT %s", (limit,)).fetchall()
+            return itens, c.execute("SELECT count(*) AS n " + onde).fetchone()["n"]
+        (e2, n2), (on2, n_on2) = online_etapa("NOT " + pedido), online_etapa(pedido)
         f6 = investigacao.FILA_SQL
         par = {"dias": settings().investigacao_dias, "conf": settings().investigacao_confianca_min, "n": limit}
         e6 = c.execute(
@@ -843,26 +846,30 @@ def ai_fila(limit: int = Query(100, ge=1, le=300)):
         ev = c.execute("SELECT name, total_queries, classification, 'verificacao' AS entrada, false AS analisando "
                        "FROM domains WHERE " + investigacao.VERIF_FILA + " ORDER BY total_queries DESC, id LIMIT %s",
                        (limit,)).fetchall()
-        fila1_vazia = not investigacao.fase1_ocupa_todos(c)   # (06/11) "espera a etapa 1" só se ela ocupa todas as vagas
+        fila1_vazia = not investigacao.fase1_cheia(c)   # (07/11) "espera a etapa 1" com 10 ou mais nela
     return {"e1": {"total": n1, "itens": e1}, "e2": {"total": n2, "itens": e2, "habilitado": online.habilitado()},
-            "investigacao": {"total": n6 + nv, "itens": (e6 + ev)[:limit], "habilitado": settings().investigacao_enabled,
+            "online2": {"total": n_on2, "itens": on2, "habilitado": online.habilitado()},
+            # (07/11) etapa 2 local = só a investigação (a que usa a IA); a verificação da infraestrutura vem à parte
+            "verificacao": {"total": nv, "itens": ev},
+            "investigacao": {"total": n6, "itens": e6, "habilitado": settings().investigacao_enabled,
                              "espera_etapa1": not fila1_vazia, "investigar": n6, "verificar": nv,
                              "virustotal_resta": investigacao.vt_resta("verificacao")}}
 
 
-_FILA_INV = [0.0, 0]   # (quando contou, total): a página consulta a cada 3 s e a contagem custa ~0,2 s
+_FILA_INV = [0.0, 0, 0]   # (quando contou, investigar, verificar): a página consulta a cada 3 s e a contagem custa ~0,2 s
 
 
-def _fila_investigacao(c) -> int:
-    """Quantos domínios esperam a etapa 2 (investigação + verificação da infraestrutura), com cache de 15 s."""
+def _fila_investigacao(c, so_investigar: bool = False) -> int:
+    """Quantos domínios esperam a etapa 2 local (investigação + verificação da infraestrutura), com cache de 15 s.
+    so_investigar: só a investigação (a que usa a IA; a verificação é VirusTotal/URLScan)."""
     import time
     from . import investigacao
     if time.monotonic() - _FILA_INV[0] > 15 or not _FILA_INV[0]:
-        _FILA_INV[1] = (c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.FILA_SQL,
-                                  {"dias": settings().investigacao_dias, "conf": settings().investigacao_confianca_min}).fetchone()["n"]
-                        + c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.VERIF_FILA).fetchone()["n"])
+        _FILA_INV[1] = c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.FILA_SQL,
+                                 {"dias": settings().investigacao_dias, "conf": settings().investigacao_confianca_min}).fetchone()["n"]
+        _FILA_INV[2] = c.execute("SELECT count(*) AS n FROM domains WHERE " + investigacao.VERIF_FILA).fetchone()["n"]
         _FILA_INV[0] = time.monotonic()
-    return _FILA_INV[1]
+    return _FILA_INV[1] if so_investigar else _FILA_INV[1] + _FILA_INV[2]
 
 
 @app.get("/ai/events", dependencies=[Depends(auth)])
@@ -928,7 +935,9 @@ def ai_events(after_id: int = 0, limit: int = Query(60, le=300)):
                           " AND (NOT dominio_decidido(id) OR reanalise_pedida)) AS whois FROM domains").fetchone()
         from . import listas_ia, online
         st_on = online.status(c)
-        queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": st_on["fila"],
+        queue = {**queue, "lista": listas_ia.status(c)["fila"], "online": st_on["fila"] - st_on["fila_e2"],
+                 "online2": st_on["fila_e2"],   # (07/11) IA online · etapa 2: 2ª opinião com o dossiê da investigação
+                 "investigar": _fila_investigacao(c, so_investigar=True),
                  "investigacao": _fila_investigacao(c),   # etapa 2 da fila local (01/10)
                  "online_on": online.habilitado(), "online_espera": st_on.get("espera"),
                  "revisar": c.execute(listas.FASE5_SQL).fetchone()["n"]}

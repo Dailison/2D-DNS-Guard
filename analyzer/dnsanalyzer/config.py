@@ -128,6 +128,7 @@ class Settings:
     investigacao_enabled: bool         # fase 6: investigação profunda com a fila da IA vazia
     investigacao_dias: int             # reinvestiga depois de N dias (ou quando o domínio é reanalisado)
     investigacao_confianca_min: float  # aplica classificação/lista só com esta confiança (e serviço reconhecido)
+    investigacao_fase1_max: int        # (07/11) a etapa 2 só começa com a fila da etapa 1 abaixo disto
     investigacao_tempo_max: int        # s por domínio (rodadas extras só enquanto sobra tempo p/ veredito + revisor)
     investigacao_tempo_max_vm: int     # idem na VM (só CPU: cada pergunta leva minutos)
     investigacao_plano_online: bool    # (21/10) na VM, o plano de cada rodada pelo Gemini (a IA local decide o veredito)
@@ -297,6 +298,8 @@ def load_settings() -> Settings:
         investigacao_enabled=_bool(os.environ.get("INVESTIGACAO_ENABLED"), False),
         investigacao_dias=_int("INVESTIGACAO_DIAS", 14),
         investigacao_confianca_min=float(os.environ.get("INVESTIGACAO_CONFIANCA_MIN") or 0.85),
+        # (07/11, pedido do usuário) analisador só pega investigação com a fila da etapa 1 vazia ou quase (abaixo de 10)
+        investigacao_fase1_max=max(_int("INVESTIGACAO_FASE1_MAX", 10), 1),
         investigacao_tempo_max=_int("INVESTIGACAO_TEMPO_MAX", 600),   # 10 min por domínio (pedido do usuário 29/09)
         investigacao_tempo_max_vm=_int("INVESTIGACAO_TEMPO_MAX_VM", 1200),   # (30/09) na VM, sem GPU
         # (22/10, pedido do usuário) desligado: o Gemini falhava (HTTP 503/500) em 43% das rodadas e a rodada caía p/ a IA local

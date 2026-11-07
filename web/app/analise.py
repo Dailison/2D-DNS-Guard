@@ -825,6 +825,15 @@ def ia_fila():
         return jsonify({"error": str(e)}), 502
 
 
+@analise_bp.get("/ia/analisadores")
+def ia_analisadores():
+    """Botão "IA local": VM e reforços (no ar, em andamento, domínios por hora)."""
+    try:
+        return jsonify(api.get("/ia/analisadores"))
+    except AnalyzerError as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @analise_bp.get("/ia/varredura")
 def ia_varredura():
     """Botão "Travados": computadores em varredura (muitos domínios inéditos por hora) aguardando avaliação."""

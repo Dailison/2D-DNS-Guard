@@ -179,6 +179,11 @@
   .topo .ghost.alerta{border-color:var(--twod-danger,#dc2626);color:var(--twod-danger-text,#b91c1c)}
   .topo .trvn{background:var(--twod-danger,#dc2626);color:var(--twod-on-danger,#fff);border-radius:999px;padding:0 6px;font-size:.72rem;margin-left:4px}
   dialog.dlg.fila.trv{max-width:900px}
+  .topo button.st.anl{background:none;border:1px solid var(--ln);border-radius:10px;padding:4px 10px;cursor:pointer;color:inherit;font:inherit}
+  .topo button.st.anl:hover{border-color:var(--ac)}
+  .topo .anln{background:var(--twod-primary,#2563eb);color:var(--twod-on-primary,#fff);border-radius:999px;padding:0 7px;font-size:.74rem;margin-left:6px}
+  dialog.dlg.fila.anl{max-width:860px}
+  .anl .off td{opacity:.55}
   .trv .trv-ac{white-space:nowrap;text-align:right}.trv .trv-ac .ghost{margin-left:4px}
   dialog.dlg.fila{max-width:780px;padding:0;background:var(--card);color:var(--tx);border:1px solid var(--ln);display:none;flex-direction:column}
   dialog.dlg.fila[open]{display:flex;max-height:min(82vh,760px)}
@@ -215,8 +220,10 @@
 
 <div class="iav" x-data="iav" x-cloak>
   <section class="topo glass">
-    <div class="st"><span class="pulse" :class="ia.ok ? 'ok' : (ia.ok === false ? 'x' : '')"></span>
-      <b x-text="'IA local · ' + (ia.model || '…')"></b><small x-text="ia.txt"></small></div>
+    <button type="button" class="st anl" @click="abrirAnl()"
+            :title="anl.total ? anl.trabalhando + ' trabalhando · ' + anl.no_ar + ' de ' + anl.total + ' no ar' : ia.txt"><span class="pulse"
+            :class="(anl.total ? anl.no_ar : ia.ok) ? 'ok' : ((anl.total || ia.ok === false) ? 'x' : '')"></span>
+      <b>IA local</b><b class="anln" x-text="anl.total ? anl.trabalhando : '…'"></b></button>
     <template x-for="k in kpis" :key="k.l">
       <div class="kp" :title="k.s"><b x-text="k.v"></b><span x-text="k.l"></span></div>
     </template>
@@ -287,6 +294,38 @@
                x-text="'+ ' + (fila.d[fila.aba].total - fila.d[fila.aba].itens.length).toLocaleString('pt-BR') + ' na fila'"></small>
       </div>
     </template>
+  </dialog>
+
+  <dialog class="dlg fila anl" x-ref="anl" @close="anl.aberto = false" @click.self="$refs.anl.close()">
+    <div class="fh">
+      <h3>Analisadores</h3>
+      <small x-text="anl.upd"></small>
+      <button type="button" class="ghost" @click="carregaAnl()" :disabled="anl.carregando" title="Atualizar" aria-label="Atualizar"><i class="bi bi-arrow-clockwise"></i></button>
+      <button type="button" class="ghost" @click="$refs.anl.close()" title="Fechar" aria-label="Fechar"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <p class="ferr" x-show="anl.erro" x-text="anl.erro"></p>
+    <div class="fwrap">
+      <table class="ftb" x-show="anl.itens.length">
+        <thead><tr><th>Analisador</th><th>Tipo</th><th>Situação</th>
+          <th class="num" title="domínios com este analisador agora (inclui os que esperam uma vaga)">Em andamento</th>
+          <th class="num" title="etapa 1 (IA local) concluídas na última hora">Etapa 1/h</th>
+          <th class="num" title="etapa 2 (investigação) concluídas na última hora">Etapa 2/h</th><th>Modelo</th></tr></thead>
+        <tbody>
+          <template x-for="r in anl.itens" :key="r.ip">
+            <tr :class="{off: !r.no_ar}" :title="r.ultima ? 'última atividade ' + quando(r.ultima) : ''">
+              <td class="dm"><b x-text="r.ip"></b></td>
+              <td x-text="r.tipo"></td>
+              <td><span class="pill" :class="!r.no_ar ? 'MALICIOSO' : (r.trabalhando ? 'TRABALHO' : 'DESCONHECIDO')"
+                        x-text="!r.no_ar ? 'Fora do ar' : (r.trabalhando ? 'Trabalhando' : 'Ocioso')"></span></td>
+              <td class="num" :title="r.vagas + ' análises simultâneas'" x-text="r.em_andamento"></td>
+              <td class="num" x-text="r.etapa1_h.toLocaleString('pt-BR')"></td>
+              <td class="num" x-text="r.etapa2_h.toLocaleString('pt-BR')"></td>
+              <td x-text="r.modelo || '—'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </dialog>
 
   <dialog class="dlg fila trv" x-ref="trv" @close="trv.aberto = false" @click.self="$refs.trv.close()">
@@ -414,6 +453,7 @@
 document.addEventListener('alpine:init', function () {
   var URL_EV = "{{ url_for('analise.ia_eventos') }}";
   var URL_FILA = "{{ url_for('analise.ia_fila') }}";
+  var URL_ANL = "{{ url_for('analise.ia_analisadores') }}";
   var URL_TRV = "{{ url_for('analise.ia_varredura') }}";
   var URL_TRV_DEC = "{{ url_for('analise.ia_varredura_decidir', tid=0, cid=0) }}".replace(/\/0\/0$/, '/__T__/__C__');
   var URL_CTRL = "{{ url_for('analise.ia_controle', chave='__K__') }}";
@@ -494,6 +534,7 @@ document.addEventListener('alpine:init', function () {
     var idx = {e1: {}, e2: {}}, lastId = 0, first = true;
     return {
       LBL: {TRABALHO: 'Trabalho', NAO_TRABALHO: 'Não trabalho', SUSPEITO: 'Suspeito', MALICIOSO: 'Malicioso', DESCONHECIDO: 'Desconhecido'},
+      anl: {aberto: false, carregando: false, itens: [], total: 0, no_ar: 0, trabalhando: 0, erro: '', upd: ''},
       ia: {ok: null, model: '', txt: 'conectando…'}, onlineOn: null, onlineEspera: '', onlineFila: null,
       kpis: [{v: '–', l: 'fila local · etapa 1', s: ''}, {v: '–', l: 'fila local · etapa 2', s: ''},
              {v: '–', l: 'na última hora', s: ''}, {v: '–', l: 'por domínio', s: ''}],
@@ -520,6 +561,7 @@ document.addEventListener('alpine:init', function () {
         topo(); window.addEventListener('resize', topo);
         this.poll(); setInterval(this.poll.bind(this), 3000);
         this.carregaTrv(); setInterval(() => { if (!this.trv.aberto) this.carregaTrv(); }, 60000);
+        this.carregaAnl(); setInterval(() => this.carregaAnl(), 30000);
         setInterval(() => { this.agora = Date.now(); }, 1000);
       },
 
@@ -727,6 +769,18 @@ document.addEventListener('alpine:init', function () {
           .then((j) => { this.ctrl = j; })
           .catch((e) => { this.pz.erro = e.message; })
           .finally(() => { this.pz.enviando = false; });
+      },
+      abrirAnl() { this.anl.aberto = true; this.$refs.anl.showModal(); this.carregaAnl(); },
+      carregaAnl() {
+        if (this.anl.carregando) return;
+        this.anl.carregando = true;
+        fetch(URL_ANL, {credentials: 'same-origin'})
+          .then(function (r) { return r.json().then(function (j) { if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status); return j; }); })
+          .then((d) => { Object.assign(this.anl, {itens: d.itens || [], total: d.total || 0, no_ar: d.no_ar || 0,
+                                                  trabalhando: d.trabalhando || 0, erro: '',
+                                                  upd: 'atualizado ' + new Date().toLocaleTimeString('pt-BR')}); })
+          .catch((e) => { this.anl.erro = 'Falha ao carregar (' + e.message + ')'; })
+          .finally(() => { this.anl.carregando = false; });
       },
       abrirTrv() { this.trv.aberto = true; this.$refs.trv.showModal(); this.carregaTrv(); },
       carregaTrv() {
